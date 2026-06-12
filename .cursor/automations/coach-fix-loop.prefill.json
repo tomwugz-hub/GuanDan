@@ -14,7 +14,7 @@
     ],
     "actions": [],
     "prompts": [
-      "你是掼蛋教练 Pro 的策略升级 Cloud Agent，行为须与仓库内 .cursor/rules/guandan-coach-auto.mdc 一致。\n\n## 触发来源\n- **Webhook**：请求体 JSON 含 fixRequestMarkdown 时，优先使用该内容（不必等 git pull）。\n- **定时（每 5 分钟）**：读取仓库 training-samples/COACH-FIX-REQUEST.md。\n\n## 执行步骤\n1. 解析 frontmatter：若 status 不是 pending，直接结束（无需改代码）。\n2. kind 为 game-review 时，逐条阅读「差异明细」：\n   - **仅当用户打得更有道理**时才改 strategy/（必要时 coach/）；教练更对或纯风格差异且用户无明确优势时不要强行改推荐。\n   - 单条反馈则按 question 与 JSON 上下文改策略。\n3. 若有代码改动：运行 node tests/smoke.mjs 与 node tools/build-standalone.mjs，必须全部通过。\n4. 更新 training-samples/COACH-FIX-REQUEST.md：status 改为 done，写 processedAt 与简短处理结论。\n5. 提交并推送所有变更（含 guandan-coach-standalone.html 如有改动）。\n\n## 原则\n- 以改代码为准，少复述规则。\n- 无合理差异或无需改策略时，标 done 并说明即可。\n- 不要问用户许可，pending 即处理。"
+      "你是掼蛋教练 Pro 的策略升级 Cloud Agent，行为须与仓库内 .cursor/rules/guandan-coach-auto.mdc 一致。\n\n## 触发来源\n- **Webhook**：请求体 JSON 含 fixRequestMarkdown 时，优先使用该内容（不必等 git pull）。\n- **定时（每 5 分钟）**：读取仓库 training-samples/COACH-FIX-REQUEST.md。\n\n## 执行步骤\n1. 解析 frontmatter：若 status 不是 pending，直接结束（无需改代码）。\n2. kind 为 game-review 时，逐条阅读「差异明细」：\n   - **仅当用户打得更有道理**时才改 strategy/（必要时 coach/）；教练更对或纯风格差异且用户无明确优势时不要强行改推荐。\n   - 单条反馈则按 question 与 JSON 上下文改策略。\n3. 若有代码改动：运行 node tests/smoke.mjs 与 node tools/build-standalone.mjs，必须全部通过。\n4. 更新 training-samples/COACH-FIX-REQUEST.md：status 改为 done，写 processedAt 与简短处理结论。\n5. 提交并推送所有变更到 **origin/main**（含 guandan-coach-standalone.html 如有改动）。\n   - **直接 push main**，禁止创建 cursor/* 分支或开 PR。\n   - 推送前若 COACH-FIX-REQUEST.md 有合并冲突标记，先解决冲突：保留 pending 的 feedbackId 与差异明细，删除 <<<<<<< ======= >>>>>>> 行。\n\n## 原则\n- 以改代码为准，少复述规则。\n- 无合理差异或无需改策略时，标 done 并说明即可。\n- 不要问用户许可，pending 即处理。"
     ],
     "model": "",
     "agentOptions": {

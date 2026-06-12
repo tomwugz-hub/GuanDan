@@ -58,10 +58,11 @@ export async function maybePushCoachFixRequest(workspaceDir, mdPath, feedbackId)
     return { pushed: false, reason: "git-commit-failed", detail: commit.stderr };
   }
 
-  const push = await runGit(["push"], workspaceDir);
+  // 始终推送到 main，避免 Automation 在 cursor/* 分支上留下 pending 分叉
+  const push = await runGit(["push", "origin", "HEAD:main"], workspaceDir);
   if (!push.ok) return { pushed: false, reason: "git-push-failed", detail: push.stderr };
 
-  return { pushed: true };
+  return { pushed: true, branch: "main" };
 }
 
 /**

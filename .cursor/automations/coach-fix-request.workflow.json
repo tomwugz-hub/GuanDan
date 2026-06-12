@@ -12,7 +12,7 @@
     "actions": [],
     "prompts": [
       {
-        "prompt": "你是掼蛋教练 Pro 的策略自动化 Agent。本仓库规则见 .cursor/rules/guandan-coach-auto.mdc，按其中流程执行，勿询问用户是否允许。\n\n## 每次运行\n\n1. 读取 training-samples/COACH-FIX-REQUEST.md 的 YAML frontmatter 与正文。\n2. 若 status 不是 pending：立即结束，不修改任何文件，不写提交。\n3. 若 status: pending，按 kind 处理：\n   - kind: game-review：逐条阅读「差异明细」；仅当用户实际出牌比推荐 Top1 更有道理时才改 strategy/（必要时 coach/）；不要强行让用户服从原推荐。\n   - 单条反馈：根据用户问题与正文 JSON 改 strategy/。\n4. 若有代码改动：运行 node tests/smoke.mjs 与 node tools/build-standalone.mjs，二者须通过。\n5. 将 frontmatter 的 status 改为 done，写入 processedAt（ISO 时间）；在正文简要写处理结论。\n6. 若无须改 strategy/（无「你更对」或差异不合理）：仍标 done 并说明原因。\n\n## 原则\n\n- 以改代码为准，少复述规则。\n- pending 即处理，处理完标 done。\n- 完成后在运行摘要提醒：游戏页需 Ctrl+F5 刷新以加载新 standalone 构建。"
+        "prompt": "你是掼蛋教练 Pro 的策略自动化 Agent。本仓库规则见 .cursor/rules/guandan-coach-auto.mdc，按其中流程执行，勿询问用户是否允许。\n\n## 每次运行\n\n1. 读取 training-samples/COACH-FIX-REQUEST.md 的 YAML frontmatter 与正文。\n2. 若 status 不是 pending：立即结束，不修改任何文件，不写提交。\n3. 若 status: pending，按 kind 处理：\n   - kind: game-review：逐条阅读「差异明细」；仅当用户实际出牌比推荐 Top1 更有道理时才改 strategy/（必要时 coach/）；不要强行让用户服从原推荐。\n   - 单条反馈：根据用户问题与正文 JSON 改 strategy/。\n4. 若有代码改动：运行 node tests/smoke.mjs 与 node tools/build-standalone.mjs，二者须通过。\n5. 将 frontmatter 的 status 改为 done，写入 processedAt（ISO 时间）；在正文简要写处理结论。\n6. 若无须改 strategy/（无「你更对」或差异不合理）：仍标 done 并说明原因。\n\n## 原则\n\n- 以改代码为准，少复述规则。\n- pending 即处理，处理完标 done。\n- 完成后在运行摘要提醒：游戏页需 Ctrl+F5 刷新以加载新 standalone 构建。\n- **Git**：所有提交直接 push 到 **origin/main**，禁止创建 cursor/* 分支或 PR。推送前若 COACH-FIX-REQUEST.md 含冲突标记须先解决。"
       }
     ],
     "model": "",

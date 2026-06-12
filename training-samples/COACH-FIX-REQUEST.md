@@ -1,11 +1,14 @@
 ---
-status: pending
+status: done
 feedbackId: gr-1781283915430-nubn0c
 kind: game-review
 createdAt: 2026-06-12T17:05:15.461Z
+processedAt: 2026-06-13T00:00:00.000Z
 ---
 
-# 本局自动对比 · 待改左侧推荐
+# 本局自动对比 · 已处理
+
+**处理结论：** 8 处均为风格差异（你更对 0、教练更对 0），无明确需向用户打法靠拢的手牌，未改 strategy/。
 
 **牌局：** game-4，级牌 2
 **你出牌：** 22 手，**与推荐1不同：** 8 手
