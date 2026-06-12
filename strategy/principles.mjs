@@ -1809,6 +1809,26 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       }
     }
 
+    // 接风手牌仍多（≥20）：先单张试探，不宜急着组三带二（game-2 turn44，21张）
+    const heavyCatchWind = leadMode === "catch-wind" && resolvedHand.length >= 20;
+    if (heavyCatchWind) {
+      if (
+        candidate.type === PLAY_TYPES.single
+        && candidate.mainRank
+        && !isJoker({ rank: candidate.mainRank })
+        && physicalRankCount(resolvedHand, candidate.mainRank) === 1
+      ) {
+        score -= resolvedHand.length >= 20 ? 7600 : 6200;
+        reasons.push("接风手牌仍多，先单张试探更灵活");
+        principles.push("P6");
+      } else if (candidate.type === PLAY_TYPES.tripleWithPair) {
+        score += resolvedHand.length >= 20 ? 7200 : 5800;
+        reasons.push("接风手牌仍多，不宜急着组三带二减手");
+        principles.push("P6");
+        hasStrongConflict = true;
+      }
+    }
+
     // 领出/接风拆钢板组三带二（P5 反面）
     if (
       steelPlate
@@ -1843,7 +1863,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
             && item.length >= 6
             && !resolveTripleBreakForConsecutivePairs(item, resolvedHand, levelRank).splitsTriple,
         );
-        if (reserve && (altCp || resolvedHand.length >= 15) && !(leadMode === "fresh-open" && recovery)) {
+        if (reserve && (altCp || resolvedHand.length >= 15) && !(leadMode === "fresh-open" && recovery) && !heavyCatchWind) {
           score -= resolvedHand.length >= 15 ? 4800 : 4200;
           reasons.push(`【P5】${rankLabel(tripleRank)}三带二一次减五张，优于拆三张凑连对`);
           principles.push("P5");
@@ -1856,7 +1876,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       const tripleRank = candidate.mainRank;
       const solePair = solePairForTripleRank(resolvedHand, levelRank, tripleRank);
       const pairUsed = (candidate.cards ?? []).find((card) => card.rank !== tripleRank)?.rank ?? null;
-      if (solePair && pairUsed === solePair) {
+      if (solePair && pairUsed === solePair && !heavyCatchWind) {
         score -= resolvedHand.length >= 15 ? 5200 : 4600;
         reasons.push(`【P5】接风${rankLabel(tripleRank)}带对${rankLabel(solePair)}一次减五张，优于裸三张`);
         principles.push("P5");

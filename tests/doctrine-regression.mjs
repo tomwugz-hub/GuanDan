@@ -3201,6 +3201,60 @@ scenario("P5-game2-seed708223280-turn32-接风9带K", "P5", () => {
   }
 });
 
+// —— game-2 seed 1022941181 turn44：接风21张先单张试探，不宜7带4三带二 ——
+scenario("P6-game2-seed1022941181-turn44-接风重手先单张", "P6", () => {
+  const hand = cards([
+    ["7", SUITS.clubs, 0], ["7", SUITS.spades, 0], ["7", SUITS.spades, 1],
+    ["4", SUITS.diamonds, 0], ["4", SUITS.spades, 1],
+    ["8", SUITS.clubs, 1], ["8", SUITS.hearts, 0],
+    ["9", SUITS.clubs, 0], ["9", SUITS.spades, 0],
+    ["K", SUITS.spades, 0],
+    ["3", SUITS.hearts, 0], ["3", SUITS.diamonds, 0],
+    ["5", SUITS.diamonds, 0], ["5", SUITS.spades, 0],
+    ["A", SUITS.hearts, 0], ["A", SUITS.diamonds, 0],
+    ["2", SUITS.diamonds, 0], ["2", SUITS.diamonds, 1],
+    ["6", SUITS.clubs, 0], ["10", SUITS.hearts, 0], ["J", SUITS.clubs, 0],
+  ]);
+  const pair3 = classifyPlay(cards([["3", SUITS.hearts, 0], ["3", SUITS.diamonds, 0]]), "2");
+  let state = createGameStateFromHands({
+    levelRank: "2",
+    hands: [hand, filler, filler, filler],
+    currentPlayerIndex: 0,
+  });
+  state = {
+    ...state,
+    lastActivePlay: null,
+    lastActivePlayerIndex: null,
+    playHistory: [
+      { turnNumber: 40, playerIndex: 0, play: pair3 },
+      { turnNumber: 41, playerIndex: 1, play: classifyPlay([], "2") },
+      { turnNumber: 42, playerIndex: 2, play: classifyPlay([], "2") },
+      { turnNumber: 43, playerIndex: 3, play: classifyPlay([], "2") },
+    ],
+  };
+  const rec = recommendPlay(hand, "2", null, {
+    state,
+    playerIndex: 0,
+    mlFusionMode: "off",
+    mlModel: false,
+  });
+  assert(
+    rec.candidate.type === PLAY_TYPES.single,
+    `turn44 接风21张应单张试探，实际 ${rec.candidate.label ?? rec.candidate.type}`,
+  );
+  assert(
+    rec.reasons.some((r) => /手牌仍多|单张试探/.test(r)),
+    `应说明接风重手先试探，实际 ${rec.reasons.join("；")}`,
+  );
+  const triple7 = generateBasicCandidates(hand, "2", null)
+    .find((item) => item.type === PLAY_TYPES.tripleWithPair && item.mainRank === "7");
+  assert(triple7, "手牌应能组7带4三带二");
+  assert(
+    rec.candidate.type !== PLAY_TYPES.tripleWithPair || rec.candidate.mainRank !== "7",
+    "不宜首推7带4三带二",
+  );
+});
+
 // —— batch seed 9000 turn51：五张级牌纯炸（含逢人配）压单2 ——
 scenario("P7-batch-seed9000-turn51-五张2满张炸", "P7", () => {
   function mulberry32(seed) {

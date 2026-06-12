@@ -125,7 +125,8 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
         if (count === 2 && rank !== candidate.mainRank) pairRanksInHand.push(rank);
       }
       const solePairLead = pairRank != null && pairRanksInHand.length === 1 && pairRanksInHand[0] === pairRank;
-      if (solePairLead) {
+      const heavyCatchWind = hand.length >= 20;
+      if (solePairLead && !heavyCatchWind) {
         score -= heavyHand ? 4200 : 5200;
         reasons.push("接风三带二一次减五张，优于裸三张或拆结构");
       } else if (probeHand && highTriple) {
@@ -135,8 +136,8 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
       if (!solePairLead) {
         score -= heavyHand && highTriple ? 2000 : 3400;
       }
-      if (!probeHand || !highTriple || solePairLead) {
-        reasons.push(solePairLead
+      if (!probeHand || !highTriple || (solePairLead && !heavyCatchWind)) {
+        reasons.push(solePairLead && !heavyCatchWind
           ? "接风三带二带唯一对子，一次减五张"
           : "接风优先三带二、顺子等减手结构");
       }
