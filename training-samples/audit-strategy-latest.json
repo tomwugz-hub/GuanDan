@@ -1,0 +1,167 @@
+{
+  "ok": false,
+  "auditedAt": "2026-06-12T05:58:53.636Z",
+  "games": 6,
+  "completed": 6,
+  "incomplete": 0,
+  "completionRate": 1,
+  "avgTurns": 95,
+  "violationCount": 5,
+  "violationsByCode": {
+    "sf-waste-small": 3,
+    "bomb-reason-contradiction": 2
+  },
+  "samples": [
+    {
+      "code": "bomb-reason-contradiction",
+      "detail": "理由说不必动炸仍出炸",
+      "gameSeed": 42104,
+      "turnNumber": 2,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
+        "【P7】能用小炸就不用大炸，优先最小够压炸弹",
+        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
+      ],
+      "handCount": 27,
+      "mustBeat": "ConsecutivePairs:K"
+    },
+    {
+      "code": "bomb-reason-contradiction",
+      "detail": "理由说不必动炸仍出炸",
+      "gameSeed": 42104,
+      "turnNumber": 8,
+      "playerIndex": 0,
+      "playLabel": "Bomb",
+      "reasons": [
+        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
+        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
+      ],
+      "handCount": 21,
+      "mustBeat": "ConsecutivePairs:5"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42104,
+      "turnNumber": 62,
+      "playerIndex": 2,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "只有炸弹能压，应抢牌权",
+        "对手剩牌少，提高拦截积极性"
+      ],
+      "handCount": 9,
+      "mustBeat": "Single:BJ"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42105,
+      "turnNumber": 37,
+      "playerIndex": 3,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "有普通炸弹可压，不宜亮同花顺",
+        "只有炸弹能压，应抢牌权",
+        "对手剩牌少，提高拦截积极性"
+      ],
+      "handCount": 19,
+      "mustBeat": "Single:2"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42105,
+      "turnNumber": 77,
+      "playerIndex": 2,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "只有炸弹能压，应抢牌权"
+      ],
+      "handCount": 10,
+      "mustBeat": "Single:BJ"
+    }
+  ],
+  "autoGameSpotCheck": {
+    "games": 6,
+    "completed": 6,
+    "hitLimit": 0
+  },
+  "levelRank": "2",
+  "seedStart": 42100,
+  "allViolations": [
+    {
+      "code": "bomb-reason-contradiction",
+      "detail": "理由说不必动炸仍出炸",
+      "gameSeed": 42104,
+      "turnNumber": 2,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
+        "【P7】能用小炸就不用大炸，优先最小够压炸弹",
+        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
+      ],
+      "handCount": 27,
+      "mustBeat": "ConsecutivePairs:K"
+    },
+    {
+      "code": "bomb-reason-contradiction",
+      "detail": "理由说不必动炸仍出炸",
+      "gameSeed": 42104,
+      "turnNumber": 8,
+      "playerIndex": 0,
+      "playLabel": "Bomb",
+      "reasons": [
+        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
+        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
+      ],
+      "handCount": 21,
+      "mustBeat": "ConsecutivePairs:5"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42104,
+      "turnNumber": 62,
+      "playerIndex": 2,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "只有炸弹能压，应抢牌权",
+        "对手剩牌少，提高拦截积极性"
+      ],
+      "handCount": 9,
+      "mustBeat": "Single:BJ"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42105,
+      "turnNumber": 37,
+      "playerIndex": 3,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "有普通炸弹可压，不宜亮同花顺",
+        "只有炸弹能压，应抢牌权",
+        "对手剩牌少，提高拦截积极性"
+      ],
+      "handCount": 19,
+      "mustBeat": "Single:2"
+    },
+    {
+      "code": "sf-waste-small",
+      "detail": "同花顺压Single",
+      "gameSeed": 42105,
+      "turnNumber": 77,
+      "playerIndex": 2,
+      "playLabel": "StraightFlush",
+      "reasons": [
+        "只有炸弹能压，应抢牌权"
+      ],
+      "handCount": 10,
+      "mustBeat": "Single:BJ"
+    }
+  ]
+}

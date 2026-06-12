@@ -1,0 +1,26 @@
+---
+description: 掼蛋教练 Pro — 局后自动对比、自动分析、自动改策略
+alwaysApply: true
+---
+
+# 掼蛋教练自动迭代
+
+用户**只管打牌**，不必看右侧推荐，也**无需说「打完一局」或任何确认**。
+
+每手会自动对比「推荐 Top1」与「实际出牌」；局末应用会自动保存复盘并写入 `training-samples/COACH-FIX-REQUEST.md`（`status: pending`）。
+
+## 每轮对话开始时（强制执行，勿询问用户）
+
+1. **立即**读 `training-samples/COACH-FIX-REQUEST.md`。
+2. 若 `status: pending`：**不要问用户是否允许**，直接处理：
+   - **`kind: game-review`**：按「差异明细」逐条判断；**仅当用户打得更有道理**时才改 `strategy/`（必要时 `coach/`），不要强行让用户服从原推荐。
+   - **单条反馈**：按用户问题与 JSON 改策略。
+   - 跑 `node tests/smoke.mjs` 与 `node tools/build-standalone.mjs`。
+   - 将 `status` 改为 `done`，简短告知用户 Ctrl+F5 刷新游戏页。
+3. 若 `status: done` 或无 pending：正常响应用户，无需重复处理。
+
+## 原则
+
+- 以**改代码**为准，少复述规则。
+- 无差异或差异不合理的局，标 `done` 并说明即可。
+- **pending 即处理，处理完标 done**；用户不必在 Chat 里触发。

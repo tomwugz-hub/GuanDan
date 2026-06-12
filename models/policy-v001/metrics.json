@@ -1,0 +1,11 @@
+{
+  "trainedAt": "2026-06-09T03:41:49.158Z",
+  "runtime": "node",
+  "rowsFile": "D:\\掼蛋教练Pro\\datasets\\v1\\rows.jsonl",
+  "rowCount": 9211,
+  "exampleCount": 38411,
+  "rowTop1": {
+    "top1": 0.7757146673791077,
+    "rows": 7486
+  }
+}

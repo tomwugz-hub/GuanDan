@@ -1,0 +1,37 @@
+{
+  "target": 5,
+  "startedAt": "2026-06-11T15:42:34.666Z",
+  "updatedAt": "2026-06-12T00:27:21.809Z",
+  "remaining": 3,
+  "games": [
+    {
+      "index": 1,
+      "feedbackId": "gr-1781191930620-3iw6w0",
+      "gameId": "game-8",
+      "seed": 927736086,
+      "ingestedAt": "2026-06-11T15:42:34.664Z",
+      "divergenceCount": 19,
+      "goldenIds": [
+        "G-game-8-seed927736086-turn20",
+        "G-game-8-seed927736086-turn36",
+        "G-game-8-seed927736086-turn52",
+        "G-game-8-seed927736086-turn76",
+        "G-game-8-seed927736086-turn88",
+        "G-game-8-seed927736086-turn108"
+      ]
+    },
+    {
+      "index": 2,
+      "feedbackId": "gr-1781217810564-pyqf0z",
+      "gameId": "game-2",
+      "seed": 953512184,
+      "ingestedAt": "2026-06-12T00:27:21.806Z",
+      "divergenceCount": 6,
+      "goldenIds": [
+        "G-game-2-seed953512184-turn8",
+        "G-game-2-seed953512184-turn52"
+      ]
+    }
+  ],
+  "note": "新一轮五局训练：每局打完保存复盘后 node tools/ingest-game-review.mjs；满五局后助手补 golden 并 npm run build"
+}

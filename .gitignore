@@ -1,0 +1,14 @@
+﻿.env
+node_modules/
+*.cpuprofile
+Thumbs.db
+.DS_Store
+training-samples/*.jsonl
+training-samples/batch-auto-latest.json
+training-samples/imported/
+training-samples/coach-questions-latest.json
+training-samples/active-session.json
+datasets/v1/rows.jsonl
+guandan-coach-standalone.html
+tools/_debug-*.txt
+tools/_*.txt
