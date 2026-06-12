@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 feedbackId: gr-1781272926221-jq6h19
 kind: game-review
 createdAt: 2026-06-12T14:02:06.243Z
