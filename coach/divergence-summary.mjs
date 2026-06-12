@@ -3,18 +3,35 @@
 import { playSignature } from "../engine/card.mjs";
 import { compareRanks } from "../engine/rank-order.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
+import { detectDoctrineViolations } from "../strategy/doctrine-enforce.mjs";
+import {
+  resolveStraightBreakForSingle,
+  resolveStraightBreakForTripleWithPair,
+} from "../strategy/principles.mjs";
+import { breaksBombIntegrity } from "../strategy/scorers/structure.mjs";
 
 export const DIVERGENCE_VERDICTS = Object.freeze({
   USER_BETTER: "user-better",
   COACH_BETTER: "coach-better",
   STYLE: "style-preference",
+  COACH_QUESTIONABLE: "coach-questionable",
 });
 
 const VERDICT_LABELS = {
   [DIVERGENCE_VERDICTS.USER_BETTER]: "你更对",
   [DIVERGENCE_VERDICTS.COACH_BETTER]: "教练更对",
   [DIVERGENCE_VERDICTS.STYLE]: "风格差异",
+  [DIVERGENCE_VERDICTS.COACH_QUESTIONABLE]: "教练不合理",
 };
+
+const ADJUDICATION_BY_VERDICT = {
+  [DIVERGENCE_VERDICTS.USER_BETTER]: "user",
+  [DIVERGENCE_VERDICTS.COACH_BETTER]: "coach",
+  [DIVERGENCE_VERDICTS.STYLE]: "style",
+  [DIVERGENCE_VERDICTS.COACH_QUESTIONABLE]: "coach-questionable",
+};
+
+const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
 /** 是否计入人类复盘（排除机器人与自动打完代打） */
 export function isHumanReplayRecord(record, humanPlayerIndex = 0) {
@@ -44,6 +61,140 @@ export function verdictLabel(verdict) {
   return VERDICT_LABELS[verdict] ?? "待观察";
 }
 
+/** 从复盘记录还原教纲检测所需的桌面上下文 */
+export function buildDivergenceTableContext(record) {
+  const hand = record?.handBefore ?? [];
+  const levelRank = record?.levelRank ?? "2";
+  const previousPlay = record?.mustBeat ?? record?.tableBefore?.lastActivePlay ?? null;
+  const isOpening = !record?.mustBeat;
+  let leadMode = "must-beat";
+  if (isOpening) {
+    const lastActive = record?.tableBefore?.lastActivePlayerIndex;
+    const humanIndex = record?.playerIndex ?? 0;
+    const teammateIdx = (humanIndex + 2) % 4;
+    const seatPlays = record?.tableBefore?.seatPlays ?? [];
+    const passesOnly = seatPlays.length > 0
+      && seatPlays.every((seat) => !seat.play || seat.play.type === "Pass");
+    if (
+      lastActive === teammateIdx
+      || passesOnly
+      || (record?.handCount ?? 27) >= 20
+    ) {
+      leadMode = "catch-wind";
+    } else {
+      leadMode = "fresh-open";
+    }
+  }
+  const candidates = (record?.choices ?? []).map((choice) => choice.play).filter(Boolean);
+  return {
+    previousPlay,
+    isOpening,
+    leadMode,
+    opponentActive: Boolean(record?.mustBeat),
+    hand,
+    levelRank,
+    _candidates: candidates,
+    playerIndex: record?.playerIndex ?? 0,
+    handCount: record?.handCount,
+  };
+}
+
+/** 出牌对手牌结构的破坏程度（越高越差） */
+function structureBreakSeverity(play, hand, levelRank, tableContext = {}) {
+  if (!play || play.type === PLAY_TYPES.pass) return 0;
+  if (play.type === PLAY_TYPES.single && play.mainRank) {
+    return resolveStraightBreakForSingle(play.mainRank, hand, levelRank).breaksStraight ? 3 : 0;
+  }
+  if (play.type === PLAY_TYPES.tripleWithPair || play.type === PLAY_TYPES.triple) {
+    return resolveStraightBreakForTripleWithPair(play, hand, levelRank).breaksStraight ? 4 : 0;
+  }
+  if (BOMB_TYPES.has(play.type)) {
+    return breaksBombIntegrity(play, hand, levelRank, tableContext) ? 3 : 0;
+  }
+  return 0;
+}
+
+function fatalDoctrineViolations(violations) {
+  return (violations ?? []).filter((item) => item.blockTop1 || item.blockTop3);
+}
+
+function doctrineNote(violations) {
+  const fatal = fatalDoctrineViolations(violations);
+  if (fatal.length === 0) return null;
+  const codes = [...new Set(fatal.map((item) => item.code))].join("/");
+  return `推荐1违反教纲（${codes}）：${fatal[0].summary}`;
+}
+
+/**
+ * 教纲执法裁决：Top1 有 blockTop1 违规且用户出牌更保结构 → 你更对 / 教练不合理。
+ */
+export function adjudicateByDoctrine(record, recPlay, actPlay) {
+  const hand = record?.handBefore;
+  if (!hand?.length || !recPlay) return null;
+
+  const levelRank = record?.levelRank ?? "2";
+  const tableContext = buildDivergenceTableContext(record);
+  const recViolations = detectDoctrineViolations(recPlay, hand, levelRank, tableContext);
+  const actViolations = actPlay
+    ? detectDoctrineViolations(actPlay, hand, levelRank, tableContext)
+    : [];
+  const recFatal = fatalDoctrineViolations(recViolations);
+  const actFatal = fatalDoctrineViolations(actViolations);
+
+  if (recFatal.length === 0) return null;
+
+  const recBreak = structureBreakSeverity(recPlay, hand, levelRank, tableContext);
+  const actBreak = structureBreakSeverity(actPlay, hand, levelRank, tableContext);
+  const userPreservesStructure = actPlay
+    && actPlay.type !== PLAY_TYPES.pass
+    && (recBreak > actBreak || (recBreak > 0 && actBreak === 0));
+  const userClearlyWorse = actFatal.length > 0 && actBreak >= recBreak;
+
+  const doctrineCodes = [...new Set(recFatal.map((item) => item.code))];
+  const base = {
+    adjudication: ADJUDICATION_BY_VERDICT[DIVERGENCE_VERDICTS.COACH_QUESTIONABLE],
+    coachQuestionable: true,
+    doctrineViolations: recFatal,
+    doctrineCodes,
+    reason: doctrineNote(recViolations),
+  };
+
+  if (userClearlyWorse) {
+    return {
+      ...base,
+      verdict: DIVERGENCE_VERDICTS.COACH_QUESTIONABLE,
+      note: `${doctrineNote(recViolations)}；你此手也有结构代价，不宜简单认定`,
+    };
+  }
+
+  if (userPreservesStructure || actFatal.length === 0) {
+    return {
+      ...base,
+      verdict: DIVERGENCE_VERDICTS.USER_BETTER,
+      adjudication: ADJUDICATION_BY_VERDICT[DIVERGENCE_VERDICTS.USER_BETTER],
+      note: doctrineNote(recViolations) ?? "推荐1拆结构，你保留了成组牌型",
+    };
+  }
+
+  return {
+    ...base,
+    verdict: DIVERGENCE_VERDICTS.COACH_QUESTIONABLE,
+    note: doctrineNote(recViolations) ?? "推荐1存疑，需结合牌型结构再判断",
+  };
+}
+
+function finalizeClassification(result) {
+  const verdict = result.verdict ?? DIVERGENCE_VERDICTS.STYLE;
+  return {
+    ...result,
+    verdict,
+    adjudication: result.adjudication ?? ADJUDICATION_BY_VERDICT[verdict] ?? "style",
+    coachQuestionable: result.coachQuestionable
+      ?? (verdict === DIVERGENCE_VERDICTS.COACH_QUESTIONABLE
+        || Boolean(result.doctrineViolations?.length)),
+  };
+}
+
 /**
  * 启发式分类：供 UI 与 COACH-FIX-REQUEST 优先改「你更对」项。
  */
@@ -57,6 +208,11 @@ export function classifyDivergence(item, record = null) {
   const actType = playTypeOf(actPlay);
   const actual = item.actual ?? labelOf(actPlay);
   const recommended = item.recommended ?? labelOf(recPlay);
+
+  const doctrineVerdict = adjudicateByDoctrine(record, recPlay, actPlay);
+  if (doctrineVerdict) {
+    return finalizeClassification(doctrineVerdict);
+  }
 
   if (/炸弹作废/.test(reasons) && actual === "过牌") {
     return { verdict: DIVERGENCE_VERDICTS.USER_BETTER, note: "不宜拆炸，过牌保留炸弹更合理" };
@@ -203,12 +359,19 @@ export function classifyDivergence(item, record = null) {
 
   if (item.match?.startsWith("suggestion-") && item.match !== "suggestion-1") {
     if (actType === "TripleWithPair" && recType === "Triple" && !mustBeat) {
-      return {
+      return finalizeClassification({
         verdict: DIVERGENCE_VERDICTS.USER_BETTER,
         note: "接风三带二带对更稳，优于裸三张",
-      };
+      });
     }
-    return { verdict: DIVERGENCE_VERDICTS.COACH_BETTER, note: "你的选择仍在推荐2/推荐3，推荐1更稳" };
+    const recheck = adjudicateByDoctrine(record, recPlay, actPlay);
+    if (recheck?.coachQuestionable) {
+      return finalizeClassification(recheck);
+    }
+    return finalizeClassification({
+      verdict: DIVERGENCE_VERDICTS.COACH_BETTER,
+      note: "你的选择仍在推荐2/推荐3，推荐1更稳",
+    });
   }
 
   if (actType === "Straight" && recType === "Single" && !mustBeat) {
@@ -263,7 +426,10 @@ export function classifyDivergence(item, record = null) {
     return { verdict: DIVERGENCE_VERDICTS.STYLE, note: "控权牌使用强度不同" };
   }
 
-  return { verdict: DIVERGENCE_VERDICTS.STYLE, note: "需结合牌型结构再判断" };
+  return finalizeClassification({
+    verdict: DIVERGENCE_VERDICTS.STYLE,
+    note: "双方各有道理，需结合牌型结构再判断",
+  });
 }
 
 export function isHumanDivergence(record, humanPlayerIndex = 0) {
@@ -282,6 +448,7 @@ export function summarizeGameDivergences(timeline = [], humanPlayerIndex = 0) {
     [DIVERGENCE_VERDICTS.USER_BETTER]: 0,
     [DIVERGENCE_VERDICTS.COACH_BETTER]: 0,
     [DIVERGENCE_VERDICTS.STYLE]: 0,
+    [DIVERGENCE_VERDICTS.COACH_QUESTIONABLE]: 0,
   };
 
   let top1MatchCount = 0;
@@ -310,6 +477,10 @@ export function summarizeGameDivergences(timeline = [], humanPlayerIndex = 0) {
       verdict: classification.verdict,
       verdictLabel: verdictLabel(classification.verdict),
       verdictNote: classification.note,
+      adjudication: classification.adjudication ?? ADJUDICATION_BY_VERDICT[classification.verdict],
+      coachQuestionable: classification.coachQuestionable ?? false,
+      doctrineCodes: classification.doctrineCodes ?? [],
+      doctrineReason: classification.reason ?? null,
     });
   }
 
@@ -322,6 +493,7 @@ export function summarizeGameDivergences(timeline = [], humanPlayerIndex = 0) {
     verdictCounts,
     userBetterCount: verdictCounts[DIVERGENCE_VERDICTS.USER_BETTER],
     coachBetterCount: verdictCounts[DIVERGENCE_VERDICTS.COACH_BETTER],
+    coachQuestionableCount: verdictCounts[DIVERGENCE_VERDICTS.COACH_QUESTIONABLE],
     styleCount: verdictCounts[DIVERGENCE_VERDICTS.STYLE],
   };
 }

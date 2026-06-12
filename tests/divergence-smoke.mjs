@@ -1,4 +1,6 @@
 import { playSignature } from "../engine/card.mjs";
+import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
+import { PLAY_TYPES } from "../engine/play-types.mjs";
 import {
   classifyDivergence,
   isHumanDivergence,
@@ -646,6 +648,74 @@ const game1PassDiv = classifyDivergence({
 });
 if (game1PassDiv.verdict !== DIVERGENCE_VERDICTS.COACH_BETTER) {
   throw new Error(`炸弹局面过牌应判教练更对，实际 ${game1PassDiv.verdict}`);
+}
+
+// 开局：手有 23456 顺子 + 大王回收，Top1 单3 拆顺 → 用户出顺子应判你更对
+const openingStraightHand = [
+  { rank: "2", suit: "C", deckIndex: 0 },
+  { rank: "2", suit: "D", deckIndex: 1 },
+  { rank: "2", suit: "H", deckIndex: 1 },
+  { rank: "3", suit: "D", deckIndex: 1 },
+  { rank: "4", suit: "S", deckIndex: 0 },
+  { rank: "5", suit: "D", deckIndex: 0 },
+  { rank: "6", suit: "H", deckIndex: 1 },
+  { rank: "A", suit: "H", deckIndex: 0 },
+  { rank: "BJ", suit: "JOKER", deckIndex: 0 },
+  { rank: "8", suit: "C", deckIndex: 0 },
+  { rank: "8", suit: "D", deckIndex: 0 },
+  { rank: "9", suit: "C", deckIndex: 0 },
+  { rank: "9", suit: "D", deckIndex: 1 },
+  { rank: "10", suit: "S", deckIndex: 0 },
+  { rank: "J", suit: "C", deckIndex: 0 },
+  { rank: "Q", suit: "H", deckIndex: 0 },
+  { rank: "K", suit: "D", deckIndex: 0 },
+  { rank: "7", suit: "S", deckIndex: 0 },
+  { rank: "7", suit: "H", deckIndex: 0 },
+  { rank: "7", suit: "C", deckIndex: 1 },
+];
+const openingCandidates = generateBasicCandidates(openingStraightHand, "3", null);
+const badSingle3 = openingCandidates.find(
+  (item) => item.type === PLAY_TYPES.single && item.mainRank === "3",
+);
+const goodStraight = openingCandidates.find(
+  (item) => item.type === PLAY_TYPES.straight
+    && (item.cards ?? []).some((card) => card.rank === "3")
+    && (item.cards ?? []).some((card) => card.rank === "6"),
+);
+if (!badSingle3 || !goodStraight) {
+  throw new Error("开局拆顺测试缺少单3或23456顺子候选");
+}
+const openingBreakStraightDiv = classifyDivergence({
+  actual: goodStraight.label ?? "顺子",
+  recommended: badSingle3.label ?? "单张 3",
+  mustBeat: null,
+  handCount: openingStraightHand.length,
+  levelRank: "3",
+  match: "outside-top-3",
+  recommendedReasons: ["大王回收，先小单试探"],
+}, {
+  playerIndex: 0,
+  turnNumber: 0,
+  handCount: openingStraightHand.length,
+  levelRank: "3",
+  handBefore: openingStraightHand,
+  tableBefore: { lastActivePlay: null, lastActivePlayerIndex: null, seatPlays: [] },
+  choices: [
+    { play: badSingle3, reasons: ["大王回收，先小单试探"] },
+    { play: goodStraight, reasons: ["顺子一次减五张"] },
+  ],
+  actualPlay: goodStraight,
+});
+if (openingBreakStraightDiv.verdict !== DIVERGENCE_VERDICTS.USER_BETTER) {
+  throw new Error(
+    `开局单3拆顺、用户出顺子应判你更对，实际 ${openingBreakStraightDiv.verdict}（${openingBreakStraightDiv.note}）`,
+  );
+}
+if (!openingBreakStraightDiv.coachQuestionable) {
+  throw new Error("开局拆顺应标 coachQuestionable");
+}
+if (!openingBreakStraightDiv.doctrineCodes?.includes("P1")) {
+  throw new Error(`应引用 P1 教纲，实际 ${openingBreakStraightDiv.doctrineCodes?.join(",")}`);
 }
 
 console.log("divergence 冒烟通过");

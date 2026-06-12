@@ -16,6 +16,7 @@ import {
   diagnoseLeadTripleBreaksStraightViolation,
   getRankStructureTier,
   isFollowingOpponentSingle,
+  resolveStraightBreakForSingle,
   prefersFullBombForControl,
   shouldYieldPassAfterPartnerLeadOnOpponentBomb,
   shouldReserveStraightFlushForSmallCards,
@@ -135,6 +136,34 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       blockTop1: true,
       blockTop3: beatPairDiag.violated === "P4",
     });
+  }
+
+  // —— P1：领出/接风小单拆顺子（有顺子或更小不拆顺散单可走） ——
+  if (isLeadTurn(tableContext) && candidate.type === PLAY_TYPES.single && candidate.mainRank) {
+    const straightBreak = resolveStraightBreakForSingle(candidate.mainRank, resolvedHand, levelRank);
+    if (straightBreak.breaksStraight) {
+      const altCandidates = tableContext._candidates ?? [];
+      const hasStraightAlt = altCandidates.some((item) => item.type === PLAY_TYPES.straight);
+      const hasNonBreakingSingle = altCandidates.some(
+        (item) => item.type === PLAY_TYPES.single
+          && item.mainRank
+          && item.mainRank !== candidate.mainRank
+          && !resolveStraightBreakForSingle(item.mainRank, resolvedHand, levelRank).breaksStraight,
+      );
+      const hasGroupAlt = buildStrategicGroups(resolvedHand, levelRank).some(
+        (group) => group.play?.type === PLAY_TYPES.straight
+          || group.play?.type === PLAY_TYPES.plane
+          || group.play?.type === PLAY_TYPES.consecutivePairs,
+      );
+      if (hasStraightAlt || hasNonBreakingSingle || hasGroupAlt) {
+        violations.push({
+          code: "P1",
+          summary: `领出/接风有${straightBreak.straightLabel ?? "顺子"}，不宜拆顺出单${candidate.mainRank}`,
+          blockTop1: true,
+          blockTop3: true,
+        });
+      }
+    }
   }
 
   const leadStraightBreakDiag = diagnoseLeadTripleBreaksStraightViolation(

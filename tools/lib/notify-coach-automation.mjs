@@ -2,6 +2,13 @@ import { readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 
+/** 非交互 git：禁止终端弹窗索要凭据 */
+const GIT_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: "0",
+  GCM_INTERACTIVE: "Never",
+};
+
 /** 读取项目根目录 .env（不覆盖已有环境变量） */
 export async function loadDotEnv(workspaceDir) {
   try {
@@ -28,12 +35,41 @@ export async function loadDotEnv(workspaceDir) {
 
 function runGit(args, cwd) {
   return new Promise((resolve) => {
-    const child = spawn("git", args, { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn("git", args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: GIT_ENV,
+    });
     let stderr = "";
     child.stderr?.on("data", (chunk) => { stderr += chunk; });
     child.on("close", (code) => resolve({ ok: code === 0, stderr: stderr.trim() }));
     child.on("error", (error) => resolve({ ok: false, stderr: error.message }));
   });
+}
+
+/**
+ * 局末写入 pending 后，后台拉起本地处理器（detached，不经 IDE 沙箱，无需 Allow）。
+ * 设 GUANDAN_LOCAL_PROCESSOR=0 可关闭。
+ */
+export function spawnLocalCoachFixProcessor(workspaceDir) {
+  if (process.env.GUANDAN_LOCAL_PROCESSOR === "0") {
+    return { spawned: false, reason: "local-processor-disabled" };
+  }
+
+  const script = join(workspaceDir, "tools", "process-coach-fix-request.mjs");
+  const child = spawn(process.execPath, [script], {
+    cwd: workspaceDir,
+    detached: true,
+    stdio: "ignore",
+    windowsHide: true,
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GCM_INTERACTIVE: "Never",
+    },
+  });
+  child.unref();
+  return { spawned: true };
 }
 
 /**
@@ -59,6 +95,35 @@ export async function maybePushCoachFixRequest(workspaceDir, mdPath, feedbackId)
   }
 
   // 始终推送到 main，避免 Automation 在 cursor/* 分支上留下 pending 分叉
+  const push = await runGit(["push", "origin", "HEAD:main"], workspaceDir);
+  if (!push.ok) return { pushed: false, reason: "git-push-failed", detail: push.stderr };
+
+  return { pushed: true, branch: "main" };
+}
+
+/**
+ * 本地处理器标 done 后：提交策略改动 + standalone 构建 + COACH-FIX-REQUEST。
+ */
+export async function commitAndPushCoachFix(workspaceDir, feedbackId) {
+  if (process.env.GUANDAN_AUTO_GIT_PUSH !== "1") {
+    return { pushed: false, reason: "auto-git-push-disabled" };
+  }
+
+  const paths = [
+    "strategy/",
+    "coach/",
+    "training-samples/COACH-FIX-REQUEST.md",
+    "guandan-coach-standalone.html",
+  ];
+  const add = await runGit(["add", ...paths], workspaceDir);
+  if (!add.ok) return { pushed: false, reason: "git-add-failed", detail: add.stderr };
+
+  const message = `fix(coach): process fix request ${feedbackId ?? "unknown"}`;
+  const commit = await runGit(["commit", "-m", message], workspaceDir);
+  if (!commit.ok && !/nothing to commit|no changes added/i.test(commit.stderr)) {
+    return { pushed: false, reason: "git-commit-failed", detail: commit.stderr };
+  }
+
   const push = await runGit(["push", "origin", "HEAD:main"], workspaceDir);
   if (!push.ok) return { pushed: false, reason: "git-push-failed", detail: push.stderr };
 
@@ -103,13 +168,14 @@ export async function notifyCoachAutomationWebhook({ mdPath, feedbackId, kind })
   }
 }
 
-/** 写入 pending 后统一通知：webhook 即时触发 + 可选 git push 供 cron 兜底 */
+/** 写入 pending 后统一通知：本地处理器 + webhook + 可选 git push */
 export async function afterCoachFixRequestPending({ trainingDir, mdPath, feedbackId, kind }) {
   const workspaceDir = dirname(dirname(trainingDir));
   await loadDotEnv(workspaceDir);
 
+  const local = spawnLocalCoachFixProcessor(workspaceDir);
   const webhook = await notifyCoachAutomationWebhook({ mdPath, feedbackId, kind });
   const git = await maybePushCoachFixRequest(workspaceDir, mdPath, feedbackId);
 
-  return { webhook, git };
+  return { local, webhook, git };
 }

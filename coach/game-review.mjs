@@ -43,7 +43,7 @@ export function buildGameReviewFixMarkdown(payload) {
     "",
     `**牌局：** ${payload.gameId ?? "—"}，级牌 ${payload.levelRank ?? "—"}`,
     `**你出牌：** ${summary.totalHands} 手，**与推荐1不同：** ${summary.divergenceCount} 手`,
-    `**分类：** 你更对 ${summary.userBetterCount ?? 0} · 教练更对 ${summary.coachBetterCount ?? 0} · 风格差异 ${summary.styleCount ?? 0}`,
+    `**分类：** 你更对 ${summary.userBetterCount ?? 0} · 教练更对 ${summary.coachBetterCount ?? 0} · 教练不合理 ${summary.coachQuestionableCount ?? 0} · 风格差异 ${summary.styleCount ?? 0}`,
     "",
     "请只改 `strategy/`（必要时 `coach/`）里**你认为用户打得更有道理**的差异手；不必强行让用户服从推荐。",
     "改完执行 `node tests/smoke.mjs` 与 `node tools/build-standalone.mjs`，将 `status` 改为 `done`。",
@@ -59,9 +59,15 @@ export function buildGameReviewFixMarkdown(payload) {
   } else {
     lines.push("## 差异明细", "");
     for (const item of summary.divergences) {
+      const doctrineLine = item.doctrineCodes?.length
+        ? `- **教纲：** ${item.doctrineCodes.join("/")}${item.doctrineReason ? ` — ${item.doctrineReason}` : ""}`
+        : null;
       lines.push(
         `### 第 ${item.turnNumber} 手 · ${item.verdictLabel ?? "待观察"}`,
         `- **分类：** ${item.verdictLabel ?? "—"}${item.verdictNote ? `（${item.verdictNote}）` : ""}`,
+        `- **裁决：** ${item.adjudication ?? "—"}`,
+        ...(doctrineLine ? [doctrineLine] : []),
+        ...(item.coachQuestionable ? ["- **教练存疑：** 是"] : []),
         `- **推荐1：** ${item.recommended}${item.recommendedReasons?.length ? `（${item.recommendedReasons.join("；")}）` : ""}`,
         `- **你实际出：** ${item.actual}`,
         `- **匹配：** ${item.match}${item.mustBeat ? `，须压 ${item.mustBeat}` : ""}`,

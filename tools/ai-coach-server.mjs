@@ -208,10 +208,14 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`掼蛋训练采集服务：http://127.0.0.1:${port}`);
   console.log("  POST /coach-feedback   反馈样本 + 待改任务 COACH-FIX-REQUEST.md");
+  console.log("  → pending 时自动拉起 tools/process-coach-fix-request.mjs（零确认）");
   if (process.env.CURSOR_AUTOMATION_WEBHOOK_URL) {
-    console.log("  → pending 时将 POST Cursor Automation Webhook");
+    console.log("  → 并行 POST Cursor Automation Webhook");
+  }
+  if (process.env.GUANDAN_AUTO_GIT_PUSH === "1") {
+    console.log("  → GUANDAN_AUTO_GIT_PUSH=1：非交互 git push 已启用");
   } else {
-    console.log("  → 未配置 CURSOR_AUTOMATION_WEBHOOK_URL（见 .env.example）");
+    console.log("  → 建议 .env 设 GUANDAN_AUTO_GIT_PUSH=1（见 .env.example）");
   }
   console.log("  POST /training-sample  完整训练导出");
   console.log("  GET/POST /game-session  牌局存档（内置浏览器友好）");

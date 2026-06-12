@@ -2186,6 +2186,7 @@ function formatVerdictStats(summary, { interactive = false, activeFilter = null 
   const tabs = [
     { verdict: DIVERGENCE_VERDICTS.USER_BETTER, label: "你更对", count: summary.userBetterCount ?? 0 },
     { verdict: DIVERGENCE_VERDICTS.COACH_BETTER, label: "教练更对", count: summary.coachBetterCount ?? 0 },
+    { verdict: DIVERGENCE_VERDICTS.COACH_QUESTIONABLE, label: "教练不合理", count: summary.coachQuestionableCount ?? 0 },
     { verdict: DIVERGENCE_VERDICTS.STYLE, label: "风格差异", count: summary.styleCount ?? 0 },
   ];
   const items = tabs.map(({ verdict, label, count }) => {

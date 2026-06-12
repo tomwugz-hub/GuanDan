@@ -110,6 +110,8 @@ export function slimCoachAdviceRecord(record) {
     levelRank: record.levelRank,
     handCount: record.handCount,
     playersBefore: record.playersBefore,
+    handBefore: record.handBefore,
+    tableBefore: record.tableBefore,
     mustBeat: record.mustBeat,
     handProfile: record.handProfile,
     choices: record.choices,
