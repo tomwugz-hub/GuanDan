@@ -2,7 +2,8 @@ import http from "node:http";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeUserDispute } from "../coach/user-dispute.mjs";
+import { buildDisputeAckMessage, normalizeUserDispute } from "../coach/user-dispute.mjs";
+import { appendDisputeToPendingFixRequest } from "./lib/merge-coach-fix-dispute.mjs";
 import { writeCoachFixRequestFiles } from "./lib/write-coach-fix-request.mjs";
 import { loadDotEnv } from "./lib/notify-coach-automation.mjs";
 import { deleteSessionFile, readSessionFile, writeSessionFile } from "./lib/session-file.mjs";
@@ -133,11 +134,21 @@ async function saveUserDispute(raw) {
   };
   await appendFile(userDisputesJsonlPath, `${JSON.stringify(enriched)}\n`, "utf8");
   await appendFile(coachQuestionsJsonlPath, `${JSON.stringify(enriched)}\n`, "utf8");
+
+  const fixMerge = await appendDisputeToPendingFixRequest(
+    trainingDir,
+    enriched,
+    raw.gameReviewFeedbackId ?? raw.feedbackId ?? null,
+  );
+
   return {
     feedbackId: enriched.feedbackId,
     turnNumber: enriched.turnNumber,
     upgradeCandidate: enriched.upgradeCandidate,
     jsonlPath: userDisputesJsonlPath,
+    ackMessage: buildDisputeAckMessage(enriched),
+    fixRequestMerged: fixMerge.merged,
+    fixRequestFeedbackId: fixMerge.feedbackId ?? null,
   };
 }
 
@@ -242,7 +253,7 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`掼蛋训练采集服务：http://127.0.0.1:${port}`);
   console.log("  POST /coach-feedback   反馈样本 + 待改任务 COACH-FIX-REQUEST.md");
-  console.log("  POST /coach-dispute    复盘申诉（写入 user-disputes.jsonl）");
+  console.log("  POST /coach-dispute    复盘申诉（jsonl + 并入 pending COACH-FIX-REQUEST）");
   console.log("  → pending 时自动拉起 tools/process-coach-fix-request.mjs（零确认）");
   if (process.env.CURSOR_AUTOMATION_WEBHOOK_URL) {
     console.log("  → 并行 POST Cursor Automation Webhook");

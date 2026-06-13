@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import {
   isDisputeUpgradeCandidate,
   parseUserDisputesFromMarkdown,
+  reAdjudicateDispute,
 } from "../coach/user-dispute.mjs";
 import {
   commitAndPushCoachFix,
@@ -41,7 +42,7 @@ function parseFrontmatter(markdown) {
   return fields;
 }
 
-/** 解析「差异明细」各手分类 */
+/** 解析「差异明细」各手分类与推荐/实际 */
 function parseDivergences(markdown) {
   const section = markdown.split("## 差异明细")[1]?.split("## 完整时间线")[0] ?? "";
   const blocks = section.split(/^### /m).slice(1);
@@ -49,11 +50,21 @@ function parseDivergences(markdown) {
     const header = block.split(/\r?\n/)[0] ?? "";
     const turnMatch = header.match(/第\s*(\d+)\s*手/);
     const verdictMatch = header.match(/·\s*(.+)$/);
+    const recommendedMatch = block.match(/\*\*推荐1：\*\*\s*(.+)/);
+    const actualMatch = block.match(/\*\*你实际出：\*\*\s*(.+)/);
     return {
       turnNumber: turnMatch ? Number(turnMatch[1]) : null,
       verdict: verdictMatch?.[1]?.trim() ?? "",
+      recommended: recommendedMatch?.[1]?.trim() ?? "",
+      actual: actualMatch?.[1]?.trim() ?? "",
     };
   }).filter((item) => item.turnNumber != null);
+}
+
+function levelRankFromMarkdown(markdown) {
+  const match = markdown.match(/\*\*牌局：\*\*[^，]*，级牌\s*(\S+)/)
+    ?? markdown.match(/级牌\s*([3-9JQKA2]|10)/);
+  return match?.[1]?.trim() ?? "2";
 }
 
 function buildAgentPrompt(markdown, toFix, disputes = []) {
@@ -61,7 +72,7 @@ function buildAgentPrompt(markdown, toFix, disputes = []) {
   const disputeLines = disputes.length > 0
     ? [
       "",
-      `另有用户申诉 ${disputes.length} 条：结合「用户申诉」节理由重审；结构/教纲相关（重审候选=是）的「教练更对」视同待改手。`,
+      `另有用户申诉 ${disputes.length} 条：结合「用户申诉」节理由重审；结构/教纲或回牌/牌力相关（重审候选=是）的「教练更对」视同待改手。`,
       disputes.map((d) => `第 ${d.turnNumber} 手：${d.userRationale}`).join("\n"),
     ]
     : [];
@@ -193,14 +204,29 @@ async function main() {
   await appendUserDisputesLog(userDisputes, fm.feedbackId);
   await logLine(`用户申诉 ${userDisputes.length} 条，重审候选 ${userDisputes.filter((d) => d.upgradeCandidate).length} 条`);
 
+  const levelRank = levelRankFromMarkdown(markdown);
+  const divergenceByTurn = Object.fromEntries(divergences.map((item) => [item.turnNumber, item]));
+
   const disputeUpgrades = userDisputes
     .filter((d) => d.upgradeCandidate || isDisputeUpgradeCandidate(d))
-    .map((d) => ({
-      turnNumber: d.turnNumber,
-      verdict: "用户申诉→待重审",
-      fromDispute: true,
-      userRationale: d.userRationale,
-    }));
+    .map((d) => {
+      const detail = divergenceByTurn[d.turnNumber];
+      const readj = reAdjudicateDispute(d, {
+        recommended: detail?.recommended,
+        actual: detail?.actual,
+        levelRank,
+      });
+      let verdict = "用户申诉→待重审";
+      if (readj?.verdict === "user-better") verdict = "用户申诉→你更对";
+      else if (readj?.verdict === "coach-questionable") verdict = "用户申诉→教练不合理";
+      return {
+        turnNumber: d.turnNumber,
+        verdict,
+        fromDispute: true,
+        userRationale: d.userRationale,
+        readjudication: readj,
+      };
+    });
 
   const toFixKeys = new Set();
   const toFix = [];

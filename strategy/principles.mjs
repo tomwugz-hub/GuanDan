@@ -1161,7 +1161,7 @@ function hasSteelPlate(hand, levelRank) {
   );
 }
 
-function isProbeSingleRank(rank, levelRank) {
+export function isProbeSingleRank(rank, levelRank) {
   if (rank === levelRank || isControlRank(rank, levelRank)) return false;
   return compareRanks(rank, "9", levelRank) <= 0;
 }
@@ -1901,6 +1901,40 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
           principles.push("P5");
           hasStrongConflict = true;
         }
+      }
+      // P6：有大王可回收时，小对试探牌力不足难回牌，优先大三带二减手
+      if (recovery) {
+        const pairRank = candidate.mainRank;
+        const rankCounts = new Map();
+        for (const card of resolvedHand) {
+          if (isJoker(card)) continue;
+          rankCounts.set(card.rank, (rankCounts.get(card.rank) ?? 0) + 1);
+        }
+        if (isProbeSingleRank(pairRank, levelRank)) {
+          for (const [heldTripleRank, count] of rankCounts.entries()) {
+            if (count < 3 || heldTripleRank === pairRank) continue;
+            const solePair = solePairForTripleRank(resolvedHand, levelRank, heldTripleRank);
+            if (solePair && compareRanks(heldTripleRank, pairRank, levelRank) > 0) {
+              score += resolvedHand.length >= 15 ? 5800 : 4600;
+              reasons.push(
+                `【P6】小对${rankLabel(pairRank)}试探牌力不足难回牌，优先${rankLabel(heldTripleRank)}带对${rankLabel(solePair)}三带二减手`,
+              );
+              principles.push("P6");
+              hasStrongConflict = true;
+              return { score, reasons, principles, hasStrongConflict };
+            }
+          }
+        }
+      }
+    } else if (leadMode === "catch-wind" && candidate.type === PLAY_TYPES.tripleWithPair && recovery) {
+      const tripleRank = candidate.mainRank;
+      const solePair = solePairForTripleRank(resolvedHand, levelRank, tripleRank);
+      if (solePair && compareRanks(tripleRank, "9", levelRank) > 0) {
+        score -= resolvedHand.length >= 15 ? 4800 : 3800;
+        reasons.push(
+          `【P6】大王可回收，${rankLabel(tripleRank)}带对${rankLabel(solePair)}减手优于小对试探`,
+        );
+        principles.push("P6");
       }
     }
 

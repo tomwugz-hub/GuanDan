@@ -3417,4 +3417,63 @@ scenario("P5-三带二带最小对不拆连对", "P5", () => {
   );
 });
 
+// —— game-2 turn20：有大王时小对9试探难回牌，应 J带对6 三带二 ——
+scenario("P6-game2-turn20-小对9难回牌宜三带二", "P6", () => {
+  const hand = cards([
+    ["J", SUITS.clubs, 0], ["J", SUITS.diamonds, 1], ["J", SUITS.spades, 0],
+    ["6", SUITS.spades, 0], ["6", SUITS.hearts, 0],
+    ["9", SUITS.clubs, 1], ["9", SUITS.diamonds, 0],
+    ["BJ", SUITS.joker, 0],
+    ["3", SUITS.hearts, 0], ["4", SUITS.hearts, 0], ["5", SUITS.hearts, 0],
+    ["7", SUITS.hearts, 0], ["8", SUITS.hearts, 0],
+    ["Q", SUITS.hearts, 0], ["K", SUITS.hearts, 0], ["A", SUITS.hearts, 0],
+    ["2", SUITS.clubs, 0],
+  ]);
+  const bomb5 = classifyPlay(cards([
+    ["5", SUITS.spades, 0], ["5", SUITS.hearts, 0], ["5", SUITS.hearts, 1],
+    ["5", SUITS.clubs, 0], ["5", SUITS.diamonds, 1],
+  ]), "2");
+  let state = createGameStateFromHands({
+    levelRank: "2",
+    hands: [hand, filler, filler, filler],
+    currentPlayerIndex: 0,
+  });
+  state = {
+    ...state,
+    lastActivePlay: null,
+    lastActivePlayerIndex: null,
+    playHistory: [
+      { turnNumber: 18, playerIndex: 0, play: bomb5 },
+      { turnNumber: 19, playerIndex: 1, play: classifyPlay([], "2") },
+      { turnNumber: 19, playerIndex: 2, play: classifyPlay([], "2") },
+      { turnNumber: 19, playerIndex: 3, play: classifyPlay([], "2") },
+    ],
+  };
+  const rec = recommendPlay(hand, "2", null, {
+    state,
+    playerIndex: 0,
+    mlFusionMode: "off",
+    mlModel: false,
+  });
+  assert(
+    rec.candidate.type === PLAY_TYPES.tripleWithPair && rec.candidate.mainRank === "J",
+    `turn20 有大王应 J带对6 三带二，实际 ${rec.candidate.label ?? rec.candidate.type}`,
+  );
+  const pairNine = generateBasicCandidates(hand, "2", null)
+    .find((item) => item.type === PLAY_TYPES.pair && item.mainRank === "9");
+  assert(pairNine, "手牌应能组对9");
+  const allCands = generateBasicCandidates(hand, "2", null);
+  const ctx = enrichScoringContext({ state, playerIndex: 0, previousPlay: null }, allCands, hand, "2");
+  const pairScored = scoreCandidate(pairNine, hand, "2", null, { ...ctx, _candidates: allCands });
+  assert(
+    pairScored.score > rec.score,
+    `小对9试探应劣于 J三带二（对9=${pairScored.score} 三带二=${rec.score}）`,
+  );
+  assert(
+    pairScored.reasons.some((r) => /难回牌|牌力不足|试探/.test(r))
+      || rec.reasons.some((r) => /大王可回收|三带二|减手/.test(r)),
+    `应说明小对试探或三带二减手理由，对9=${pairScored.reasons.join("；")} top=${rec.reasons.join("；")}`,
+  );
+});
+
 console.log(`\ndoctrine-regression: 全部 ${passed} 场景通过`);

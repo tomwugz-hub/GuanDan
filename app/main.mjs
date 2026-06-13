@@ -18,6 +18,7 @@ import {
   isHumanReplayRecord,
   DIVERGENCE_VERDICTS,
   normalizeUserDispute,
+  buildDisputeAckMessage,
   isJoker,
   isWildCard,
   isGameOver,
@@ -1348,10 +1349,6 @@ function findUserDispute(turnNumber) {
   return (currentGameMeta?.userDisputes ?? []).find((item) => item.turnNumber === turnNumber) ?? null;
 }
 
-function disputeAckMessage() {
-  return "已记录你的意见";
-}
-
 /** 仅「教练更对」可提交异议 */
 function canDisputeVerdict(verdict) {
   return verdict === DIVERGENCE_VERDICTS.COACH_BETTER;
@@ -2307,15 +2304,26 @@ async function submitUserDisputeFromUI(turnNumber) {
   }
 
   try {
-    await submitUserDispute({
+    const result = await submitUserDispute({
       ...dispute,
+      gameId: currentGameMeta.gameId,
       feedbackId: currentGameMeta.gameId,
+      gameReviewFeedbackId: currentGameMeta.gameReviewFeedbackId ?? null,
       levelRank: state.levelRank,
     });
-    showCoachToast(disputeAckMessage());
+    const ackText = result.ackMessage ?? buildDisputeAckMessage(dispute);
+    showCoachToast(ackText);
+    const ackEl = document.querySelector(`#dispute-rationale-${turnNumber}`)
+      ?.closest(".divergence-dispute")
+      ?.querySelector(".dispute-ack");
+    if (ackEl) {
+      ackEl.textContent = ackText;
+      ackEl.hidden = false;
+    }
   } catch (error) {
     console.warn("异议暂存本机", error);
-    showCoachToast(disputeAckMessage());
+    const ackText = buildDisputeAckMessage(dispute);
+    showCoachToast(ackText);
   }
 
   renderGameReviewPanel();
@@ -4607,6 +4615,7 @@ async function submitGameReview() {
     await yieldToMainThread();
     const result = await submitCoachFeedback(payload);
     currentGameMeta.gameReviewSubmitted = true;
+    currentGameMeta.gameReviewFeedbackId = result.feedbackId ?? payload.feedbackId ?? null;
     feedbackSubmitCount += result.online ? 1 : 0;
 
     await yieldToMainThread();

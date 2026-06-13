@@ -357,6 +357,23 @@ export function classifyDivergence(item, record = null) {
     }
   }
 
+  if (actType === "TripleWithPair" && recType === "Pair" && !mustBeat && record?.handBefore?.length) {
+    const levelRank = item.levelRank ?? record?.levelRank ?? "2";
+    const hasBJ = record.handBefore.some((card) => card.rank === "BJ");
+    const recRank = recPlay?.mainRank;
+    if (
+      hasBJ
+      && recRank
+      && compareRanks(recRank, "9", levelRank) <= 0
+      && compareRanks(actPlay?.mainRank ?? "", recRank, levelRank) > 0
+    ) {
+      return {
+        verdict: DIVERGENCE_VERDICTS.USER_BETTER,
+        note: "小对试探牌力不足难回牌，三带二一次减五张更合理",
+      };
+    }
+  }
+
   if (item.match?.startsWith("suggestion-") && item.match !== "suggestion-1") {
     if (actType === "TripleWithPair" && recType === "Triple" && !mustBeat) {
       return finalizeClassification({
