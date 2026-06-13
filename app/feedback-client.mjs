@@ -2,7 +2,9 @@ import { buildCoachFeedbackPayload } from "../coach/feedback-sample.mjs";
 import { safeGetItem, safeSetItem } from "./storage-safe.mjs";
 
 const FEEDBACK_QUEUE_KEY = "guandan-coach-feedback-queue";
+const DISPUTE_QUEUE_KEY = "guandan-coach-dispute-queue";
 const BRIDGE_URL = "http://127.0.0.1:8787/coach-feedback";
+const DISPUTE_URL = "http://127.0.0.1:8787/coach-dispute";
 
 export function readFeedbackQueue() {
   try {
@@ -78,6 +80,53 @@ export async function submitCoachFeedback(payload) {
     return { ok: true, online: true, ...result };
   } catch (error) {
     const pending = enqueueFeedback(payload);
+    return {
+      ok: true,
+      online: false,
+      pending,
+      error: error.message || String(error),
+    };
+  }
+}
+
+export function readDisputeQueue() {
+  try {
+    const raw = safeGetItem(DISPUTE_QUEUE_KEY, "[]");
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeDisputeQueue(items) {
+  safeSetItem(DISPUTE_QUEUE_KEY, JSON.stringify(items.slice(-120)));
+}
+
+export function enqueueDispute(dispute) {
+  const queue = readDisputeQueue();
+  queue.push({ queuedAt: new Date().toISOString(), dispute });
+  writeDisputeQueue(queue);
+  return queue.length;
+}
+
+export async function postUserDispute(dispute) {
+  const response = await fetch(DISPUTE_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(dispute),
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || `coach-dispute failed: ${response.status}`);
+  return data;
+}
+
+export async function submitUserDispute(dispute) {
+  try {
+    const result = await postUserDispute(dispute);
+    return { ok: true, online: true, ...result };
+  } catch (error) {
+    const pending = enqueueDispute(dispute);
     return {
       ok: true,
       online: false,

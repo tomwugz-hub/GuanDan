@@ -2288,6 +2288,82 @@
         outline: none;
       }
 
+      .divergence-dispute-inline {
+        display: inline-block;
+        margin-left: 6px;
+        vertical-align: middle;
+      }
+
+      button.dispute-btn,
+      button.dispute-submit-btn {
+        margin: 0;
+        padding: 2px 8px;
+        border: 1px solid rgba(217, 28, 28, 0.35);
+        border-radius: 6px;
+        background: rgba(217, 28, 28, 0.08);
+        color: #a61b1b;
+        font-size: 10px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      button.dispute-btn:hover,
+      button.dispute-submit-btn:hover {
+        background: rgba(217, 28, 28, 0.14);
+      }
+
+      .dispute-recorded {
+        display: inline-block;
+        margin-left: 4px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        background: rgba(58, 122, 158, 0.14);
+        color: #2a5f7d;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      .divergence-dispute {
+        margin-top: 10px;
+        padding-top: 8px;
+        border-top: 1px dashed var(--line);
+      }
+
+      .dispute-title {
+        margin: 0 0 6px;
+        font-size: 12px;
+      }
+
+      .dispute-rationale-input {
+        width: 100%;
+        box-sizing: border-box;
+        margin-bottom: 6px;
+        padding: 6px 8px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font: inherit;
+        font-size: 12px;
+        resize: vertical;
+        min-height: 56px;
+      }
+
+      .dispute-actions {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .dispute-rationale {
+        margin: 0 0 4px;
+        font-size: 12px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+      }
+
+      .dispute-ack {
+        margin: 6px 0 0;
+      }
+
       .divergence-detail {
         margin-bottom: 8px;
         padding: 10px;
@@ -3280,7 +3356,7 @@
         <aside class="side-panel ai-coach-panel" id="aiPanel">
           <div class="ai-coach-head">
             <h2>本局复盘</h2>
-            <p class="ai-status" id="aiStatus">专注打牌即可；系统会自动对比你的出牌与推荐。</p>
+            <p class="ai-status" id="aiStatus">专注打牌即可，局末会自动记录复盘。</p>
           </div>
           <div class="ai-body">
             <div class="improve-cards" id="improveCards" hidden></div>
@@ -3316,7 +3392,7 @@
         </aside>
       </main>
 
-      <footer id="message">系统会自动记录你与推荐的差异；局末可保存复盘，方便下次对比进步。</footer>
+      <footer id="message">专注打牌，教练会自动记录并优化推荐。</footer>
     </div>
 
     <div class="onboarding-target-ring" id="onboardingRing" hidden></div>

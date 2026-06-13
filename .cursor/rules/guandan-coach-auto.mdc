@@ -24,6 +24,7 @@ alwaysApply: true
 1. **立即**读 `training-samples/COACH-FIX-REQUEST.md`。
 2. 若 `status: pending`：**绝不询问许可、绝不等待 Allow**，直接处理（与本地处理器相同逻辑，互为兜底）：
    - **`kind: game-review`**：按「差异明细」逐条判断；**用户更对**或**教练不合理**（Top1 违反 P1/P4/P5/P6/P9 等教纲且用户更保结构）时改 `strategy/`（必要时 `coach/`）；教练更对且无教纲违规则不改。
+   - **「用户申诉」**：必读；对「教练更对」的申诉中，理由涉及拆顺子/拆炸/保结构/教纲等（重审候选=是）的，结合用户理由重审，可升级为待改手并改 `strategy/`；所有申诉记入 `user-disputes.jsonl`。
    - **单条反馈**：按用户问题与 JSON 改策略。
    - 跑 `node tests/smoke.mjs` 与 `node tools/build-standalone.mjs`。
    - 将 `status` 改为 `done`，简短告知用户 Ctrl+F5 刷新游戏页。

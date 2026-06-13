@@ -2,6 +2,7 @@ import http from "node:http";
 import { appendFile, mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeUserDispute } from "../coach/user-dispute.mjs";
 import { writeCoachFixRequestFiles } from "./lib/write-coach-fix-request.mjs";
 import { loadDotEnv } from "./lib/notify-coach-automation.mjs";
 import { deleteSessionFile, readSessionFile, writeSessionFile } from "./lib/session-file.mjs";
@@ -14,6 +15,7 @@ const trainingJsonlPath = join(trainingDir, "coach-training-feedback.jsonl");
 const trainingLatestPath = join(trainingDir, "coach-training-latest.json");
 const coachQuestionsJsonlPath = join(trainingDir, "coach-questions.jsonl");
 const coachQuestionsLatestPath = join(trainingDir, "coach-questions-latest.json");
+const userDisputesJsonlPath = join(trainingDir, "user-disputes.jsonl");
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -118,6 +120,27 @@ async function saveCoachFeedback(feedback) {
   };
 }
 
+async function saveUserDispute(raw) {
+  await mkdir(trainingDir, { recursive: true });
+  const dispute = normalizeUserDispute(raw);
+  if (!dispute) throw new Error("申诉缺少手数或理由");
+  const enriched = {
+    savedAt: new Date().toISOString(),
+    source: "guandan-coach-dispute",
+    kind: "user-dispute",
+    feedbackId: raw.feedbackId ?? `ud-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    ...dispute,
+  };
+  await appendFile(userDisputesJsonlPath, `${JSON.stringify(enriched)}\n`, "utf8");
+  await appendFile(coachQuestionsJsonlPath, `${JSON.stringify(enriched)}\n`, "utf8");
+  return {
+    feedbackId: enriched.feedbackId,
+    turnNumber: enriched.turnNumber,
+    upgradeCandidate: enriched.upgradeCandidate,
+    jsonlPath: userDisputesJsonlPath,
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   if (request.method === "OPTIONS") {
     sendJson(response, 204, {});
@@ -142,6 +165,17 @@ const server = http.createServer(async (request, response) => {
     try {
       const payload = JSON.parse(await readBody(request));
       const result = await saveCoachFeedback(payload);
+      sendJson(response, 200, { ok: true, ...result });
+    } catch (error) {
+      sendJson(response, 500, { error: error.message || String(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && request.url === "/coach-dispute") {
+    try {
+      const payload = JSON.parse(await readBody(request));
+      const result = await saveUserDispute(payload);
       sendJson(response, 200, { ok: true, ...result });
     } catch (error) {
       sendJson(response, 500, { error: error.message || String(error) });
@@ -208,6 +242,7 @@ const server = http.createServer(async (request, response) => {
 server.listen(port, "127.0.0.1", () => {
   console.log(`掼蛋训练采集服务：http://127.0.0.1:${port}`);
   console.log("  POST /coach-feedback   反馈样本 + 待改任务 COACH-FIX-REQUEST.md");
+  console.log("  POST /coach-dispute    复盘申诉（写入 user-disputes.jsonl）");
   console.log("  → pending 时自动拉起 tools/process-coach-fix-request.mjs（零确认）");
   if (process.env.CURSOR_AUTOMATION_WEBHOOK_URL) {
     console.log("  → 并行 POST Cursor Automation Webhook");

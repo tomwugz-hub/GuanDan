@@ -5,7 +5,7 @@
   "type": "module",
   "description": "掼蛋 AI 教练 Pro：规则引擎 + 可解释策略 + 复盘",
   "scripts": {
-    "test": "node tests/doctrine-regression.mjs && node tests/acceptance-user.mjs && node tests/smoke.mjs && node tests/principles-smoke.mjs && node tests/feedback-smoke.mjs && node tests/divergence-smoke.mjs && node tests/coach-fix-request-smoke.mjs && node tests/pipeline-smoke.mjs && node tests/ml-integration-smoke.mjs && node tests/import-smoke.mjs && node tests/merge-smoke.mjs && node tests/audit-strategy-smoke.mjs",
+    "test": "node tests/doctrine-regression.mjs && node tests/acceptance-user.mjs && node tests/smoke.mjs && node tests/principles-smoke.mjs && node tests/feedback-smoke.mjs && node tests/divergence-smoke.mjs && node tests/coach-fix-request-smoke.mjs && node tests/user-dispute-smoke.mjs && node tests/pipeline-smoke.mjs && node tests/ml-integration-smoke.mjs && node tests/import-smoke.mjs && node tests/merge-smoke.mjs && node tests/audit-strategy-smoke.mjs",
     "test:gate": "node tools/pre-release-gate.mjs",
     "test:golden": "node tests/golden-scenarios.mjs",
     "ingest-review": "node tools/ingest-game-review.mjs",

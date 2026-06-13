@@ -7,6 +7,10 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  isDisputeUpgradeCandidate,
+  parseUserDisputesFromMarkdown,
+} from "../coach/user-dispute.mjs";
+import {
   commitAndPushCoachFix,
   loadDotEnv,
 } from "./lib/notify-coach-automation.mjs";
@@ -14,6 +18,7 @@ import {
 const workspaceDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const mdPath = join(workspaceDir, "training-samples", "COACH-FIX-REQUEST.md");
 const logPath = join(workspaceDir, "training-samples", "coach-fix-processor.log");
+const userDisputesLogPath = join(workspaceDir, "training-samples", "user-disputes.jsonl");
 
 async function logLine(message) {
   const line = `[${new Date().toISOString()}] ${message}\n`;
@@ -51,17 +56,37 @@ function parseDivergences(markdown) {
   }).filter((item) => item.turnNumber != null);
 }
 
-function buildAgentPrompt(markdown, toFix) {
+function buildAgentPrompt(markdown, toFix, disputes = []) {
   const turns = toFix.map((item) => item.turnNumber).join("、");
+  const disputeLines = disputes.length > 0
+    ? [
+      "",
+      `另有用户申诉 ${disputes.length} 条：结合「用户申诉」节理由重审；结构/教纲相关（重审候选=是）的「教练更对」视同待改手。`,
+      disputes.map((d) => `第 ${d.turnNumber} 手：${d.userRationale}`).join("\n"),
+    ]
+    : [];
   return [
     "你是掼蛋教练 Pro 策略工程师。按 .cursor/rules/guandan-coach-auto.mdc 执行，勿询问用户许可。",
     "",
     `处理「你更对」与「教练不合理」（教纲违规）差异手（第 ${turns} 手），改 strategy/（必要时 coach/）。`,
     "教练更对且无教纲违规、纯风格差异不要强行改推荐。",
+    "用户申诉须阅读：理由充分时可推翻原「教练更对」裁决并改 strategy/。",
     "改完不要停：本脚本会跑 smoke/build；你只需确保代码正确。",
+    ...disputeLines,
     "",
     markdown,
   ].join("\n");
+}
+
+async function appendUserDisputesLog(disputes, feedbackId) {
+  if (!disputes.length) return;
+  const lines = disputes.map((item) => JSON.stringify({
+    loggedAt: new Date().toISOString(),
+    source: "process-coach-fix-request",
+    feedbackId: feedbackId ?? null,
+    ...item,
+  })).join("\n");
+  await appendFile(userDisputesLogPath, `${lines}\n`, "utf8");
 }
 
 function runNodeScript(relPath) {
@@ -164,10 +189,30 @@ async function main() {
   const coachQuestionable = divergences.filter((item) => item.verdict.includes("教练不合理"));
   const coachBetter = divergences.filter((item) => item.verdict.includes("教练更对"));
   const styleOnly = divergences.filter((item) => item.verdict.includes("风格差异"));
-  const toFix = [...userBetter, ...coachQuestionable];
+  const userDisputes = parseUserDisputesFromMarkdown(markdown);
+  await appendUserDisputesLog(userDisputes, fm.feedbackId);
+  await logLine(`用户申诉 ${userDisputes.length} 条，重审候选 ${userDisputes.filter((d) => d.upgradeCandidate).length} 条`);
+
+  const disputeUpgrades = userDisputes
+    .filter((d) => d.upgradeCandidate || isDisputeUpgradeCandidate(d))
+    .map((d) => ({
+      turnNumber: d.turnNumber,
+      verdict: "用户申诉→待重审",
+      fromDispute: true,
+      userRationale: d.userRationale,
+    }));
+
+  const toFixKeys = new Set();
+  const toFix = [];
+  for (const item of [...userBetter, ...coachQuestionable, ...disputeUpgrades]) {
+    const key = item.turnNumber;
+    if (toFixKeys.has(key)) continue;
+    toFixKeys.add(key);
+    toFix.push(item);
+  }
 
   if (toFix.length > 0 && process.env.GUANDAN_LOCAL_AGENT !== "0") {
-    const agent = await tryCursorSdkAgent(buildAgentPrompt(markdown, toFix));
+    const agent = await tryCursorSdkAgent(buildAgentPrompt(markdown, toFix, userDisputes));
     await logLine(`SDK Agent: ${JSON.stringify(agent)}`);
   }
 
@@ -184,9 +229,12 @@ async function main() {
   }
 
   const turnList = toFix.map((item) => item.turnNumber).join("、");
+  const disputeNote = userDisputes.length > 0
+    ? `；用户申诉 ${userDisputes.length} 条已记入 user-disputes.jsonl`
+    : "";
   const conclusion = toFix.length === 0
-    ? `本局无「你更对/教练不合理」项（教练更对 ${coachBetter.length}、教练不合理 ${coachQuestionable.length}、风格差异 ${styleOnly.length}），不改推荐。`
-    : `已按「你更对/教练不合理」处理第 ${turnList} 手（见 strategy/ 变更）；教练更对 ${coachBetter.length}、风格差异 ${styleOnly.length} 处保持原推荐。`;
+    ? `本局无「你更对/教练不合理/申诉重审」项（教练更对 ${coachBetter.length}、教练不合理 ${coachQuestionable.length}、风格差异 ${styleOnly.length}）${disputeNote}，不改推荐。`
+    : `已处理第 ${turnList} 手（你更对/教练不合理/申诉重审，见 strategy/ 变更）；教练更对 ${coachBetter.length}、风格差异 ${styleOnly.length} 处保持原推荐${disputeNote}。`;
 
   await markDone(markdown, conclusion);
   await logLine(`已标 done: ${conclusion}`);

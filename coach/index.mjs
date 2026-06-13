@@ -2,6 +2,7 @@ export * from "./local-qa.mjs";
 export * from "./fix-request.mjs";
 export * from "./divergence-summary.mjs";
 export * from "./game-review.mjs";
+export * from "./user-dispute.mjs";
 export * from "./turn-advice.mjs";
 export * from "./robot-player.mjs";
 export * from "./auto-game.mjs";

@@ -1,4 +1,5 @@
 import { summarizeGameDivergences } from "./divergence-summary.mjs";
+import { buildUserDisputesMarkdownSection } from "./user-dispute.mjs";
 
 export function buildGameReviewPayload({
   gameSnapshot,
@@ -7,6 +8,7 @@ export function buildGameReviewPayload({
   matchLevels = null,
   matchGameNumber = null,
   userNote = "",
+  userDisputes = [],
 }) {
   const summary = summarizeGameDivergences(coachAdviceTimeline, humanPlayerIndex);
   const gameId = gameSnapshot?.gameId ?? `game-${Date.now()}`;
@@ -26,6 +28,7 @@ export function buildGameReviewPayload({
     divergenceSummary: summary,
     coachAdviceTimeline,
     currentPosition: gameSnapshot,
+    userDisputes: userDisputes ?? [],
   };
 }
 
@@ -74,6 +77,11 @@ export function buildGameReviewFixMarkdown(payload) {
         "",
       );
     }
+  }
+
+  const disputes = payload.userDisputes ?? [];
+  if (disputes.length > 0) {
+    lines.push(...buildUserDisputesMarkdownSection(disputes), "");
   }
 
   lines.push(

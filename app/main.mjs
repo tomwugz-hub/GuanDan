@@ -17,6 +17,7 @@ import {
   summarizeGameDivergences,
   isHumanReplayRecord,
   DIVERGENCE_VERDICTS,
+  normalizeUserDispute,
   isJoker,
   isWildCard,
   isGameOver,
@@ -45,6 +46,7 @@ import {
   buildFeedbackFromSession,
   flushFeedbackQueue,
   submitCoachFeedback,
+  submitUserDispute,
 } from "./feedback-client.mjs";
 import {
   clearSafeBootMode,
@@ -60,7 +62,6 @@ import {
   withTimeout,
   RESTORE_TIMEOUT_MS,
 } from "./boot-guard.mjs";
-import { buildCoachFeedbackClipboardText } from "../coach/feedback-clipboard.mjs";
 import {
   buildPersistedSession,
   clearPersistedSessionDual,
@@ -1198,21 +1199,11 @@ function showCoachToast(text) {
   }, 1800);
 }
 
-async function copyFabFeedback(record) {
-  const text = buildCoachFeedbackClipboardText(record, aiChatTimeline, currentGameMeta);
-  try {
-    await navigator.clipboard.writeText(text);
-    showCoachToast("已复制，贴到 Cursor 对话即可");
-  } catch {
-    showCoachToast("复制失败，请手动选中文字复制");
-  }
-}
-
 async function saveFabFeedback(record) {
   const result = await pushCoachFeedbackForQuestion(record.question, record);
   showCoachToast(result.online
     ? "反馈已保存，会用于改进教练"
-    : "已暂存本机，启动 cmd 后自动同步");
+    : "已暂存本机，下次启动后会自动同步");
 }
 
 function renderFabChatLog() {
@@ -1244,19 +1235,13 @@ function renderFabChatLog() {
     const actions = document.createElement("div");
     actions.className = "coach-fab-entry-actions";
 
-    const copyBtn = document.createElement("button");
-    copyBtn.className = "btn";
-    copyBtn.type = "button";
-    copyBtn.textContent = "复制发给 Cursor";
-    copyBtn.addEventListener("click", () => copyFabFeedback(item));
-
     const saveBtn = document.createElement("button");
     saveBtn.className = "btn";
     saveBtn.type = "button";
     saveBtn.textContent = "保存这条反馈";
     saveBtn.addEventListener("click", () => saveFabFeedback(item));
 
-    actions.append(copyBtn, saveBtn);
+    actions.append(saveBtn);
     entry.append(question, answer, actions);
     elements.coachFabLog.append(entry);
   }
@@ -1354,8 +1339,26 @@ function hideSavedDivergenceDetail() {
   }
 }
 
+function divergenceItemForTurn(turnNumber) {
+  const summary = currentDivergenceSummary();
+  return summary.divergences.find((item) => item.turnNumber === turnNumber) ?? null;
+}
+
+function findUserDispute(turnNumber) {
+  return (currentGameMeta?.userDisputes ?? []).find((item) => item.turnNumber === turnNumber) ?? null;
+}
+
+function disputeAckMessage() {
+  return "已记录你的意见";
+}
+
+/** 仅「教练更对」可提交异议 */
+function canDisputeVerdict(verdict) {
+  return verdict === DIVERGENCE_VERDICTS.COACH_BETTER;
+}
+
 /** 将推荐对比面板渲染到指定容器（本局或历史复盘共用） */
-function renderDivergenceDetailInto(container, record, turnNumber, onClose) {
+function renderDivergenceDetailInto(container, record, turnNumber, onClose, { divergenceItem = null } = {}) {
   if (!record || !container) return;
   container.hidden = false;
   container.replaceChildren();
@@ -1400,6 +1403,42 @@ function renderDivergenceDetailInto(container, record, turnNumber, onClose) {
     actual.innerHTML += `<br><span class="muted">${escapeHtml(matchNote)}</span>`;
   }
   container.append(actual);
+
+  const divItem = divergenceItem ?? divergenceItemForTurn(turnNumber);
+  if (divItem && canDisputeVerdict(divItem.verdict)) {
+    const disputeWrap = document.createElement("div");
+    disputeWrap.className = "divergence-dispute";
+    const existing = findUserDispute(turnNumber);
+    if (existing) {
+      disputeWrap.innerHTML = `
+        <p class="dispute-title"><strong>你的意见</strong> <span class="dispute-recorded">已记录</span></p>
+        <p class="dispute-rationale">${escapeHtml(existing.userRationale)}</p>
+      `;
+    } else {
+      const label = document.createElement("label");
+      label.className = "dispute-title";
+      label.htmlFor = `dispute-rationale-${turnNumber}`;
+      label.innerHTML = "<strong>我有异议</strong>";
+      const textarea = document.createElement("textarea");
+      textarea.id = `dispute-rationale-${turnNumber}`;
+      textarea.className = "dispute-rationale-input";
+      textarea.rows = 2;
+      textarea.placeholder = "例如：这手应该先保顺子…";
+      const actions = document.createElement("div");
+      actions.className = "dispute-actions";
+      const submitBtn = document.createElement("button");
+      submitBtn.type = "button";
+      submitBtn.className = "dispute-submit-btn";
+      submitBtn.dataset.disputeTurn = String(turnNumber);
+      submitBtn.textContent = "提交";
+      const ack = document.createElement("p");
+      ack.className = "muted dispute-ack";
+      ack.hidden = true;
+      actions.append(submitBtn);
+      disputeWrap.append(label, textarea, actions, ack);
+    }
+    container.append(disputeWrap);
+  }
 }
 
 function showDivergenceDetail(turnNumber) {
@@ -1408,7 +1447,13 @@ function showDivergenceDetail(turnNumber) {
   selectedDivergenceTurn = turnNumber;
   hideSavedDivergenceDetail();
   scrollToHistoryHand(turnNumber);
-  renderDivergenceDetailInto(elements.divergenceDetail, record, turnNumber, hideDivergenceDetail);
+  renderDivergenceDetailInto(
+    elements.divergenceDetail,
+    record,
+    turnNumber,
+    hideDivergenceDetail,
+    { divergenceItem: divergenceItemForTurn(turnNumber) },
+  );
   elements.divergenceDetail.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -1623,7 +1668,7 @@ async function askAiCoach() {
   if (elements.aiStatus) {
     elements.aiStatus.textContent = result.online
       ? "已记录你的反馈，感谢补充。"
-      : `已暂存 ${result.pending ?? 1} 条反馈。请用「点我启动掼蛋教练Pro.cmd」联网同步。`;
+      : "已暂存到本机，下次启动后会自动同步。";
   }
 
   if (elements.aiQuestion) elements.aiQuestion.value = "";
@@ -1840,6 +1885,7 @@ function applyRestoredSession(data) {
   }
   currentGameMeta = data.currentGameMeta ?? null;
   if (currentGameMeta) {
+    currentGameMeta.userDisputes = currentGameMeta.userDisputes ?? [];
     currentGameMeta.reportTenReminded = currentGameMeta.reportTenReminded ?? false;
     currentGameMeta.reportOneReminded = currentGameMeta.reportOneReminded ?? false;
     currentGameMeta.keyPauseFired = currentGameMeta.keyPauseFired ?? [];
@@ -1957,6 +2003,7 @@ function prepareGame(game, seed, extraMeta = {}) {
     partnerIndex: (HUMAN_INDEX + 2) % PLAYER_NAMES.length,
     ...extraMeta,
     coachAdviceTimeline: [],
+    userDisputes: [],
     fabQaCount: 0,
     gameReviewSubmitted: false,
     reportTenReminded: false,
@@ -2209,13 +2256,70 @@ function renderDivergenceListHtml(items) {
   }
   let html = "<ul class=\"divergence-list\">";
   for (const item of items) {
+    const disputed = findUserDispute(item.turnNumber);
+    const disputeBtn = canDisputeVerdict(item.verdict)
+      ? (disputed
+        ? "<span class=\"dispute-recorded\">已记录</span>"
+        : `<button type="button" class="dispute-btn" data-dispute-turn="${item.turnNumber}">我有异议</button>`)
+      : "";
     html += `<li class="divergence-item" data-hand-index="${item.turnNumber}" role="button" tabindex="0" title="点击查看推荐对比">`
       + `${verdictBadgeHtml(item.verdict, item.verdictLabel)}第${item.turnNumber}手：`
       + `${escapeHtml(item.recommended)} → ${escapeHtml(item.actual)}`
-      + `${item.verdictNote ? `<br><span class="muted">${escapeHtml(item.verdictNote)}</span>` : ""}</li>`;
+      + `${item.verdictNote ? `<br><span class="muted">${escapeHtml(item.verdictNote)}</span>` : ""}`
+      + `${disputeBtn ? `<span class="divergence-dispute-inline">${disputeBtn}</span>` : ""}</li>`;
   }
   html += "</ul>";
   return html;
+}
+
+async function submitUserDisputeFromUI(turnNumber) {
+  if (!currentGameMeta || !state) return;
+  const textarea = document.querySelector(`#dispute-rationale-${turnNumber}`);
+  const rationale = textarea?.value?.trim() ?? "";
+  if (!rationale) {
+    message = "请先写一句说明。";
+    render({ immediate: true });
+    return;
+  }
+  if (findUserDispute(turnNumber)) {
+    message = "这手已经记录过意见了。";
+    render({ immediate: true });
+    return;
+  }
+  const divItem = divergenceItemForTurn(turnNumber);
+  const dispute = normalizeUserDispute({
+    turnNumber,
+    originalAdjudication: divItem?.verdictLabel ?? divItem?.adjudication ?? "unknown",
+    verdict: divItem?.verdict ?? null,
+    verdictLabel: divItem?.verdictLabel ?? null,
+    userRationale: rationale,
+    gameId: currentGameMeta.gameId,
+  });
+  if (!dispute) return;
+
+  if (!currentGameMeta.userDisputes) currentGameMeta.userDisputes = [];
+  currentGameMeta.userDisputes.push(dispute);
+
+  const submitBtn = document.querySelector(`.dispute-submit-btn[data-dispute-turn="${turnNumber}"]`);
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "提交中…";
+  }
+
+  try {
+    await submitUserDispute({
+      ...dispute,
+      feedbackId: currentGameMeta.gameId,
+      levelRank: state.levelRank,
+    });
+    showCoachToast(disputeAckMessage());
+  } catch (error) {
+    console.warn("异议暂存本机", error);
+    showCoachToast(disputeAckMessage());
+  }
+
+  renderGameReviewPanel();
+  showDivergenceDetail(turnNumber);
 }
 
 function openSubmitReminderDialog(nextAction) {
@@ -2382,11 +2486,11 @@ async function probeAiBridgeStatus() {
       }
     }
     if (aiBridgeOnline) {
-      elements.aiStatus.textContent = "局末自动保存复盘并升级左侧推荐，你只管打牌。";
+      elements.aiStatus.textContent = "专注打牌即可，局末会自动记录复盘。";
     }
   } catch {
     aiBridgeOnline = false;
-    elements.aiStatus.textContent = "请用「点我启动掼蛋教练Pro.cmd」启动；刷新后会自动恢复对局进度。";
+    elements.aiStatus.textContent = "请用「点我启动掼蛋教练Pro.cmd」启动游戏；刷新后会自动恢复对局进度。";
   }
 }
 
@@ -2477,12 +2581,12 @@ async function saveTrainingSample() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `save failed: ${response.status}`);
-    message = `训练样本已保存：${data.latestPath || "training-samples/coach-training-latest.json"}`;
+    message = "样本已保存。";
     aiBridgeOnline = true;
   } catch (error) {
     elements.exportOutput.value = text;
     elements.exportPanel.hidden = false;
-    message = `训练采集服务未启动。请用「点我启动掼蛋教练Pro.cmd」，或执行 node tools/ai-coach-server.mjs。已把样本放到导出区。详情：${error.message || error}`;
+    message = "请先运行「点我启动掼蛋教练Pro.cmd」再保存样本；已把内容放到导出区。";
   }
   render();
 }
@@ -4079,7 +4183,7 @@ function renderImproveCards(summary) {
 const ONBOARDING_STEPS = [
   { step: 1, target: () => elements.newGame, text: "第一步：点「新开一局」发牌开始练习。" },
   { step: 2, target: () => elements.playRecommended, text: "第二步：轮到你时点「提示」，先看推荐牌和理由。" },
-  { step: 3, target: () => elements.improveCards?.hidden ? elements.submitGameReview : elements.improveCards, text: "第三步：局末自动保存复盘；若已启用 Cursor Automation，策略会自动升级（见 docs/COACH-TRAINING-LOOP.md）。" },
+  { step: 3, target: () => elements.improveCards?.hidden ? elements.submitGameReview : elements.improveCards, text: "第三步：打完一局后，右侧会自动记录复盘，教练会持续优化推荐。" },
 ];
 
 function onboardingDone() {
@@ -4199,7 +4303,7 @@ const FIRST_TIP_ITEMS = [
   { id: "coachFab", text: "点「问教练」可向本机规则引擎提问，与左侧推荐一致。" },
   { id: "rules", text: "「规则」可随时查看牌型、贡牌等速查说明。" },
   { id: "drill", text: "「专项练习」针对弱项开一局，教练会标【专项】提示。" },
-  { id: "saveReview", text: "局末自动保存复盘并升级推荐，你只管打牌。" },
+  { id: "saveReview", text: "打完一局后，复盘会自动保存，教练会持续优化推荐。" },
 ];
 
 function readFirstTipsState() {
@@ -4319,7 +4423,7 @@ function renderAdvice({ computeAdvice = true } = {}) {
     <h3>差异统计</h3>
     <p>已记 <strong>${divSummary.totalHands}</strong> 手，<strong>${divSummary.divergenceCount}</strong> 处与你出牌和推荐1不同。</p>
     ${formatVerdictStats(divSummary)}
-    <p class="muted">局末自动保存复盘并升级推荐，无需手动操作。</p>
+    <p class="muted">专注打牌即可，局末会自动记录复盘。</p>
   `;
   elements.advice.append(autoBox);
 
@@ -4425,7 +4529,7 @@ function renderGameReviewPanel() {
   renderImproveCards(summary);
 
   if (!state) {
-    elements.gameReviewSummary.innerHTML = "<p>开局后自动对比，局末自动保存复盘并升级推荐。</p>";
+    elements.gameReviewSummary.innerHTML = "<p>开局后自动对比你的出牌与推荐，局末自动记录。</p>";
     if (elements.submitGameReview) elements.submitGameReview.disabled = true;
     return;
   }
@@ -4434,16 +4538,20 @@ function renderGameReviewPanel() {
   html += formatVerdictStats(summary, { interactive: true, activeFilter: divergenceVerdictFilter });
   if (summary.divergenceCount > 0) {
     html += renderDivergenceListHtml(divergencesByVerdict(summary, divergenceVerdictFilter));
+    const disputeCount = (currentGameMeta?.userDisputes ?? []).length;
+    if (disputeCount > 0) {
+      html += `<p class="muted">已记录 <strong>${disputeCount}</strong> 条你的意见。</p>`;
+    }
   } else if (summary.totalHands > 0) {
     html += "<p class=\"muted\">你与推荐1完全一致，继续保持。</p>";
   }
 
   if (submitted) {
-    html += "<p><strong>复盘已保存</strong>，已入队待升级。下次在 Cursor 随便发一句话，策略会自动改好；改完 <kbd>Ctrl+F5</kbd> 刷新本页。</p>";
+    html += "<p><strong>本局已记录</strong>，教练会根据你的打法持续优化。</p>";
   } else if (gameOver) {
-    html += "<p><strong>正在自动保存复盘</strong>，保存后入队；开 Cursor 对话即自动升级策略。</p>";
+    html += "<p class=\"muted\">正在保存本局记录…</p>";
   } else {
-    html += "<p>局末将自动保存复盘并入队；下次开 Cursor 对话时自动升级推荐。</p>";
+    html += "<p class=\"muted\">打完本局后会自动记录复盘。</p>";
   }
 
   elements.gameReviewSummary.innerHTML = html;
@@ -4493,6 +4601,7 @@ async function submitGameReview() {
       matchLevels: matchState?.levels ?? null,
       matchGameNumber: matchState?.gameNumber ?? null,
       userNote,
+      userDisputes: currentGameMeta.userDisputes ?? [],
     });
 
     await yieldToMainThread();
@@ -4524,8 +4633,8 @@ async function submitGameReview() {
 
     if (elements.aiStatus) {
       elements.aiStatus.textContent = result.online
-        ? `复盘已保存（${payload.divergenceSummary.divergenceCount} 处差异），已入队。下次开 Cursor 对话会自动升级策略。`
-        : "复盘已暂存到本机。请用「点我启动掼蛋教练Pro.cmd」启动采集服务后重试。";
+        ? "本局已记录，教练会根据你的打法持续优化。"
+        : "本局已暂存到本机，下次启动后会自动同步。";
     }
     if (elements.aiQuestion) elements.aiQuestion.value = "";
     advanceOnboarding(3);
@@ -4975,8 +5084,26 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const disputeSubmitBtn = event.target.closest(".dispute-submit-btn[data-dispute-turn]");
+  if (disputeSubmitBtn) {
+    event.preventDefault();
+    event.stopPropagation();
+    submitUserDisputeFromUI(Number(disputeSubmitBtn.dataset.disputeTurn));
+    return;
+  }
+
+  const disputeBtn = event.target.closest(".dispute-btn[data-dispute-turn]");
+  if (disputeBtn) {
+    event.preventDefault();
+    event.stopPropagation();
+    showDivergenceDetail(Number(disputeBtn.dataset.disputeTurn));
+    const textarea = document.querySelector(`#dispute-rationale-${disputeBtn.dataset.disputeTurn}`);
+    textarea?.focus();
+    return;
+  }
+
   const divergenceItem = event.target.closest(".divergence-item[data-hand-index]");
-  if (divergenceItem) {
+  if (divergenceItem && !event.target.closest(".dispute-btn, .dispute-submit-btn")) {
     event.preventDefault();
     showDivergenceDetail(Number(divergenceItem.dataset.handIndex));
     return;
