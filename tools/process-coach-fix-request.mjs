@@ -12,6 +12,10 @@ import {
   reAdjudicateDispute,
 } from "../coach/user-dispute.mjs";
 import {
+  INSIGHT_VERDICTS,
+  parseGameInsightsFromMarkdown,
+} from "../coach/in-play-insight.mjs";
+import {
   commitAndPushCoachFix,
   loadDotEnv,
 } from "./lib/notify-coach-automation.mjs";
@@ -201,8 +205,10 @@ async function main() {
   const coachBetter = divergences.filter((item) => item.verdict.includes("教练更对"));
   const styleOnly = divergences.filter((item) => item.verdict.includes("风格差异"));
   const userDisputes = parseUserDisputesFromMarkdown(markdown);
+  const gameInsights = parseGameInsightsFromMarkdown(markdown);
+  const adoptedInsights = gameInsights.filter((i) => i.verdict === INSIGHT_VERDICTS.ADOPTED);
   await appendUserDisputesLog(userDisputes, fm.feedbackId);
-  await logLine(`用户申诉 ${userDisputes.length} 条，重审候选 ${userDisputes.filter((d) => d.upgradeCandidate).length} 条`);
+  await logLine(`用户申诉 ${userDisputes.length} 条，重审候选 ${userDisputes.filter((d) => d.upgradeCandidate).length} 条；打牌中意见 ${gameInsights.length} 条（采纳 ${adoptedInsights.length}）`);
 
   const levelRank = levelRankFromMarkdown(markdown);
   const divergenceByTurn = Object.fromEntries(divergences.map((item) => [item.turnNumber, item]));
@@ -215,6 +221,7 @@ async function main() {
         recommended: detail?.recommended,
         actual: detail?.actual,
         levelRank,
+        gameInsights,
       });
       let verdict = "用户申诉→待重审";
       if (readj?.verdict === "user-better") verdict = "用户申诉→你更对";
@@ -235,6 +242,19 @@ async function main() {
     if (toFixKeys.has(key)) continue;
     toFixKeys.add(key);
     toFix.push(item);
+  }
+
+  for (const insight of adoptedInsights) {
+    if (toFixKeys.has(insight.turnNumber)) continue;
+    toFixKeys.add(insight.turnNumber);
+    toFix.push({
+      turnNumber: insight.turnNumber,
+      verdict: "打牌中意见→你更对",
+      fromInsight: true,
+      userRationale: insight.question,
+      recommended: divergenceByTurn[insight.turnNumber]?.recommended ?? insight.top1Label ?? "",
+      actual: divergenceByTurn[insight.turnNumber]?.actual ?? "",
+    });
   }
 
   if (toFix.length > 0 && process.env.GUANDAN_LOCAL_AGENT !== "0") {

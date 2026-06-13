@@ -33,6 +33,11 @@ import {
   fixResistTributeStarter,
   tryLocalCoachAnswer,
   appendRuleEngineAnswerFooter,
+  analyzeInPlayInsight,
+  formatInPlayInsightReply,
+  normalizeGameInsight,
+  INSIGHT_VERDICTS,
+  INSIGHT_STATUS_LABELS,
   createCard,
   filterReasonsForUser,
   firstReasonForUser,
@@ -296,6 +301,7 @@ const elements = {
   coachFabClose: document.querySelector("#coachFabClose"),
   coachFabQuestion: document.querySelector("#coachFabQuestion"),
   coachFabSend: document.querySelector("#coachFabSend"),
+  coachFabObjection: document.querySelector("#coachFabObjection"),
   coachFabLog: document.querySelector("#coachFabLog"),
   coachFabLimit: document.querySelector("#coachFabLimit"),
   coachToast: document.querySelector("#coachToast"),
@@ -1284,6 +1290,73 @@ function toggleCoachFab() {
   setCoachFabOpen(!coachFabOpen);
 }
 
+function submitInPlayInsight(question) {
+  const text = String(question ?? "").trim();
+  if (!text) {
+    showCoachToast("先写一句意见，再提交");
+    return;
+  }
+  if (!state || !currentGameMeta || isGameOver(state)) {
+    showCoachToast("请先开局并在轮到你时反馈");
+    return;
+  }
+  if (state.currentPlayerIndex !== HUMAN_INDEX) {
+    showCoachToast("轮到你出牌时再提意见");
+    return;
+  }
+
+  const context = buildAiCoachContext(text);
+  const { analysis, verdict } = analyzeInPlayInsight(text, context);
+  const top1 = currentAdvice ? adviceChoices(currentAdvice)[0] : null;
+  const insight = normalizeGameInsight({
+    turnNumber: state.turnNumber,
+    question: text,
+    analysis,
+    verdict,
+    top1Label: top1?.candidate?.label ?? null,
+    userNote: text,
+  });
+  if (!insight) return;
+
+  if (!currentGameMeta.gameInsights) currentGameMeta.gameInsights = [];
+  currentGameMeta.gameInsights.push(insight);
+
+  const reply = formatInPlayInsightReply(analysis, verdict);
+  showCoachToast(reply);
+
+  const record = {
+    id: `insight-${Date.now()}`,
+    createdAt: insight.createdAt,
+    source: "in-play-insight",
+    model: "rule-engine",
+    question: text,
+    context,
+    answer: reply,
+    answerSource: "in-play-insight",
+    insightVerdict: verdict,
+    error: null,
+  };
+  appendAiChatRecord(record);
+  renderFabChatLog();
+  renderAdvice();
+  renderGameReviewPanel();
+  schedulePersistSession();
+}
+
+function askFabCoachObjection() {
+  const question = elements.coachFabQuestion?.value.trim() ?? "";
+  if (!question) {
+    if (elements.coachFabQuestion) {
+      elements.coachFabQuestion.placeholder = "例如：不应拆对组同花顺";
+      elements.coachFabQuestion.focus();
+    }
+    showCoachToast("写一句意见，再点「这手不合理」");
+    return;
+  }
+  submitInPlayInsight(question);
+  if (elements.coachFabQuestion) elements.coachFabQuestion.value = "";
+}
+
 function askFabCoach() {
   const question = elements.coachFabQuestion?.value.trim() ?? "";
   if (!question) {
@@ -1883,6 +1956,7 @@ function applyRestoredSession(data) {
   currentGameMeta = data.currentGameMeta ?? null;
   if (currentGameMeta) {
     currentGameMeta.userDisputes = currentGameMeta.userDisputes ?? [];
+    currentGameMeta.gameInsights = currentGameMeta.gameInsights ?? [];
     currentGameMeta.reportTenReminded = currentGameMeta.reportTenReminded ?? false;
     currentGameMeta.reportOneReminded = currentGameMeta.reportOneReminded ?? false;
     currentGameMeta.keyPauseFired = currentGameMeta.keyPauseFired ?? [];
@@ -2001,6 +2075,7 @@ function prepareGame(game, seed, extraMeta = {}) {
     ...extraMeta,
     coachAdviceTimeline: [],
     userDisputes: [],
+    gameInsights: [],
     fabQaCount: 0,
     gameReviewSubmitted: false,
     reportTenReminded: false,
@@ -4525,6 +4600,61 @@ function renderAdvice({ computeAdvice = true } = {}) {
     choiceList.append(renderChoiceCard(choices[index], index));
   }
   recommendation.append(choiceList);
+
+  const insightWrap = document.createElement("div");
+  insightWrap.className = "in-play-insight";
+  const insightBtn = document.createElement("button");
+  insightBtn.type = "button";
+  insightBtn.className = "btn insight-objection-btn";
+  insightBtn.id = "insightObjectionBtn";
+  insightBtn.textContent = "这手不合理";
+  insightBtn.title = "对当前推荐提一句意见，教练会即时回复";
+  insightBtn.addEventListener("click", () => {
+    const existing = insightWrap.querySelector(".insight-objection-form");
+    if (existing) {
+      existing.hidden = !existing.hidden;
+      if (!existing.hidden) existing.querySelector("textarea")?.focus();
+      return;
+    }
+    const form = document.createElement("div");
+    form.className = "insight-objection-form";
+    const label = document.createElement("label");
+    label.htmlFor = "insightObjectionInput";
+    label.textContent = "你觉得哪里不合理？";
+    const textarea = document.createElement("textarea");
+    textarea.id = "insightObjectionInput";
+    textarea.rows = 2;
+    textarea.placeholder = "例如：不应拆对组同花顺";
+    const actions = document.createElement("div");
+    actions.className = "insight-objection-actions";
+    const sendBtn = document.createElement("button");
+    sendBtn.type = "button";
+    sendBtn.className = "btn primary";
+    sendBtn.textContent = "发送";
+    sendBtn.addEventListener("click", () => {
+      submitInPlayInsight(textarea.value);
+      textarea.value = "";
+      form.hidden = true;
+    });
+    actions.append(sendBtn);
+    form.append(label, textarea, actions);
+    insightWrap.append(form);
+    textarea.focus();
+  });
+  insightWrap.append(insightBtn);
+
+  const turnInsights = (currentGameMeta?.gameInsights ?? []).filter(
+    (item) => item.turnNumber === state.turnNumber,
+  );
+  if (turnInsights.length > 0) {
+    const latest = turnInsights[turnInsights.length - 1];
+    const note = document.createElement("p");
+    note.className = "insight-latest-reply muted";
+    note.textContent = formatInPlayInsightReply(latest.analysis, latest.verdict);
+    insightWrap.append(note);
+  }
+
+  recommendation.append(insightWrap);
   elements.advice.append(recommendation);
 }
 
@@ -4552,6 +4682,32 @@ function renderGameReviewPanel() {
     }
   } else if (summary.totalHands > 0) {
     html += "<p class=\"muted\">你与推荐1完全一致，继续保持。</p>";
+  }
+
+  const insights = currentGameMeta?.gameInsights ?? [];
+  const adoptedInsights = insights.filter((i) => i.verdict === INSIGHT_VERDICTS.ADOPTED);
+  const recordedInsights = insights.filter((i) => i.verdict === INSIGHT_VERDICTS.RECORDED);
+  const reviewInsights = insights.filter(
+    (i) => i.verdict === INSIGHT_VERDICTS.ADOPTED || i.verdict === INSIGHT_VERDICTS.RECORDED,
+  );
+  if (reviewInsights.length > 0) {
+    html += "<div class=\"game-insights-block\">";
+    html += "<h4>本局你的意见</h4>";
+    html += `<p>已采纳优化 <strong>${adoptedInsights.length}</strong> 条 / 已记录待观察 <strong>${recordedInsights.length}</strong> 条</p>`;
+    html += "<ul class=\"game-insights-list\">";
+    for (const item of reviewInsights) {
+      const status = INSIGHT_STATUS_LABELS[item.verdict] ?? item.verdict;
+      const summaryText = item.analysis?.length > 48
+        ? `${item.analysis.slice(0, 48)}…`
+        : (item.analysis || "—");
+      html += `<li class="game-insight-item insight-${item.verdict}">`
+        + `<span class="insight-turn">第${item.turnNumber}手</span> `
+        + `<span class="insight-user">${escapeHtml(item.question)}</span> `
+        + `<span class="insight-reply muted">${escapeHtml(summaryText)}</span> `
+        + `<span class="insight-status">${escapeHtml(status)}</span>`
+        + "</li>";
+    }
+    html += "</ul></div>";
   }
 
   if (submitted) {
@@ -4610,6 +4766,7 @@ async function submitGameReview() {
       matchGameNumber: matchState?.gameNumber ?? null,
       userNote,
       userDisputes: currentGameMeta.userDisputes ?? [],
+      gameInsights: currentGameMeta.gameInsights ?? [],
     });
 
     await yieldToMainThread();
@@ -5221,6 +5378,7 @@ function bindPrimaryActions() {
     ["coachFab", toggleCoachFab],
     ["coachFabClose", () => setCoachFabOpen(false)],
     ["coachFabSend", askFabCoach],
+    ["coachFabObjection", askFabCoachObjection],
     ["rulesBtn", toggleRulesDrawer],
     ["rulesClose", () => setRulesDrawerOpen(false)],
     ["openDrillPanel", openDrillPracticePanel],

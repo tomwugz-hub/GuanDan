@@ -2164,12 +2164,13 @@
 
       .coach-fab-input-row {
         display: flex;
+        flex-wrap: wrap;
         gap: 8px;
         align-items: stretch;
       }
 
       .coach-fab-input-row textarea {
-        flex: 1;
+        flex: 1 1 100%;
         min-height: 52px;
         resize: vertical;
         border: 1px solid var(--line);
@@ -2183,6 +2184,85 @@
         align-self: flex-end;
         min-height: 36px;
         padding: 0 12px;
+      }
+
+      .in-play-insight {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px dashed var(--line);
+      }
+
+      .insight-objection-btn {
+        font-size: 13px;
+      }
+
+      .insight-objection-form textarea {
+        width: 100%;
+        margin: 6px 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px;
+        font: inherit;
+        font-size: 13px;
+        resize: vertical;
+      }
+
+      .insight-objection-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      .insight-latest-reply {
+        margin: 8px 0 0;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      .game-insights-block {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel-soft);
+      }
+
+      .game-insights-block h4 {
+        margin: 0 0 6px;
+        font-size: 14px;
+      }
+
+      .game-insights-list {
+        margin: 8px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 8px;
+      }
+
+      .game-insight-item {
+        font-size: 13px;
+        line-height: 1.45;
+        padding: 8px;
+        border-radius: 6px;
+        background: #fff;
+        border: 1px solid var(--line);
+      }
+
+      .game-insight-item .insight-status {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: 700;
+        background: #eef6ff;
+        color: #1a5fb4;
+      }
+
+      .game-insight-item.insight-adopted .insight-status {
+        background: #e8f5e9;
+        color: #2e7d32;
       }
 
       .coach-fab-log {
@@ -3328,8 +3408,9 @@
               </div>
               <p class="coach-fab-limit" id="coachFabLimit"></p>
               <div class="coach-fab-input-row">
-                <textarea id="coachFabQuestion" rows="2" placeholder="例如：这手拆炸合适吗？逢人配怎么用？"></textarea>
+                <textarea id="coachFabQuestion" rows="2" placeholder="例如：这手拆炸合适吗？不应拆对组顺子？"></textarea>
                 <button class="btn primary" id="coachFabSend" type="button">发送</button>
+                <button class="btn" id="coachFabObjection" type="button" title="对当前推荐提意见">这手不合理</button>
               </div>
               <div class="coach-fab-log" id="coachFabLog">
                 <p class="coach-fab-hint">本机规则引擎直接作答，与左侧推荐一致。</p>

@@ -147,11 +147,38 @@ function isSmallProbePlay(play, levelRank = "2") {
   return false;
 }
 
+/** 将同手 adopted 意见并入申诉重审上下文（避免与 in-play-insight 循环依赖） */
+function disputeContextWithGameInsights(dispute, gameInsights = []) {
+  const related = (gameInsights ?? []).filter(
+    (item) => item.turnNumber === dispute?.turnNumber
+      && (item.verdict === "adopted" || item.verdict === "recorded"),
+  );
+  const adopted = related.filter((i) => i.verdict === "adopted");
+  if (!adopted.length) return { gameInsights: related };
+  return {
+    gameInsights: related,
+    insightAdopted: true,
+    insightRationale: adopted.map((i) => i.question).join("；"),
+    forceUpgrade: true,
+  };
+}
+
 /**
  * 结合用户申诉理由与差异手上下文，判断是否应推翻原「教练更对」裁决。
  * @returns {{ upgrade: boolean, verdict?: string, note?: string, coachQuestionable?: boolean } | null}
  */
 export function reAdjudicateDispute(dispute, context = {}) {
+  const insightCtx = disputeContextWithGameInsights(dispute, context.gameInsights);
+  if (insightCtx.forceUpgrade) {
+    return {
+      upgrade: true,
+      verdict: DIVERGENCE_VERDICTS.USER_BETTER,
+      note: `打牌中意见已采纳：${insightCtx.insightRationale ?? ""}`,
+      coachQuestionable: true,
+      fromGameInsight: true,
+    };
+  }
+
   if (!isDisputeUpgradeCandidate(dispute)) return null;
 
   const {
