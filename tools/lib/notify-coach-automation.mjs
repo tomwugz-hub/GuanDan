@@ -3,11 +3,17 @@ import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 
 /** 非交互 git：禁止终端弹窗索要凭据 */
-const GIT_ENV = {
+export const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: "0",
   GCM_INTERACTIVE: "Never",
 };
+
+/** 当前进程与子进程统一非交互 git 环境 */
+export function applyNonInteractiveGitEnv() {
+  process.env.GIT_TERMINAL_PROMPT = "0";
+  process.env.GCM_INTERACTIVE = "Never";
+}
 
 /** 读取项目根目录 .env（不覆盖已有环境变量） */
 export async function loadDotEnv(workspaceDir) {

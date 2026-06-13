@@ -59,6 +59,22 @@
 
 **默认本地处理器开启**，打完一局即自动升级，**不必开 Chat**。
 
+## Cursor IDE 沙箱 Allow（仅开发者须知）
+
+在 **Cursor Chat / Agent** 里改代码时，IDE 可能弹出 **Allow**（沙箱权限）——这是 Cursor 编辑器行为，**无法从本仓库关闭或绕过**。
+
+游戏与训练闭环**不依赖** Chat / Allow：
+
+| 路径 | 是否需要 Allow |
+|------|----------------|
+| 打牌 → 局末自动复盘 | 否 |
+| `8787` → detached `process-coach-fix-request.mjs` | 否（不经 IDE 沙箱） |
+| Automation Webhook / cron | 否 |
+| `GUANDAN_AUTO_GIT_PUSH=1` 非交互 push | 否 |
+| 仅在 Chat 里手动让 Agent 改代码 | 可能（IDE 弹窗） |
+
+用户侧只需 **Ctrl+F5** 刷新游戏页；开发者偶尔 `git pull` 即可。
+
 ## 你只需做什么
 
 | 目标 | 操作 |

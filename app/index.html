@@ -2755,39 +2755,6 @@
         50% { box-shadow: 0 0 0 6px rgba(47, 143, 106, 0); }
       }
 
-      .submit-reminder-dialog {
-        width: min(420px, calc(100vw - 32px));
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        padding: 0;
-        box-shadow: var(--shadow);
-      }
-
-      .submit-reminder-dialog::backdrop {
-        background: rgba(24, 34, 42, 0.42);
-      }
-
-      .submit-reminder-inner {
-        padding: 16px 16px 14px;
-      }
-
-      .submit-reminder-inner h3 {
-        margin: 0 0 8px;
-        font-size: 16px;
-      }
-
-      .submit-reminder-inner p {
-        margin: 0 0 12px;
-        color: var(--muted);
-        font-size: 13px;
-        line-height: 1.5;
-      }
-
-      .submit-reminder-actions {
-        display: grid;
-        gap: 8px;
-      }
-
       .advice-auto .muted {
         color: var(--muted);
         font-size: 12px;
@@ -3541,18 +3508,6 @@
         </section>
       </div>
     </aside>
-
-    <dialog id="submitReminderDialog" class="submit-reminder-dialog">
-      <div class="submit-reminder-inner">
-        <h3>还没保存这局复盘</h3>
-        <p id="submitReminderText">记录这局复盘？这样下次可以对比进步。</p>
-        <div class="submit-reminder-actions">
-          <button class="btn primary" id="submitAndNext" type="button">保存复盘并下一局</button>
-          <button class="btn" id="skipSubmitNext" type="button">跳过，直接下一局</button>
-          <button class="btn" id="cancelSubmitNext" type="button">取消</button>
-        </div>
-      </div>
-    </dialog>
     
     <script type="module" src="./main.mjs"></script>
   </body>

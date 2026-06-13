@@ -3202,5 +3202,9 @@ assert(
   /coachFabBackdrop/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
   "main.mjs 应绑定 coachFabBackdrop 遮罩点击收起",
 );
+assert(
+  !/submitReminderDialog|submit-reminder-dialog/.test(indexHtml),
+  "游戏 UI 不应含保存复盘确认弹窗（局末自动保存）",
+);
 
 console.log("掼蛋教练 Pro：全部冒烟测试通过");

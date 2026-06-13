@@ -187,7 +187,6 @@ let keyPauseEnabled = safeGetItem(KEY_PAUSE_STORAGE, "1") !== "0";
 /** 当前展示的关键时刻暂停 overlay；null 表示未展示 */
 let keyPauseOverlay = null;
 let autoGameRunning = false;
-let pendingAfterSubmitAction = null;
 let feedbackSubmitCount = 0;
 let persistSessionTimer = null;
 let hintShown = false;
@@ -285,11 +284,6 @@ const elements = {
   aiChatLog: document.querySelector("#aiChatLog"),
   aiPanel: document.querySelector("#aiPanel"),
   message: document.querySelector("#message"),
-  submitReminderDialog: document.querySelector("#submitReminderDialog"),
-  submitReminderText: document.querySelector("#submitReminderText"),
-  submitAndNext: document.querySelector("#submitAndNext"),
-  skipSubmitNext: document.querySelector("#skipSubmitNext"),
-  cancelSubmitNext: document.querySelector("#cancelSubmitNext"),
   onboardingOverlay: document.querySelector("#onboardingOverlay"),
   onboardingRing: document.querySelector("#onboardingRing"),
   onboardingText: document.querySelector("#onboardingText"),
@@ -2148,7 +2142,7 @@ function resetActivePlayQueues() {
   robotQueueActive = false;
 }
 
-function newGame(extraMeta = {}) {
+async function newGame(extraMeta = {}) {
   clearTimeout(persistSessionTimer);
   persistSessionTimer = null;
   resetActivePlayQueues();
@@ -2156,6 +2150,8 @@ function newGame(extraMeta = {}) {
   currentAdvice = null;
   selectedDivergenceTurn = null;
   keyPauseOverlay = null;
+
+  await ensureGameReviewSaved();
 
   try {
     hideDivergenceDetail();
@@ -2245,7 +2241,8 @@ function newGame(extraMeta = {}) {
   }
 }
 
-function newCompetitiveMatch() {
+async function newCompetitiveMatch() {
+  await ensureGameReviewSaved();
   archiveCurrentGame(state && isGameOver(state) ? "complete" : "interrupted");
   const seed = Date.now() % 2147483647;
   matchState = createCompetitiveMatch({
@@ -2285,6 +2282,16 @@ function scheduleAutoGameReview() {
     autoGameReviewTimer = null;
     void submitGameReview();
   }, 600);
+}
+
+/** 新开一局/竞技赛前确保局末复盘已静默保存，无需确认弹窗 */
+async function ensureGameReviewSaved() {
+  if (!needsSubmitReminder()) return;
+  if (autoGameReviewTimer !== null) {
+    window.clearTimeout(autoGameReviewTimer);
+    autoGameReviewTimer = null;
+  }
+  await submitGameReview();
 }
 
 function onGameOverDetected() {
@@ -2405,22 +2412,6 @@ async function submitUserDisputeFromUI(turnNumber) {
   showDivergenceDetail(turnNumber);
 }
 
-function openSubmitReminderDialog(nextAction) {
-  const summary = currentDivergenceSummary();
-  pendingAfterSubmitAction = nextAction;
-  if (elements.submitReminderText) {
-    elements.submitReminderText.textContent = summary.divergenceCount > 0
-      ? `本局共 ${summary.totalHands} 手，有 ${summary.divergenceCount} 处与推荐不同。记录这局复盘？这样下次可以对比进步。`
-      : "记录这局复盘？这样下次可以对比进步。";
-  }
-  elements.submitReminderDialog?.showModal();
-}
-
-function closeSubmitReminderDialog() {
-  elements.submitReminderDialog?.close();
-  pendingAfterSubmitAction = null;
-}
-
 function proceedNextCompetitiveGame() {
   if (!matchState || matchState.complete || !state || !isGameOver(state)) return;
   settleCompetitiveGameIfNeeded();
@@ -2444,27 +2435,8 @@ function proceedNextCompetitiveGame() {
 
 async function nextCompetitiveGame() {
   if (!matchState || matchState.complete || !state || !isGameOver(state)) return;
-  if (needsSubmitReminder()) {
-    await submitGameReview();
-  }
+  await ensureGameReviewSaved();
   proceedNextCompetitiveGame();
-}
-
-async function submitAndContinueNext() {
-  const action = pendingAfterSubmitAction;
-  closeSubmitReminderDialog();
-  await submitGameReview();
-  if (action === "next" && currentGameMeta?.gameReviewSubmitted) {
-    proceedNextCompetitiveGame();
-  }
-}
-
-function skipSubmitAndContinueNext() {
-  const action = pendingAfterSubmitAction;
-  closeSubmitReminderDialog();
-  message = "已跳过保存复盘，本局差异未记录。";
-  if (action === "next") proceedNextCompetitiveGame();
-  else render();
 }
 
 function exportLog() {
@@ -5390,7 +5362,7 @@ function bindPrimaryActions() {
     node.addEventListener("click", (event) => {
       event.preventDefault();
       if (node.disabled) return;
-      handler();
+      void Promise.resolve(handler()).catch((error) => console.error(error));
     });
   }
   if (elements.importReplayBtn && elements.importReplayBtn.dataset.bound !== "1") {
@@ -5423,9 +5395,6 @@ function bindPrimaryActions() {
     elements.rulesBackdrop.addEventListener("click", () => setRulesDrawerOpen(false));
   }
   const dialogActions = [
-    [elements.submitAndNext, submitAndContinueNext],
-    [elements.skipSubmitNext, skipSubmitAndContinueNext],
-    [elements.cancelSubmitNext, closeSubmitReminderDialog],
     [elements.onboardingSkip, skipOnboarding],
     [elements.firstTipDismiss, dismissCurrentFirstTip],
     [elements.firstTipSkipAll, skipAllFirstTips],
@@ -5436,13 +5405,6 @@ function bindPrimaryActions() {
     node.addEventListener("click", (event) => {
       event.preventDefault();
       handler();
-    });
-  }
-  if (elements.submitReminderDialog && elements.submitReminderDialog.dataset.bound !== "1") {
-    elements.submitReminderDialog.dataset.bound = "1";
-    elements.submitReminderDialog.addEventListener("cancel", (event) => {
-      event.preventDefault();
-      closeSubmitReminderDialog();
     });
   }
   if (!window.__guandanCoachResizeBound) {

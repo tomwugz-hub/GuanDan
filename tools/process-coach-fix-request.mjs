@@ -16,6 +16,7 @@ import {
   parseGameInsightsFromMarkdown,
 } from "../coach/in-play-insight.mjs";
 import {
+  applyNonInteractiveGitEnv,
   commitAndPushCoachFix,
   loadDotEnv,
 } from "./lib/notify-coach-automation.mjs";
@@ -182,6 +183,7 @@ async function markDone(markdown, conclusion) {
 
 async function main() {
   await loadDotEnv(workspaceDir);
+  applyNonInteractiveGitEnv();
 
   let markdown;
   try {

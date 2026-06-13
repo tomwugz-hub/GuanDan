@@ -5,12 +5,13 @@ import { fileURLToPath } from "node:url";
 import { buildDisputeAckMessage, normalizeUserDispute } from "../coach/user-dispute.mjs";
 import { appendDisputeToPendingFixRequest } from "./lib/merge-coach-fix-dispute.mjs";
 import { writeCoachFixRequestFiles } from "./lib/write-coach-fix-request.mjs";
-import { loadDotEnv } from "./lib/notify-coach-automation.mjs";
+import { loadDotEnv, applyNonInteractiveGitEnv } from "./lib/notify-coach-automation.mjs";
 import { deleteSessionFile, readSessionFile, writeSessionFile } from "./lib/session-file.mjs";
 
 const port = Number(process.env.GUANDAN_AI_PORT || 8787);
 const workspaceDir = dirname(dirname(fileURLToPath(import.meta.url)));
 await loadDotEnv(workspaceDir);
+applyNonInteractiveGitEnv();
 const trainingDir = join(workspaceDir, "training-samples");
 const trainingJsonlPath = join(trainingDir, "coach-training-feedback.jsonl");
 const trainingLatestPath = join(trainingDir, "coach-training-latest.json");
