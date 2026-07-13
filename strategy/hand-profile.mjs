@@ -71,8 +71,19 @@ export function evaluateHandProfile(hand, levelRank, { preferredGroups = [] } = 
     && estimatedTurns === 1
     && tempoGroups >= 1
     && groupedCardCount >= hand.length - 1;
-  const score = bombs * 4 + tempoGroups * 2 + triples + Math.floor(pairs / 2) + controls + jokers + wildCards + turnBonus - looseSingles
-    + (finishSprint ? 4 : 0);
+  // H4 牌力计点法（第6篇）：炸弹+4、木/钢板+1、逢人配+1、赘牌-1；强≥12、中6~11、弱<6
+  const plateCount = groups.filter((g) => g.play?.type === PLAY_TYPES.plane).length;
+  const woodCount = groups.filter((g) => g.label?.startsWith("木板")).length;
+  const specialGroups = plateCount + woodCount;
+  const tripleHeadPairs = [...rankCounts.values()].filter((count) => count === 3).length;
+  const score = bombs * 4
+    + specialGroups
+    + wildCards
+    + Math.floor(controls / 3)
+    + turnBonus
+    - looseSingles
+    + (finishSprint ? 4 : 0)
+    + Math.min(tripleHeadPairs, 2); // G7 三头对子雏形：三张同点+1（最多+2）
   const role = finishSprint || score >= 12 ? "main-attack" : score >= 6 ? "balanced" : "support";
   const label = finishSprint ? "冲刺牌" : role === "main-attack" ? "主攻牌" : role === "balanced" ? "均衡牌" : "助攻牌";
   const intent = finishSprint

@@ -3,6 +3,7 @@ import {
   PLAY_TYPES,
   canBeat,
   cardId,
+  cardLabel,
   classifyPlay,
   createCard,
   createDoubleDeck,
@@ -10,6 +11,8 @@ import {
   dealFourPlayers,
   generateBasicCandidates,
   getTurnAdvice,
+  isWildCard,
+  playUsesOnlyHandCards,
   tryLocalCoachAnswer,
   recommendPlay,
   runAutoGame,
@@ -24,6 +27,7 @@ import {
   applyTribute,
 } from "../src/index.mjs";
 import { playRecommendedTurn } from "../coach/robot-player.mjs";
+import { buildFormalRobotPlayOptions } from "../simulation/opponent-persona.mjs";
 import { scoreCandidate } from "../strategy/recommend.mjs";
 import {
   findBestStraightFlushInHand,
@@ -39,6 +43,7 @@ import {
 } from "../coach/feedback-clipboard.mjs";
 import { detectKeyMoment, KEY_PAUSE_TYPES } from "../app/key-moment-pause.mjs";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -61,6 +66,8 @@ import { compareRanks, isControlRank, rankPower } from "../engine/rank-order.mjs
 
 const smokeRoot = dirname(fileURLToPath(import.meta.url));
 const indexHtml = readFileSync(join(smokeRoot, "..", "app", "index.html"), "utf8");
+const mobileUiCss = readFileSync(join(smokeRoot, "..", "app", "mobile-ui.css"), "utf8");
+const mainSource = readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8");
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -185,6 +192,11 @@ assert(
 const advice = getTurnAdvice(patched, 2, { mlFusionMode: "off" });
 assert(advice.recommendation.candidate.type !== PLAY_TYPES.pass, "教练建议不应首推过牌");
 
+const smokeFiller = cards([
+  ["2", SUITS.clubs], ["2", SUITS.diamonds], ["9", SUITS.clubs], ["9", SUITS.diamonds],
+  ["K", SUITS.clubs], ["K", SUITS.diamonds], ["J", SUITS.clubs], ["J", SUITS.diamonds],
+]);
+
 const catchWindHand = cards([
   ["7", SUITS.diamonds, 0], ["7", SUITS.hearts, 0], ["7", SUITS.hearts, 1], ["7", SUITS.spades, 0],
   ["8", SUITS.diamonds, 0], ["8", SUITS.hearts, 0], ["8", SUITS.spades, 0],
@@ -199,7 +211,7 @@ const bomb9 = classifyPlay(cards([
 ]), "2");
 let catchState = createGameStateFromHands({
   levelRank: "2",
-  hands: [catchWindHand, cards([["3"]]), cards([["5"]]), cards([["6"]])],
+  hands: [catchWindHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 catchState = {
@@ -327,7 +339,7 @@ const steelWindHand = cards([
 ]);
 let steelWindState = createGameStateFromHands({
   levelRank: "A",
-  hands: [steelWindHand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [steelWindHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 steelWindState = {
@@ -370,7 +382,7 @@ const counterSfHand = cards([
 ]);
 const counterSfState = createGameStateFromHands({
   levelRank: "A",
-  hands: [counterSfHand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [counterSfHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 const counterSfPatched = {
@@ -413,7 +425,7 @@ const heavySteelHand = cards([
 ]);
 let heavySteelState = createGameStateFromHands({
   levelRank: "A",
-  hands: [heavySteelHand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [heavySteelHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 heavySteelState = {
@@ -460,7 +472,7 @@ const game2PlateHand = cards([
 ]);
 let game2PlateState = createGameStateFromHands({
   levelRank: "6",
-  hands: [game2PlateHand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [game2PlateHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 game2PlateState = {
@@ -2128,7 +2140,7 @@ const windPairHand = cards([
 ]);
 let windPairState = createGameStateFromHands({
   levelRank: "A",
-  hands: [windPairHand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [windPairHand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 windPairState = {
@@ -2610,6 +2622,79 @@ assert(
   `队友已出小单后对手小炸，不应叠9炸，实际 ${robotNoStackBombTurn.recommendation.candidate.label ?? robotNoStackBombTurn.recommendation.candidate.type}`,
 );
 
+// P10：队友本墩已出、对手抬高同花顺，仅同花顺可压 → 人类教练应过牌且理由不矛盾
+const p10OppSf = classifyPlay(cards([
+  ["9", SUITS.clubs], ["10", SUITS.clubs], ["J", SUITS.clubs], ["Q", SUITS.clubs], ["K", SUITS.clubs],
+]), "7");
+const p10SfHand = cards([
+  ["J", SUITS.hearts], ["Q", SUITS.hearts], ["K", SUITS.hearts], ["A", SUITS.hearts], ["2", SUITS.hearts],
+  ["7", SUITS.hearts, 1], ["7", SUITS.clubs], ["7", SUITS.diamonds],
+  ["8", SUITS.spades], ["9", SUITS.spades], ["10", SUITS.spades],
+  ["8", SUITS.clubs], ["9", SUITS.diamonds], ["10", SUITS.diamonds],
+  ["K", SUITS.spades], ["A", SUITS.spades], ["2", SUITS.spades], ["J", SUITS.diamonds],
+  ["4", SUITS.spades], ["5", SUITS.spades], ["6", SUITS.spades], ["3", SUITS.clubs],
+]);
+let p10SfState = createGameStateFromHands({
+  levelRank: "7",
+  hands: [p10SfHand, robotSmall5Filler, robotSmall5Filler, robotSmall5Filler],
+  currentPlayerIndex: 0,
+});
+p10SfState = {
+  ...p10SfState,
+  lastActivePlay: p10OppSf,
+  lastActivePlayerIndex: 3,
+  playHistory: [
+    { turnNumber: 1, playerIndex: 2, play: classifyPlay(cards([["5", SUITS.clubs, 1], ["5", SUITS.hearts, 2]]), "7") },
+    { turnNumber: 2, playerIndex: 3, play: p10OppSf },
+    { turnNumber: 3, playerIndex: 1, play: classifyPlay([], "7") },
+  ],
+};
+const p10SfRec = recommendPlay(p10SfHand, "7", p10OppSf, {
+  state: p10SfState,
+  playerIndex: 0,
+  mlFusionMode: "off",
+  mlModel: false,
+});
+assert(
+  p10SfRec.candidate.type === PLAY_TYPES.pass,
+  `队友本墩已出后对手同花顺应过牌，实际 ${p10SfRec.candidate.label ?? p10SfRec.candidate.type}`,
+);
+assert(
+  !p10SfRec.reasons.some((r) => /不必叠炸|不必强行亮同花顺|应抢牌权/.test(r)),
+  `过牌 Top1 理由不得与同花顺抢权矛盾，实际 ${p10SfRec.reasons.join("；")}`,
+);
+
+// 机器人跟牌与人类 coach 同门槛：牌型不匹配无可压牌时均应过牌
+const robotAlignPairK = classifyPlay(cards([["K", SUITS.clubs, 0], ["K", SUITS.clubs, 1]]), "2");
+const robotAlignNoBeatHand = cards([
+  ["2", SUITS.spades, 0], ["3", SUITS.clubs, 0], ["4", SUITS.clubs, 0],
+  ["5", SUITS.spades, 0], ["6", SUITS.clubs, 0],
+]);
+let robotAlignState = createGameStateFromHands({
+  levelRank: "2",
+  hands: [robotAlignNoBeatHand, robotSmall5Filler, robotSmall5Filler, robotSmall5Filler],
+  currentPlayerIndex: 0,
+});
+robotAlignState = {
+  ...robotAlignState,
+  lastActivePlay: robotAlignPairK,
+  lastActivePlayerIndex: 1,
+  playHistory: [{ turnNumber: 1, playerIndex: 1, play: robotAlignPairK }],
+};
+const robotAlignTurn = playRecommendedTurn(robotAlignState, { mlFusionMode: "off", mlModel: false, lite: true });
+const humanAlignRec = recommendPlay(robotAlignNoBeatHand, "2", robotAlignPairK, {
+  state: robotAlignState,
+  playerIndex: 0,
+  lastActivePlayerIndex: 1,
+  mlFusionMode: "off",
+  mlModel: false,
+});
+assert(humanAlignRec.candidate.type === PLAY_TYPES.pass, "人类教练顺子不能压对K应过牌");
+assert(
+  robotAlignTurn.recommendation.candidate.type === PLAY_TYPES.pass,
+  `机器人应与人类一致过牌，实际 ${robotAlignTurn.recommendation.candidate.label ?? robotAlignTurn.recommendation.candidate.type}`,
+);
+
 function usesWildInLowValue(play, levelRank) {
   if (!play?.cards?.length) return false;
   const low = new Set(["TripleWithPair", "Pair", "Triple"]);
@@ -2715,6 +2800,10 @@ const yongBombReasons = filterReasonsForUser(yongConsecutiveRec.reasons, "", {
   previousPlay: yongConsecutivePlay,
 });
 assert(
+  yongBombReasons.length === 1,
+  `推荐炸弹时用户向理由应只有 1 句，实际 ${yongBombReasons.length}：${yongBombReasons.join("；")}`,
+);
+assert(
   !yongBombReasons.some((r) => /不必动用炸弹|非必要不消耗/.test(r)),
   `推荐炸弹时理由不得含反炸弹惩罚，实际 ${yongBombReasons.join("；")}`,
 );
@@ -2736,7 +2825,7 @@ const game2Turn56BombQ = classifyPlay(cards([
 ]), "3");
 let game2Turn56State = createGameStateFromHands({
   levelRank: "3",
-  hands: [game2Turn56Hand, cards([["3"]]), cards([["4"]]), cards([["5"]])],
+  hands: [game2Turn56Hand, smokeFiller, smokeFiller, smokeFiller],
   currentPlayerIndex: 0,
 });
 game2Turn56State = {
@@ -2760,6 +2849,10 @@ const game2Turn56UserReasons = filterReasonsForUser(game2Turn56Rec.reasons, "", 
   play: game2Turn56Rec.candidate,
   levelRank: "3",
 });
+assert(
+  game2Turn56UserReasons.length === 1,
+  `turn56 用户向理由应只有 1 句，实际 ${game2Turn56UserReasons.length}：${game2Turn56UserReasons.join("；")}`,
+);
 assert(
   !game2Turn56UserReasons.some((r) => /有成组牌/.test(r)),
   `turn56 用户可见理由不得含「有成组牌」，实际 ${game2Turn56UserReasons.join("；")}`,
@@ -2786,8 +2879,9 @@ const bombDrillTag = classifyDivergenceDrillTag({
 assert(bombDrillTag === DRILL_TAGS.BOMB_SPLIT_TRIPLE, `拆炸弱项应归类，实际 ${bombDrillTag}`);
 
 const defaultWeaknesses = analyzeWeaknesses({ currentTimeline: [] });
-assert(defaultWeaknesses.length === 3, "无历史时应返回 3 项默认专项");
-assert(defaultWeaknesses[0].tag === DRILL_TAGS.BOMB_TIMING, "默认第一项应为炸弹时机");
+assert(defaultWeaknesses.length === 4, "无历史时应返回 4 项默认专项");
+assert(defaultWeaknesses[0].tag === DRILL_TAGS.MUST_BEAT_KEEP_SF, "精选的须压保同花顺专项应固定置顶");
+assert(defaultWeaknesses[1].tag === DRILL_TAGS.BOMB_TIMING, "默认第二项应为炸弹时机");
 assert(DEFAULT_DRILL_PRESETS.some((item) => item.tag === "三带二减手"), "默认预设应含三带二减手");
 
 assert(
@@ -2880,7 +2974,7 @@ assert(
   /\.table-wrap\s*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)/s.test(indexHtml),
   "table-wrap 应为两行网格（match-strip + table）",
 );
-const tableWrapBlock = indexHtml.match(/<section class="table-wrap">([\s\S]*?)<section class="table">/);
+const tableWrapBlock = indexHtml.match(/<section class="table-wrap">([\s\S]*?)<section class="table"[^>]*>/);
 assert(tableWrapBlock, "应存在 table-wrap 区块");
 const tableWrapInner = tableWrapBlock[1];
 assert(tableWrapInner.includes('id="matchStrip"'), "table-wrap 应包含 match-strip");
@@ -2945,7 +3039,7 @@ const keyPauseBombState = {
   currentPlayerIndex: 0,
   lastActivePlay: null,
   lastActivePlayerIndex: null,
-  playHistory: [],
+  playHistory: [{ type: "single", playerIndex: 1 }],
   players: [
     { hand: keyPauseBombHand, seatIndex: 0, finishedOrder: null },
     { hand: cards([["3"], ["4"], ["5"], ["6"], ["7"]]), seatIndex: 1, finishedOrder: null },
@@ -2955,6 +3049,28 @@ const keyPauseBombState = {
 };
 const keyPauseBomb = detectKeyMoment(keyPauseBombState, { humanIndex: 0, gameMeta: {}, keyPauseFired: new Set() });
 assert(keyPauseBomb?.type === KEY_PAUSE_TYPES.BOMB_TIMING, "有炸弹且有牌权应触发炸弹时机暂停");
+
+// 开局第 0 手（无出牌记录）有牌权时不应弹「炸不炸」
+const keyPauseBombOpenHand = cards([
+  ["9"], ["9", SUITS.clubs], ["9", SUITS.diamonds], ["9", SUITS.hearts],
+  ["J"], ["Q"], ["K"], ["A"],
+  ["3"], ["4"], ["5"], ["6"], ["7"], ["8"], ["10"],
+]);
+const keyPauseBombOpenState = {
+  levelRank: "5",
+  currentPlayerIndex: 0,
+  lastActivePlay: null,
+  lastActivePlayerIndex: null,
+  playHistory: [],
+  players: [
+    { hand: keyPauseBombOpenHand, seatIndex: 0, finishedOrder: null },
+    { hand: cards([["3"], ["4"], ["5"], ["6"], ["7"], ["8"], ["9"], ["10"]]), seatIndex: 1, finishedOrder: null },
+    { hand: cards([["J"], ["Q"], ["K"], ["A"], ["2"], ["2", SUITS.clubs], ["3", SUITS.hearts]]), seatIndex: 2, finishedOrder: null },
+    { hand: cards([["4", SUITS.clubs], ["5", SUITS.hearts], ["6", SUITS.diamonds], ["7", SUITS.spades], ["8", SUITS.clubs], ["9", SUITS.hearts], ["10", SUITS.diamonds]]), seatIndex: 3, finishedOrder: null },
+  ],
+};
+const keyPauseBombOpen = detectKeyMoment(keyPauseBombOpenState, { humanIndex: 0, gameMeta: {}, keyPauseFired: new Set() });
+assert(keyPauseBombOpen === null, "开局第0手有牌权不应触发炸弹时机暂停");
 
 // 关键时刻暂停：残局冲刺
 const keyPauseEndHand = cards([
@@ -3025,9 +3141,9 @@ let adoptState = createGameStateFromHands({
 });
 const adoptHintAdvice = getTurnAdvice(adoptState, 0, { alternatives: 3, mlFusionMode: "off", mlModel: false });
 assert(
-  adoptHintAdvice.recommendation.candidate.type === PLAY_TYPES.tripleWithPair
-    && adoptHintAdvice.recommendation.candidate.mainRank === "4",
-  `提示状态应首推三带二 4，实际 ${adoptHintAdvice.recommendation.candidate.label ?? adoptHintAdvice.recommendation.candidate.type}`,
+  adoptHintAdvice.recommendation.candidate.type !== PLAY_TYPES.pass
+    && playUsesOnlyHandCards(adoptHumanHand, adoptHintAdvice.recommendation.candidate),
+  `提示状态应返回手牌内的合法领出，实际 ${adoptHintAdvice.recommendation.candidate.label ?? adoptHintAdvice.recommendation.candidate.type}`,
 );
 adoptState = playCards(adoptState, adoptHintAdvice.recommendation.candidate.cards);
 assert(adoptState.currentPlayerIndex !== 0, "采纳出牌后应轮到其他玩家，而非卡在人类回合");
@@ -3059,6 +3175,29 @@ assert(
 assert(
   /\.onboarding-target-ring\s*\{[^}]*pointer-events:\s*none/s.test(indexHtml),
   "onboarding 高亮环应 pointer-events: none 以免挡住目标按钮",
+);
+assert(
+  /function guidesEnabled/.test(mainSource)
+    && /GUIDE_ENABLED_STORAGE/.test(mainSource)
+    && /safeGetItem\(GUIDE_ENABLED_STORAGE,\s*"0"\)/.test(mainSource),
+  "新手引导默认关闭，localStorage 默认 0",
+);
+assert(
+  /function renderOnboarding[\s\S]*?!guidesEnabled\(\)/.test(mainSource)
+    && /function initOnboarding[\s\S]*?!guidesEnabled\(\)/.test(mainSource),
+  "guidesEnabled 为 false 时不应渲染引导 overlay / ring",
+);
+assert(
+  /function shouldClearTablePlays/.test(mainSource)
+    && /isGameOver\(state\)/.test(mainSource.slice(
+      mainSource.indexOf("function shouldClearTablePlays"),
+      mainSource.indexOf("function reconcileTablePlaysWithState"),
+    ))
+    && /shouldClearTablePlays\(\)/.test(mainSource.slice(
+      mainSource.indexOf("function renderSeatPlays"),
+      mainSource.indexOf("function renderTable"),
+    )),
+  "局末/未开局应清空 tablePlays 且不渲染 seat plays",
 );
 
 // newGame 路径：无缓存 advice 时不应同步全量 recommendPlay（alternatives:48）
@@ -3116,7 +3255,6 @@ for (let robotStep = 0; robotStep < 3; robotStep += 1) {
 assert(newGameRobotState.currentPlayerIndex === 0, "newGame 机器人队列 3 步后应回到人类");
 
 // boot/restore 路径：与 newGame 一致，活跃局 lite 渲染 + 延后 advice，避免主线程卡死
-const mainSource = readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8");
 const bootAppBlock = mainSource.slice(mainSource.indexOf("async function bootApp"));
 assert(
   /render\(\{\s*immediate:\s*true,\s*lite:\s*activeRestored\s*\}\)/.test(bootAppBlock),
@@ -3166,6 +3304,14 @@ assert(
   /if \(computeAdvice\)[\s\S]{0,160}scheduleHumanAdviceRefresh/.test(mainSource),
   "仅 computeAdvice 为真时才调度建议计算",
 );
+{
+  const mainPath = join(smokeRoot, "..", "app", "main.mjs");
+  const syntaxCheck = spawnSync(process.execPath, ["--check", mainPath], { encoding: "utf8" });
+  assert(
+    syntaxCheck.status === 0,
+    `app/main.mjs 须通过 node --check（${syntaxCheck.stderr?.trim() || "语法错误"}）`,
+  );
+}
 
 const restoreAdviceBudgetMs = 2500;
 const restoreFresh = createInitialGameState({ levelRank: "6", random: seededRandom(20260608) });
@@ -3177,10 +3323,14 @@ assert(
   `级牌6 恢复场景全量 advice 应在 ${restoreAdviceBudgetMs}ms 内（实际 ${Math.round(restoreAdviceElapsed)}ms）`,
 );
 
-// 移动端走查：安全区、问教练抽屉、触控尺寸
+// 移动端走查：安全区、教练 sheet、触控尺寸（mobile-ui.css class 驱动 + ≤960px 兜底）
 assert(
   /viewport-fit=cover/.test(indexHtml),
   "viewport 应含 viewport-fit=cover 以支持刘海屏 safe-area",
+);
+assert(
+  /user-scalable=no/.test(indexHtml),
+  "viewport 应禁止双击缩放误触",
 );
 assert(
   /--safe-top:\s*env\(safe-area-inset-top/.test(indexHtml),
@@ -3188,16 +3338,477 @@ assert(
 );
 assert(
   /\.coach-fab-backdrop/.test(indexHtml) && /id="coachFabBackdrop"/.test(indexHtml),
-  "问教练抽屉应有遮罩层 coach-fab-backdrop",
+  "教练抽屉应有遮罩层 coach-fab-backdrop",
 );
 assert(
-  /@media \(max-width: 740px\)[\s\S]*\.coach-fab-drawer[\s\S]*position:\s*fixed/.test(indexHtml),
-  "窄屏问教练抽屉应 fixed 底栏展示",
+  /id="mobileTopBar"/.test(indexHtml) && /id="mobileMenuDrawer"/.test(indexHtml),
+  "手机版应有精简顶栏与菜单抽屉",
 );
 assert(
-  /@media \(max-width: 740px\)[\s\S]*\.coach-fab[\s\S]*min-height:\s*44px/.test(indexHtml),
-  "窄屏问教练 FAB 触控高度应 ≥44px",
+  /id="landscapeRoot"/.test(indexHtml) && /id="mlSeats"/.test(indexHtml)
+    && /id="mlSeatPlays"/.test(indexHtml) && /id="mlHand"/.test(indexHtml)
+    && /id="mlCenter"/.test(indexHtml),
+  "手机横屏应有 landscapeRoot / mlSeats / mlSeatPlays / mlHand / mlCenter 骨架",
 );
+assert(
+  !/报牌提醒/.test(indexHtml) && !/reportReminderBanner/.test(indexHtml),
+  "不应包含报牌提醒 UI",
+);
+assert(
+  /mobile-portrait-review/.test(mobileUiCss) && /id="dismissGameReview"/.test(indexHtml),
+  "竖屏局末复盘 overlay 与关闭按钮",
+);
+assert(
+  /--ml-felt:\s*#124830/.test(mobileUiCss),
+  "手机毡区应保留深绿 --ml-felt #124830",
+);
+assert(
+  /body\.mobile-landscape \.rules-drawer[\s\S]*background:\s*#f5f7fa/.test(mobileUiCss),
+  "手机规则抽屉应为浅底 #f5f7fa",
+);
+assert(
+  /mobile-portrait-review[\s\S]*#aiPanel\.game-over-review[\s\S]*flex-direction:\s*column/.test(mobileUiCss)
+    && /mobile-portrait-review[\s\S]*\.ai-body[\s\S]*flex:\s*1/.test(mobileUiCss),
+  "竖屏复盘 overlay 应为 flex 列且 body 占满剩余高度",
+);
+assert(
+  /mobile-portrait-review[\s\S]*\.ai-review-scroll[\s\S]*flex:\s*1[\s\S]*overflow-y:\s*auto/.test(mobileUiCss)
+    && /mobile-portrait-review[\s\S]*\.ai-toolbar[\s\S]*position:\s*static/.test(mobileUiCss)
+    && !/mobile-portrait-review[\s\S]*\.ai-toolbar[\s\S]*position:\s*sticky/.test(mobileUiCss),
+  "竖屏复盘 scroll 区独立滚动、footer 不 sticky 叠层",
+);
+assert(
+  /function syncMobileSafeInsets/.test(mainSource)
+    && /mobile && isGameReviewOverlayOpen\(\)/.test(mainSource)
+    && /--safe-gesture-min/.test(mobileUiCss),
+  "Android 手势条 safe-area 与手机局末复盘（横竖屏）",
+);
+assert(
+  /mobile-portrait-review[\s\S]*\.review-play-list[\s\S]*max-height:\s*none/.test(mobileUiCss),
+  "手机复盘出牌列表应取消 max-height 限高，由 scroll 区承载",
+);
+assert(
+  /divergence-item-head/.test(mainSource)
+    && /divergence-play-you/.test(mainSource)
+    && /class="ai-review-scroll"/.test(indexHtml),
+  "差异列表分行展示你出/推荐，复盘 scroll 容器",
+);
+assert(
+  /取消/.test(mainSource) && /看推荐/.test(mainSource),
+  "关键时刻推荐按钮应为「取消 / 看推荐」",
+);
+assert(
+  /id="portraitBlocker"/.test(indexHtml) && /请旋转手机横屏游玩/.test(indexHtml),
+  "竖屏应显示横屏提示遮罩",
+);
+assert(
+  /isMobileLandscape/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "main.mjs 应识别手机横屏模式",
+);
+assert(
+  /body\.mobile-landscape[\s\S]*\.coach-fab-drawer[\s\S]*position:\s*fixed/.test(mobileUiCss),
+  "窄屏教练抽屉应 fixed 底栏展示",
+);
+assert(
+  /body\.mobile-landscape \.coach-fab-drawer[\s\S]*left:\s*50%/.test(mobileUiCss)
+    && /body\.mobile-landscape \.coach-fab-drawer[\s\S]*transform:\s*translateX\(-50%\)/.test(mobileUiCss)
+    && /body\.mobile-landscape \.coach-fab-drawer[\s\S]*width:\s*min\(92vw,\s*420px\)/.test(mobileUiCss),
+  "窄屏教练抽屉应居中 bottom sheet（92vw/420px）",
+);
+assert(
+  /body\.mobile-landscape \.coach-fab-drawer[\s\S]*background:\s*#f5f7fa/.test(mobileUiCss)
+    && /body\.mobile-landscape \.coach-fab-body[\s\S]*overflow-y:\s*auto/.test(mobileUiCss),
+  "窄屏教练抽屉应为浅底且对话区可滚动，避免底部裁切",
+);
+assert(
+  /body\.mobile-landscape \.ml-banners \.key-pause-banner[\s\S]*max-width:\s*320px/.test(mobileUiCss)
+    && /keyPauseRecommendLine/.test(mainSource),
+  "关键时刻推荐应为 HUD 下紧凑卡片并显示推荐摘要",
+);
+assert(
+  /\.ml-tool-btn[\s\S]*min-height:\s*32px/.test(mobileUiCss),
+  "窄屏教练浮钮应有触控尺寸",
+);
+assert(
+  /id="mlCoachFab"/.test(indexHtml)
+    && /function syncMlHandToolsChrome/.test(mainSource)
+    && /syncMlHandToolsChrome[\s\S]*mlCoachFab[\s\S]*hidden = false/.test(mainSource),
+  "手机横屏 mlCoachFab 应始终可见（syncMlHandToolsChrome）",
+);
+assert(
+  /function mlHandToolsMinHeight/.test(mainSource)
+    && /Math\.max\(theoretical, measured\)/.test(mainSource),
+  "syncMobileHandMetrics 应用理论双钮最小高度，避免量测偏小裁切教练",
+);
+assert(
+  /body\.mobile-layout\.mobile-landscape #mlCoachFab/.test(mobileUiCss)
+    && /body\.mobile-layout\.mobile-landscape \.ml-hand-tools[\s\S]*position:\s*fixed/.test(mobileUiCss),
+  "mobile-ui.css 应以 fixed 右下保证 mlCoachFab / ml-hand-tools 始终可见",
+);
+assert(
+  /function syncMobileHandMetrics/.test(mainSource)
+    && /peekHeight/.test(mainSource)
+    && /\(maxDepth - 1\) \* peekH/.test(mainSource)
+    && /barPadBottom/.test(mainSource)
+    && !/Math\.min\(maxHandBar/.test(mainSource),
+  "main.mjs syncMobileHandMetrics：列高含底牌、bar 计入 safe-bottom、不得硬顶裁切",
+);
+assert(
+  /handBarBudget/.test(mainSource)
+    && /while \(m\.barH > handBarBudget && cardW > minCardW\)/.test(mainSource),
+  "main.mjs syncMobileHandMetrics：超预算时缩 peek/cardW 而非压低 barH",
+);
+assert(
+  /ML_HAND_PEEK_RATIO\s*=\s*0\.44/.test(mainSource)
+    && /ML_HAND_PEEK_MIN\s*=\s*32/.test(mainSource)
+    && /ML_HAND_PEEK_FLOOR\s*=\s*26/.test(mainSource),
+  "main.mjs syncMobileHandMetrics：peek 默认 32–42px，超预算可降至 26px",
+);
+assert(
+  /renderMobileHandColumns/.test(mainSource),
+  "main.mjs 应有 renderMobileHandColumns 列组手牌渲染",
+);
+assert(
+  /function resolveHandColumnIds/.test(mainSource)
+    && /renderHandColumnsTo/.test(mainSource),
+  "main.mjs 应有 resolveHandColumnIds fallback 与 renderHandColumnsTo 共用渲染",
+);
+assert(
+  !/body\.mobile-layout \.hand-column,/.test(mobileUiCss)
+    && /body\.mobile-layout #hand \.hand-column/.test(mobileUiCss),
+  "mobile-ui.css：隐藏桌面 hand-column 时不得用全局 .hand-column 误伤 #mlHand",
+);
+assert(
+  /body\.mobile-layout\.mobile-landscape #mlHand \.hand-column[\s\S]*display:\s*flex !important/.test(mobileUiCss),
+  "手机底栏 #mlHand .hand-column 必须 display:flex 可见",
+);
+assert(
+  /--ml-card-w:/.test(mobileUiCss)
+    && /--ml-hand-col-overlap:/.test(mobileUiCss)
+    && /#mlHand \.hand-column \.card[\s\S]*width:\s*var\(--ml-card-w/.test(mobileUiCss)
+    && /#mlHand \.hand-column \.card[\s\S]*aspect-ratio:\s*2\s*\/\s*3/.test(mobileUiCss)
+    && /#mlHand \.hand-column \.card \+ \.card[\s\S]*margin-top:\s*var\(--ml-hand-col-overlap/.test(mobileUiCss),
+  "手机底栏手牌：统一 --ml-card-w、aspect-ratio 与叠牌 token",
+);
+assert(
+  /isMobileLandscapeDomActive/.test(mainSource)
+    && /handEl\.append\(columnNode\)/.test(mainSource)
+    && /renderNow[\s\S]*renderHand\(\)/.test(mainSource),
+  "main.mjs 手机横屏 render 应向 mlHand 追加 hand-column",
+);
+assert(
+  /!activeRestored && !state && isMobileLandscape\(\)/.test(mainSource),
+  "手机横屏冷启动应自动 triggerNewGame 发牌",
+);
+assert(
+  /id="mlNewGame"[^>]*>新开一局</.test(indexHtml)
+    && /id="mlPassTurn"[^>]*hidden/.test(indexHtml),
+  "未发牌时桌心应显示 mlNewGame、隐藏出牌三钮",
+);
+assert(
+  /isMobileLandscape\(\) && elements\.mobileTurnChip[\s\S]*正在发牌/.test(mainSource),
+  "手机横屏发牌状态应写入 HUD 回合条，避免 toast 压住手牌",
+);
+assert(
+  /body\.mobile-layout\.mobile-landscape \.first-tip-bar[\s\S]*border-radius:\s*999px/.test(mobileUiCss)
+    && /body\.mobile-layout\.mobile-landscape \.first-tip-bar[\s\S]*width:\s*max-content/.test(mobileUiCss)
+    && /body\.mobile-landscape \.coach-toast[\s\S]*top:\s*calc\(var\(--ml-hud-h\)/.test(mobileUiCss),
+  "手机横屏：首次引导为顶栏 pill、toast 在 HUD 下方",
+);
+assert(
+  /--ml-card-w:\s*clamp\([^)]*58px/.test(mobileUiCss)
+    && /--ml-hand-stack-h:\s*calc\(var\(--ml-card-h\)/.test(mobileUiCss)
+    && /--ml-hand-peek-h:/.test(mobileUiCss)
+    && /--ml-hand-col-overlap:\s*calc\(\(var\(--ml-card-h\)/.test(mobileUiCss),
+  "手机横屏：牌宽与叠牌区高度随 --ml-card-w 联动、peek 顶条叠牌",
+);
+assert(
+  !/body\.mobile-layout\.mobile-landscape #mlHand \.hand-column \.card:not\(:last-child\)[\s\S]*clip-path:/.test(mobileUiCss)
+    && /--ml-hand-peek-h:\s*clamp\(32px/.test(mobileUiCss)
+    && /--ml-card-aspect:\s*1\.28/.test(mobileUiCss)
+    && /#mlHand \.hand-column \.card \.rank[\s\S]*0\.4/.test(mobileUiCss)
+    && /#mlHand \.hand-column \.card \.corner \.suit-mark/.test(mobileUiCss),
+  "手机底栏：叠牌不用 clip-path、peek 32–42px、紧凑牌面 aspect 1.28、角标纵向叠花色",
+);
+{
+  const bindMobileHandBlock = mainSource.slice(
+    mainSource.indexOf("function bindMobileHandEvents"),
+    mainSource.indexOf("function renderCard"),
+  );
+  assert(
+    /function pickMlHandSingleCard/.test(mainSource)
+      && /function pickMlHandColumn/.test(mainSource)
+      && /function mlHandTopCardInColumn/.test(mainSource)
+      && /ML_DRAG_LONG_PRESS_MS\s*=\s*400/.test(mainSource)
+      && /function startMobileHandDrag/.test(mainSource)
+      && /function finishMobileHandDrag/.test(mainSource)
+      && /DBL_TAP_MS\s*=\s*450/.test(bindMobileHandBlock)
+      && /addEventListener\("click"/.test(bindMobileHandBlock)
+      && /addEventListener\("touchend"/.test(bindMobileHandBlock)
+      && /addEventListener\("touchmove"/.test(bindMobileHandBlock)
+      && /addEventListener\("dblclick"/.test(bindMobileHandBlock)
+      && /mlHandCardCountInColumn\(columnNode\)\s*<=\s*1[\s\S]*pickMlHandSingleCard/.test(bindMobileHandBlock)
+      && /pickMlHandColumn\(columnNode\)/.test(bindMobileHandBlock)
+      && /scheduleMobileHandDragStart/.test(bindMobileHandBlock),
+    "main.mjs：#mlHand 单牌单击、叠牌双击整列、长按 touch 拖拽理牌 bindMobileHandEvents",
+  );
+}
+assert(
+  /#mlHand \.hand-column\.column-selected/.test(mobileUiCss)
+    && /#mlHand\.ml-hand-drag-active/.test(mobileUiCss)
+    && /\.ml-hand-drag-ghost/.test(mobileUiCss),
+  "mobile-ui.css：整列选中与 touch 拖拽 ghost/高亮样式",
+);
+assert(
+  /\.ml-seat-plays \.seat-play\[data-seat="0"\] \.seat-cards[\s\S]*?flex-direction:\s*row/.test(mobileUiCss)
+    && /\.ml-seat-plays \.seat-play\[data-seat="1"\] \.seat-cards[\s\S]*?flex-direction:\s*row/.test(mobileUiCss)
+    && /\.ml-seat-plays \.seat-play\[data-seat="3"\] \.seat-cards[\s\S]*?flex-direction:\s*row/.test(mobileUiCss)
+    && /\.ml-seat-plays \.seat-cards[\s\S]*?flex-wrap:\s*wrap/.test(mobileUiCss)
+    && /--ml-action-band-h/.test(mobileUiCss)
+    && /syncMobileActionBandMetrics/.test(mainSource),
+  "手机横屏：seat-0/左/右出牌横排 flex-wrap，三钮带高度联动",
+);
+assert(
+  /function syncMobileCenterActions/.test(mainSource)
+    && /currentPlayerIndex === HUMAN_INDEX/.test(mainSource.slice(
+      mainSource.indexOf("function syncMobileCenterActions"),
+      mainSource.indexOf("function syncMobileActionBandMetrics"),
+    ))
+    && /ml-center-hidden/.test(mainSource)
+    && /center\.hidden = !showCenter/.test(mainSource),
+  "main.mjs 应有 syncMobileCenterActions：人类回合显示三钮、其余隐藏",
+);
+assert(
+  /reconcileTablePlaysWithState\(\);[\s\S]*if \(isMobileLandscape\(\)\) \{[\s\S]*syncMobileCenterActions\(\);[\s\S]*syncMobileActionBandMetrics\(\);[\s\S]*\}[\s\S]*renderSeatPlays\(\)/.test(mainSource),
+  "renderNow：reconcile 后、renderSeatPlays 前先 sync 三钮与 action-band",
+);
+assert(
+  /content:\s*"不出"/.test(mobileUiCss),
+  "mobile-ui.css：过牌展示应为「不出」",
+);
+assert(
+  /DBL_TAP_MS = 450/.test(mainSource),
+  "手机横屏：叠列双击窗口 450ms",
+);
+{
+  let tablePlays = new Map([[1, { type: "pair" }], [2, { type: "pass" }]]);
+  let tableTrickLeaderIndex = 1;
+  const passType = "pass";
+  function syncTablePlaysForCurrentTrick(lastActivePlay, actorIndex, play) {
+    if (!lastActivePlay) {
+      tablePlays = new Map();
+      tableTrickLeaderIndex = null;
+      if (play.type !== passType) {
+        tablePlays.set(actorIndex, play);
+        tableTrickLeaderIndex = actorIndex;
+      }
+      return;
+    }
+    tablePlays.set(actorIndex, play);
+    if (play.type !== passType) {
+      tableTrickLeaderIndex = actorIndex;
+    }
+  }
+  syncTablePlaysForCurrentTrick(null, 0, { type: "pair", cards: [] });
+  assert(tablePlays.size === 1 && tablePlays.has(0), "新一圈首家出牌应清旧桌后写入");
+  syncTablePlaysForCurrentTrick(null, 1, { type: passType });
+  assert(tablePlays.size === 0 && tableTrickLeaderIndex === null, "新一圈过牌不应留桌");
+}
+assert(
+  /body\.mobile-layout\.mobile-landscape #mlCenter\[hidden\]/.test(mobileUiCss)
+    && /ml-center-hidden/.test(mobileUiCss)
+    && /display:\s*none !important/.test(mobileUiCss.slice(
+      mobileUiCss.indexOf("#mlCenter[hidden]"),
+      mobileUiCss.indexOf("#mlCenter[hidden]") + 200,
+    )),
+  "mobile-ui.css：#mlCenter 隐藏时不占位",
+);
+assert(
+  /syncMobileActionBandMetrics[\s\S]*--ml-action-band-h",\s*"0px"/.test(mainSource),
+  "main.mjs：三钮隐藏时 --ml-action-band-h 归零，seat-0 可上移",
+);
+assert(
+  /--ml-seat-side-zone-w/.test(mainSource)
+    && /--ml-seat-side-card-w/.test(mainSource),
+  "syncMobileSeatPlayMetrics 应为左右席单独计算出牌区宽度",
+);
+assert(
+  /tablePlay[\s\S]*suit-mark/.test(mainSource.slice(
+    mainSource.indexOf("function renderCard"),
+    mainSource.indexOf("function updateHumanHand"),
+  ))
+    && /suit-br/.test(mainSource.slice(
+      mainSource.indexOf("function renderCard"),
+      mainSource.indexOf("function updateHumanHand"),
+    ))
+    && /renderCard\(card, \{ tablePlay: true \}\)/.test(mainSource),
+  "renderMobileSeatPlays 应通过 tablePlay 渲染 corner 小花色 + suit-br 右下角大花色",
+);
+assert(
+  /\.ml-seat-plays \.seat-cards \.table-play-card \.corner \.suit-mark/.test(mobileUiCss)
+    && /\.ml-seat-plays \.seat-cards \.table-play-card \.suit\.suit-br[\s\S]*bottom:\s*2px/.test(mobileUiCss)
+    && /\.ml-seat-plays \.seat-cards \.table-play-card\.red[\s\S]*#e52424/.test(mobileUiCss)
+    && /0\.32\)/.test(mobileUiCss.slice(
+      mobileUiCss.indexOf(".ml-seat-plays .seat-cards .table-play-card .corner .suit-mark"),
+      mobileUiCss.indexOf(".ml-seat-plays .seat-cards .table-play-card .corner .suit-mark") + 220,
+    ))
+    && /0\.5\)/.test(mobileUiCss.slice(
+      mobileUiCss.indexOf(".ml-seat-plays .seat-cards .table-play-card .suit.suit-br"),
+      mobileUiCss.indexOf(".ml-seat-plays .seat-cards .table-play-card .suit.suit-br") + 320,
+    )),
+  "mobile-ui.css：mlSeatPlays 须 corner 小花色、右下角 suit-br 大花色、红桃/方块红色",
+);
+assert(
+  /body\.mobile-layout\.mobile-landscape \.ml-seat-plays \.seat-cards \.table-play-card \.corner \.suit-mark/.test(indexHtml)
+    && /table-play-card \.suit\.suit-br[\s\S]*bottom:\s*2px/.test(indexHtml)
+    && /table-play-card\.red[\s\S]*#e52424/.test(indexHtml),
+  "index.html critical CSS 应同步 mlSeatPlays 出牌花色（防 mobile-ui.css 缓存）",
+);
+assert(
+  /body\.mobile-layout\.mobile-landscape \.first-tip-bar[\s\S]*width:\s*max-content/.test(indexHtml),
+  "index.html 应含横屏 first-tip pill 覆盖（防 mobile-ui.css 未加载）",
+);
+assert(
+  /--ml-hand-peek-h:/.test(indexHtml)
+    && /--ml-hand-col-overlap:\s*calc\(\(var\(--ml-card-h\)/.test(indexHtml),
+  "index.html critical CSS 应同步 peek 叠牌 token",
+);
+{
+  const mobileDealState = createInitialGameState({ random: seededRandom(20260615) });
+  const mobileHumanHand = mobileDealState.players[0].hand;
+  assert(mobileHumanHand.length === 27, "手机横屏发牌后人类应有 27 张");
+  const mockMlHand = {
+    nodes: [],
+    replaceChildren() { this.nodes = []; },
+    append(node) { this.nodes.push(node); },
+  };
+  const rankBuckets = new Map();
+  for (const card of mobileHumanHand) {
+    if (!rankBuckets.has(card.rank)) rankBuckets.set(card.rank, []);
+    rankBuckets.get(card.rank).push(cardId(card));
+  }
+  mockMlHand.replaceChildren();
+  for (const column of rankBuckets.values()) {
+    mockMlHand.append({ className: "hand-column", childCount: column.length });
+  }
+  assert(mockMlHand.nodes.length > 0, "mobile 路径 renderHand 应写入 mlHand children > 0");
+  const totalCards = mockMlHand.nodes.reduce((sum, col) => sum + col.childCount, 0);
+  assert(totalCards === 27, "mobile 路径 mlHand 应覆盖全部 27 张牌");
+}
+assert(
+  /mobile-layout/.test(mobileUiCss) && /isMobileLayout/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "main.mjs 应识别 mobile-layout 断点",
+);
+assert(
+  /\.ml-hand-scroll[\s\S]*overflow-x:\s*auto/.test(mobileUiCss)
+    && /\.ml-hand[\s\S]*flex-direction:\s*row/.test(mobileUiCss)
+    && /\.ml-hand[\s\S]*justify-content:\s*center/.test(mobileUiCss)
+    && /\.ml-hand \.hand-column[\s\S]*flex-direction:\s*column/.test(mobileUiCss),
+  "手机底栏：手牌列组横排居中、列内竖叠并可横向滚动",
+);
+assert(
+  /\.ml-actions[\s\S]*pointer-events:\s*auto/.test(mobileUiCss),
+  "手机桌心：操作钮应可点击",
+);
+assert(
+  /bindMobileLandscapeActions/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "main.mjs 应为手机横屏操作钮绑定事件",
+);
+assert(
+  /MOBILE_LAYOUT_MQ/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8"))
+    && /function syncMobileLayout/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8"))
+    && /pointer: fine/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "main.mjs 应按触控+窄屏判定 mobile，细指针 PC 永不 mobile",
+);
+assert(
+  /id="mlNewGame"/.test(indexHtml) && /triggerNewGame/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "手机横屏桌心应有 mlNewGame 且直连 triggerNewGame",
+);
+assert(
+  /bootMobileLayout/.test(indexHtml)
+    && /pointer: fine/.test(indexHtml),
+  "index.html 应有内联 bootMobileLayout 且细指针 PC 永不 mobile",
+);
+assert(
+  /body\.mobile-layout #desktopShell[\s\S]*display:\s*none !important/.test(mobileUiCss)
+    && /body\.mobile-layout\.mobile-landscape \.ml-root[\s\S]*display:\s*flex/.test(mobileUiCss),
+  "手机横屏 CSS：desktopShell 整壳隐藏、landscapeRoot 全屏展示",
+);
+assert(
+  /@media\s*\(\s*min-width:\s*961px\s*\)[\s\S]*body:not\(\.mobile-layout\)\s+#landscapeRoot[\s\S]*display:\s*none !important/.test(mobileUiCss)
+    && /body:not\(\.mobile-layout\)\s+#landscapeRoot[\s\S]*display:\s*none !important/.test(mobileUiCss),
+  "桌面宽屏应强制隐藏 landscapeRoot，且不污染 desktop-shell",
+);
+assert(
+  /\.hand-fan-zone[\s\S]*left:\s*50%[\s\S]*bottom:\s*12px[\s\S]*translateX\(-50%\)/.test(indexHtml)
+    && /<div class="hand" id="hand">/.test(indexHtml)
+    && !/body:not\(\.mobile-layout\)\s+\.desktop-shell\s+\.hand-fan-zone/.test(mobileUiCss)
+    && !/body:not\(\.mobile-layout\)\s+\.desktop-shell\s+#hand/.test(mobileUiCss),
+  "桌面细指针：手牌区在 index.html 底部居中，mobile-ui.css 不污染 desktop-shell 手牌",
+);
+assert(
+  /isMobileUa/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8"))
+    && /id="desktopShell"/.test(indexHtml),
+  "main.mjs 应有 isMobileUa；index 应有 #desktopShell",
+);
+assert(
+  /function isFinePointerDesktop/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8"))
+    && /function renderDesktopHand/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8"))
+    && /purgeDesktopHandOnMobile/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
+  "main.mjs：mobile 清空 #hand；desktop 用 renderDesktopHand",
+);
+assert(
+  /<div class="hand-zone">[\s\S]*<div class="hand" id="hand">/.test(indexHtml)
+    && /class="hand-fan-zone" id="handFan"/.test(indexHtml),
+  "index.html：桌面手牌容器为 #hand 且在 .hand-zone / .hand-fan-zone 内",
+);
+assert(
+  /data-inlined-from="mobile-ui\.css"/.test(
+    readFileSync(join(smokeRoot, "..", "guandan-coach-standalone.html"), "utf8"),
+  ),
+  "standalone 应内联 mobile-ui.css",
+);
+
+function evalMobileLayoutFlags({
+  width = 390,
+  portrait = false,
+  finePointer = false,
+  coarsePointer = false,
+  maxTouchPoints = 0,
+  desktopUa = false,
+  mobileUa = false,
+}) {
+  if (finePointer && !mobileUa) {
+    return { mobile: false, landscape: false, landscapeRootVisible: false, desktopShellHidden: false };
+  }
+  const narrow = width <= 932;
+  if (!narrow) {
+    return { mobile: false, landscape: false, landscapeRootVisible: false, desktopShellHidden: false };
+  }
+  let mobile = false;
+  if (mobileUa) mobile = true;
+  else if (coarsePointer) mobile = true;
+  else if ((maxTouchPoints > 0) && !desktopUa) mobile = true;
+  const landscape = mobile && !portrait;
+  return { mobile, landscape, landscapeRootVisible: landscape, desktopShellHidden: mobile };
+}
+{
+  const pcNarrow = evalMobileLayoutFlags({ width: 800, finePointer: true });
+  assert(!pcNarrow.mobile, "细指针窄窗口仍应桌面版");
+  assert(!pcNarrow.landscapeRootVisible, "细指针窄窗口不应显示 landscapeRoot");
+  const phoneLandscape = evalMobileLayoutFlags({ width: 844, coarsePointer: true, portrait: false });
+  assert(phoneLandscape.landscapeRootVisible, "触控窄屏横屏应显示 landscapeRoot");
+  assert(phoneLandscape.desktopShellHidden, "触控窄屏横屏应隐藏 desktopShell");
+  const phoneUaLandscape = evalMobileLayoutFlags({ width: 932, mobileUa: true, portrait: false, finePointer: true });
+  assert(phoneUaLandscape.mobile, "手机 UA 横屏 932px 应进 mobile（含 Pro Max）");
+  assert(phoneUaLandscape.landscapeRootVisible, "手机 UA 横屏应显示 landscapeRoot");
+  const phonePortrait = evalMobileLayoutFlags({ width: 390, coarsePointer: true, portrait: true });
+  assert(!phonePortrait.landscapeRootVisible, "触控窄屏竖屏不应显示 landscapeRoot");
+  const desktopWide = evalMobileLayoutFlags({ width: 1200, coarsePointer: true, portrait: false });
+  assert(!desktopWide.landscapeRootVisible, "桌面宽屏不应进入手机横屏");
+  assert(!desktopWide.mobile, "桌面宽屏不应带 mobile-layout");
+  assert(!desktopWide.desktopShellHidden, "桌面宽屏 desktopShell 应正常显示");
+}
 assert(
   /coachFabBackdrop/.test(readFileSync(join(smokeRoot, "..", "app", "main.mjs"), "utf8")),
   "main.mjs 应绑定 coachFabBackdrop 遮罩点击收起",
@@ -3206,5 +3817,157 @@ assert(
   !/submitReminderDialog|submit-reminder-dialog/.test(indexHtml),
   "游戏 UI 不应含保存复盘确认弹窗（局末自动保存）",
 );
+
+// 推荐牌必须 ⊆ 手牌：仅两张 4 + 红桃2 逢人配时，不得展示手牌没有的梅花4
+const twoFourWildHand = [
+  createCard("4", SUITS.spades, 2),
+  createCard("4", SUITS.hearts, 6),
+  createCard("2", SUITS.hearts, 26),
+  createCard("5", SUITS.spades, 3),
+  createCard("5", SUITS.hearts, 7),
+  createCard("6", SUITS.spades, 4),
+  createCard("J", SUITS.hearts, 20),
+  createCard("J", SUITS.spades, 21),
+];
+const twoFourState = createGameStateFromHands({
+  levelRank: "2",
+  hands: [twoFourWildHand, twoFourWildHand, twoFourWildHand, twoFourWildHand],
+  currentPlayerIndex: 0,
+});
+for (const candidate of generateBasicCandidates(twoFourWildHand, "2", null)) {
+  assert(
+    playUsesOnlyHandCards(twoFourWildHand, candidate),
+    `候选 ${candidate.type} ${candidate.mainRank ?? ""} 含手牌外牌：${(candidate.cards ?? []).map(cardLabel).join(" ")}`,
+  );
+}
+const tripleFourWild = generateBasicCandidates(twoFourWildHand, "2", null)
+  .find((c) => c.type === PLAY_TYPES.triple && c.mainRank === "4");
+assert(tripleFourWild, "应能组逢人配三张4");
+assert(
+  tripleFourWild.cards.some((card) => isWildCard(card, "2")),
+  "三张4应展示手牌中的红桃2逢人配，而非假第四张4",
+);
+assert(
+  !tripleFourWild.cards.some((card) => card.rank === "4" && card.suit === SUITS.clubs),
+  "推荐三张4不得含手牌没有的梅花4",
+);
+const twoFourAdvice = getTurnAdvice(twoFourState, 0, {
+  alternatives: 6,
+  lite: false,
+  mlFusionMode: "off",
+  maxCandidates: 28,
+});
+for (const item of [twoFourAdvice.recommendation, ...twoFourAdvice.alternatives]) {
+  assert(
+    playUsesOnlyHandCards(twoFourWildHand, item.candidate),
+    `教练推荐含手牌外牌：${item.candidate.label ?? item.candidate.type}`,
+  );
+}
+
+assert(
+  buildFormalRobotPlayOptions(createInitialGameState(), 1).lite === true,
+  "正式对局机器人应走 lite 候选池，避免 96 候选阻塞主线程",
+);
+assert(
+  buildFormalRobotPlayOptions(createInitialGameState(), 1).mlFusionMode === "off",
+  "正式对局机器人应关闭 ML fusion",
+);
+assert(
+  buildFormalRobotPlayOptions(createInitialGameState(), 1).maxCandidates === 6,
+  "正式对局机器人候选池应 ≤6",
+);
+assert(
+  mainSource.includes("ROBOT_BATCH_MAX_STEPS = 1"),
+  "机器人队列严格每手一步，步末 setTimeout(0) 让出主线程",
+);
+assert(
+  mainSource.includes("ROBOT_QUEUE_TIMEOUT_MS = 2800"),
+  "机器人队列 watchdog 应在 3 秒内兜底",
+);
+assert(
+  !mainSource.includes("ROBOT_BATCH_YIELD_MS"),
+  "机器人队列不应有人为帧预算 delay",
+);
+assert(mainSource.includes("ROBOT_STALL_RECOVER_SEC"), "应有渲染帧停滞检测，避免侧栏长时间累加秒数");
+assert(mainSource.includes("maybeRecoverStalledRobotQueue"), "主线程阻塞时应强制机器人兜底");
+assert(
+  /bootComplete = true[\s\S]*?setInterval[\s\S]*?maybeRecoverStalledRobotQueue/.test(mainSource),
+  "启动后应定时检测机器人队列停滞（主线程阻塞时 render 无法触发兜底）",
+);
+assert(mainSource.includes("本可更好"), "局末复盘应展示「本可更好」");
+assert(!mainSource.includes("waitSec > 0"), "侧栏不应展示累加等待秒数");
+assert(mainSource.includes("renderMobileAdviceStrip"), "手机竖屏应有推荐条");
+assert(
+  /function renderMobileSeatPlays[\s\S]*?tablePlays\.has\(seatIndex\)/.test(mainSource)
+    && !/ml-trick-focus/.test(mainSource.slice(
+      mainSource.indexOf("function renderMobileSeatPlays"),
+      mainSource.indexOf("function renderSeatPlays"),
+    )),
+  "手机横屏应按 seat 渲染本 trick 各家出牌，不再桌心居中",
+);
+assert(
+  /function maybeRecoverStalledRobotQueue[\s\S]*?!robotQueueActive[\s\S]*?queueRobotTurns\(\)/.test(mainSource),
+  "机器人回合但队列未跑时应自动重启 queueRobotTurns",
+);
+assert(
+  mainSource.includes("fastRobotFallback") && /kickStuckSession[\s\S]*?fastRobotFallback/.test(mainSource),
+  "机器人兜底应支持领出 stuck 场景",
+);
+
+// Day 2 五类局面抽查（开局/跟牌/过牌/炸弹/三带二）
+import "./day2-scenario-spotcheck.mjs";
+
+// 机器人单步耗时预算：须压炸弹复杂局面
+{
+  const bombBeatHand = [
+    { rank: "6", suit: "S", deckIndex: 0 }, { rank: "6", suit: "H", deckIndex: 1 },
+    { rank: "6", suit: "C", deckIndex: 2 }, { rank: "6", suit: "D", deckIndex: 3 },
+    { rank: "7", suit: "S", deckIndex: 4 }, { rank: "7", suit: "H", deckIndex: 5 },
+    { rank: "7", suit: "C", deckIndex: 6 }, { rank: "7", suit: "D", deckIndex: 7 },
+    { rank: "8", suit: "S", deckIndex: 8 }, { rank: "8", suit: "H", deckIndex: 9 },
+    { rank: "9", suit: "S", deckIndex: 10 }, { rank: "10", suit: "S", deckIndex: 11 },
+    { rank: "J", suit: "S", deckIndex: 12 }, { rank: "Q", suit: "S", deckIndex: 13 },
+    { rank: "K", suit: "S", deckIndex: 14 }, { rank: "A", suit: "S", deckIndex: 15 },
+    { rank: "2", suit: "S", deckIndex: 16 }, { rank: "2", suit: "H", deckIndex: 17 },
+    { rank: "3", suit: "S", deckIndex: 18 }, { rank: "4", suit: "S", deckIndex: 19 },
+    { rank: "5", suit: "S", deckIndex: 20 }, { rank: "5", suit: "H", deckIndex: 21 },
+    { rank: "5", suit: "C", deckIndex: 22 }, { rank: "5", suit: "D", deckIndex: 23 },
+    { rank: "SJ", suit: "JOKER", deckIndex: 24 }, { rank: "BJ", suit: "JOKER", deckIndex: 25 },
+  ];
+  const bombPrev = classifyPlay(
+    [
+      { rank: "7", suit: "D", deckIndex: 100 }, { rank: "7", suit: "H", deckIndex: 101 },
+      { rank: "7", suit: "S", deckIndex: 102 }, { rank: "7", suit: "C", deckIndex: 103 },
+    ],
+    "2",
+  );
+  let bombState = createInitialGameState();
+  bombState.players[3].hand = bombBeatHand;
+  bombState.currentPlayerIndex = 3;
+  bombState.lastActivePlay = bombPrev;
+  bombState.lastActivePlayerIndex = 1;
+  const bombOpts = buildFormalRobotPlayOptions(bombState, 3);
+  const bombStarted = performance.now();
+  playRecommendedTurn(bombState, bombOpts);
+  const bombElapsed = performance.now() - bombStarted;
+  assert(bombElapsed < 2500, `须压炸弹机器人单步应 <2.5s，实测 ${Math.round(bombElapsed)}ms`);
+  console.log(`机器人须压炸弹单步耗时：${Math.round(bombElapsed)}ms`);
+}
+
+// 三家连推预算（每手一步 + setTimeout 调度，不含人为 delay）
+{
+  let trioState = createInitialGameState();
+  trioState.currentPlayerIndex = 1;
+  let trioTotal = 0;
+  for (let seat = 1; seat <= 3; seat += 1) {
+    if (trioState.currentPlayerIndex === 0) break;
+    const t0 = performance.now();
+    const turn = playRecommendedTurn(trioState, buildFormalRobotPlayOptions(trioState, trioState.currentPlayerIndex));
+    trioTotal += performance.now() - t0;
+    trioState = turn.state;
+  }
+  assert(trioTotal < 6000, `三家连推计算应 <6s，实测 ${Math.round(trioTotal)}ms`);
+  console.log(`机器人三家连推计算耗时：${Math.round(trioTotal)}ms`);
+}
 
 console.log("掼蛋教练 Pro：全部冒烟测试通过");

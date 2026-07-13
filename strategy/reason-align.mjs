@@ -1,52 +1,36 @@
 import { PLAY_TYPES } from "../engine/play-types.mjs";
+import {
+  BOMB_TYPES,
+  filterReasonsForPlay,
+  isAntiBombReason,
+  playContradictsReasons,
+} from "./reason-consistency.mjs";
 
-const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
-
-/** 与「推荐出炸弹」矛盾的惩罚/保留类理由 */
-const ANTI_BOMB_REASONS = [
-  /^炸弹是牌权资源，非必要不消耗$/,
-  /^已有普通牌能压住，不必动用炸弹$/,
-  /^同花顺留给关键控权/,
-  /^局面尚早，同花顺不压/,
-  /^对手连对不值得消耗同花顺/,
-  /^同花顺战略保留/,
-  /^非紧急局面慎用同花顺拦炸/,
-  /^勿用高炸拦低炸/,
-  /^队友本墩已出过牌，不必强行亮同花顺$/,
-];
-
-function isAntiBombReason(reason) {
-  const raw = String(reason ?? "").trim();
-  return ANTI_BOMB_REASONS.some((pattern) => pattern.test(raw));
+/** 去重比较用：去掉原则码前缀，便于 scorer 句与教纲句对齐 */
+function stripPrinciplePrefix(text) {
+  return String(text ?? "").trim().replace(/^【P\d+】/, "").trim();
 }
 
-/** 与最终推荐方向矛盾的拆结构惩罚文案（已入选时不应展示） */
-const ANTI_STRUCTURE_PENALTY_REASONS = [
-  /^拆三张.+组其他牌型代价偏高$/,
-  /^拆三张.+出对子代价较高$/,
-  /^拆钢板.+组其他牌型代价过高$/,
-  /^拆钢板.+出对子代价过高$/,
-];
-
-function isAntiStructurePenaltyReason(reason) {
-  const raw = String(reason ?? "").trim();
-  return ANTI_STRUCTURE_PENALTY_REASONS.some((pattern) => pattern.test(raw));
+/** 较短句是否被较长句包含或为较长句前缀（语义重复） */
+function reasonOverlaps(shorter, longer) {
+  const a = stripPrinciplePrefix(shorter);
+  const b = stripPrinciplePrefix(longer);
+  if (!a || !b || a === b || b.length <= a.length) return false;
+  if (b.startsWith(a)) return true;
+  // 较短句至少 6 字且为较长句子串，避免「过牌」等短词误杀
+  return a.length >= 6 && b.includes(a);
 }
 
-function bombFallbackReason(play, previousPlay) {
-  if (previousPlay?.type === PLAY_TYPES.consecutivePairs) {
-    return "无更大连对可压，需用炸弹抢牌权";
-  }
-  if (previousPlay?.type === PLAY_TYPES.single) {
-    return "无更大单张可压，需用炸弹抢牌权";
-  }
-  if (previousPlay?.type === PLAY_TYPES.pair) {
-    return "无更大对子可压，需用炸弹抢牌权";
-  }
-  return "无可用更大普通牌可压，需用炸弹抢牌权";
+/** 子串/同前缀重叠去重：多 scorer 叠加时只保留更完整一句 */
+export function dedupeOverlappingReasonStrings(reasons) {
+  const list = (reasons ?? []).map((r) => String(r ?? "").trim()).filter(Boolean);
+  if (list.length <= 1) return list;
+  return list.filter((current, i) => !list.some((other, j) => (
+    j !== i && other.length > current.length && reasonOverlaps(current, other)
+  )));
 }
 
-/** 相同文案只保留一条（principles 与 opponent-pressure 可能重复贡献 P7 等理由） */
+/** 精确去重 + 重叠去重（principles 与 scorer 可能重复贡献近义句） */
 export function dedupeReasonStrings(reasons) {
   const seen = new Set();
   const out = [];
@@ -56,12 +40,17 @@ export function dedupeReasonStrings(reasons) {
     seen.add(key);
     out.push(key);
   }
-  return out;
+  return dedupeOverlappingReasonStrings(out);
 }
 
 /** 教纲执法内部标记，不向用户展示 */
 export function isEnforcementReason(reason) {
   return /^【执法】/.test(String(reason ?? "").trim());
+}
+
+/** 教纲原则码句（【P1】等）：参与评分/block，不向用户展示 */
+export function isDoctrinePrincipleReason(reason) {
+  return /^【P\d+】/.test(String(reason ?? "").trim());
 }
 
 /** 从理由文案提取原则码（如 P7） */
@@ -88,6 +77,9 @@ function canonicalPrincipleReason(code, reason) {
     }
     if (/压王用小炸|不宜动用更大炸/.test(text)) {
       return "【P7】压王用小炸够用，不宜动用更大炸";
+    }
+    if (/纯四炸够压|不宜拆厚炸/.test(text)) {
+      return "【P7】有纯四炸够压，不宜拆厚炸出四炸";
     }
     if (/纯炸弹够压|逢人配凑更大炸/.test(text)) {
       return "【P7】有纯炸弹够压，不宜逢人配凑更大炸";
@@ -119,19 +111,15 @@ export function mergeReasonsByPrincipleCode(reasons) {
 
 /**
  * 只保留与最终推荐出牌方向一致的理由。
- * 推荐炸弹时剔除「不必动用炸弹」等惩罚项文案。
+ * 推荐炸弹时剔除「不必动用炸弹」等惩罚项；推荐过牌时剔除「不宜过牌」等惩罚项。
  */
 export function alignReasonsForPlay(reasons, play, { previousPlay = null } = {}) {
   const list = dedupeReasonStrings((reasons ?? []).filter(Boolean));
-  if (!play || play.type === PLAY_TYPES.pass) return list;
-
-  if (!BOMB_TYPES.has(play.type)) {
-    return list.filter((reason) => !isAntiStructurePenaltyReason(reason));
-  }
-
-  const aligned = list.filter((reason) => !isAntiBombReason(reason));
-  if (aligned.length > 0) return dedupeReasonStrings(aligned);
-  return [bombFallbackReason(play, previousPlay)];
+  return filterReasonsForPlay(list, play, { previousPlay });
 }
 
-export { BOMB_TYPES, isAntiBombReason };
+export {
+  BOMB_TYPES,
+  isAntiBombReason,
+  playContradictsReasons,
+};

@@ -3,12 +3,15 @@ import {
   cardId,
   cardLabel,
   cardsLabel,
+  resolvePlayCardsFromHand,
+  playUsesOnlyHandCards,
   playSignature,
   classifyPlay,
   createCompetitiveMatch,
   createInitialGameState,
   finishCompetitiveGame,
   buildStrategicGroups,
+  mergePremiumStrategicGroups,
   evaluateHandProfile,
   groupPlayHistoryByRound,
   getTurnAdvice,
@@ -17,6 +20,7 @@ import {
   summarizeGameDivergences,
   isHumanReplayRecord,
   DIVERGENCE_VERDICTS,
+  verdictUiLabel,
   normalizeUserDispute,
   buildDisputeAckMessage,
   isJoker,
@@ -43,8 +47,12 @@ import {
   firstReasonForUser,
 } from "../src/index.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
+import { opponentsPendingAfterPlayer, effectivePreviousPlay, isCatchWindPending, resolveTrickLeaderIndex } from "../engine/game-state.mjs";
+import { isTeammate } from "../strategy/seat-utils.mjs";
+import { partnerLeadNeedsGuard } from "../strategy/table-context.mjs";
 import { dedupeKey } from "../tools/lib/dedupe-key.mjs";
 import { messageTimestamp } from "../tools/lib/message-timestamp.mjs";
+import { TRIAL_PLAY_VERSION, TRIAL_FEEDBACK } from "./trial-config.mjs";
 import { detectOpenGuanDanLog, opengdanMessagesToGame } from "../tools/adapters/opengdan-log.mjs";
 import { detectLegacyGdWs, legacyGdMessagesToGame } from "../tools/adapters/legacy-gd-ws.mjs";
 import { safeGetItem, safeRemoveItem, safeSetItem } from "./storage-safe.mjs";
@@ -80,6 +88,7 @@ import {
 } from "./session-persist.mjs";
 import {
   formatAlignRate,
+  formatLearningPoints,
   loadProgressStats,
   recordDrillSessionFromReview,
   renderRecentTrendBars,
@@ -93,6 +102,7 @@ import {
   buildSingleGameMatchSummary,
   countDrillFocusHits,
   createDrillRiggedState,
+  DRILL_TAGS,
   getDrillBannerHint,
   getDrillScenarioSummary,
   renderDrillPracticeListHtml,
@@ -103,6 +113,11 @@ import {
   sortStraightFlushCards,
 } from "../strategy/straight-flush-arrange.mjs";
 import { detectKeyMoment } from "./key-moment-pause.mjs";
+import { fastRobotFallback, humanAdviceFallback, ROBOT_LITE_MAX_CANDIDATES, ROBOT_STEP_DEADLINE_MS } from "../coach/robot-player.mjs";
+import { COACH_STRATEGY_REVISION } from "../strategy/sf-runway-guard.mjs";
+import { buildFormalRobotPlayOptions } from "../simulation/opponent-persona.mjs";
+
+const REQUIRED_STRATEGY_REVISION = 6;
 
 const HUMAN_INDEX = 0;
 const PLAYER_NAMES = ["你", "勇哥", "老史", "毛蛋"];
@@ -155,11 +170,23 @@ let archivedGames = [];
 let currentGameMeta = null;
 let draggedCardId = null;
 let draggedColumnIds = null;
+/** 手机横屏 touch 理牌拖拽态 */
+let mobileHandDrag = null;
+let mobileHandDragTimer = null;
 let suppressCardClick = false;
 let freeWildCardIds = new Set();
 let handColumnIds = null;
 let pendingCardClickTimer = null;
 let pendingCardClickAction = null;
+/** 列顶向下滑选手势：最小垂直位移（px） */
+const COLUMN_SWIPE_MIN_DOWN = 40;
+/** 列顶向下滑选手势：允许的最大水平偏移（px） */
+const COLUMN_SWIPE_MAX_HORIZONTAL = 32;
+/** 手机横屏手工理牌：长按触发拖拽（ms） */
+const ML_DRAG_LONG_PRESS_MS = 400;
+/** 手机横屏手工理牌：短触/横滑与拖拽区分阈值（px） */
+const ML_DRAG_MOVE_THRESHOLD = 12;
+const ML_REORDER_TIP_STORAGE = "guandan-coach-pro-mobile-reorder-tip-v1";
 let matchState = null;
 let matchSettledTurnNumber = null;
 let aiChatTimeline = [];
@@ -169,13 +196,28 @@ const KEY_PAUSE_STORAGE = "guandan-coach-pro-key-pause";
 const ONBOARDING_STORAGE = "guandan-coach-onboarding-v2";
 /** 单项功能首次说明（onboarding 完成后展示，不重复三步引导） */
 const FIRST_TIPS_STORAGE = "guandan-coach-pro-first-tips-v1";
+/** 新手引导总开关；默认关，可在菜单勾选「新手引导」开启 */
+const GUIDE_ENABLED_STORAGE = "guandan-coach-pro-guide-enabled-v1";
 /** 浮动问教练每局次数上限；0 表示不限 */
 const FAB_QA_LIMIT_PER_GAME = 0;
-/** 窄屏布局断点，与 index.html @media (max-width: 740px) 一致 */
+/** 窄屏布局断点，与 mobile-ui.css @media (max-width: 932px) 一致（含 iPhone 横屏 932px） */
 const MOBILE_LAYOUT_MQ = typeof window !== "undefined"
-  ? window.matchMedia("(max-width: 740px)")
+  ? window.matchMedia("(max-width: 932px)")
   : null;
+const MOBILE_PORTRAIT_MQ = typeof window !== "undefined"
+  ? window.matchMedia("(max-width: 932px) and (orientation: portrait)")
+  : null;
+const MOBILE_LANDSCAPE_MQ = typeof window !== "undefined"
+  ? window.matchMedia("(max-width: 932px) and (orientation: landscape)")
+  : null;
+const MOBILE_ORIENTATION_PORTRAIT_MQ = typeof window !== "undefined"
+  ? window.matchMedia("(orientation: portrait)")
+  : null;
+const MOBILE_PORTRAIT_DISMISS_STORAGE = "guandan-coach-pro-portrait-dismiss-v1";
+const MOBILE_A2HS_DISMISS_STORAGE = "guandan-coach-pro-a2hs-dismiss-v1";
+/** 手机竖屏：显示旋转提示；用户可点「仍要竖屏玩」跳过 */
 let coachFabOpen = false;
+let mobileMenuOpen = false;
 let rulesDrawerOpen = false;
 /** 历史复盘列表当前展开的对局 */
 let expandedReviewGameId = null;
@@ -194,9 +236,10 @@ let hintShown = false;
 let hintAwaiting = false;
 let hintAdvice = null;
 let hintCardIds = new Set();
-let reportReminderText = null;
+/** 局末复盘 overlay 是否已被用户关闭（新开一局时重置） */
+let gameReviewOverlayDismissed = false;
 let onboardingStep = 0;
-/** 复盘差异列表当前筛选分类（默认「教练更对」） */
+/** 复盘差异列表当前筛选分类（默认「建议学习点」） */
 let divergenceVerdictFilter = DIVERGENCE_VERDICTS.COACH_BETTER;
 let renderFrameId = null;
 let rendering = false;
@@ -206,15 +249,21 @@ let bootComplete = false;
 let robotQueueGeneration = 0;
 let robotQueueTimer = null;
 let robotQueueWatchdog = null;
-/** 机器人队列步间间隔（ms）；0 = 尽快推进，由 batch 控制主线程喘息 */
+/** 机器人队列步间间隔（ms）；0 = 尽快推进，每手 setTimeout(0) 让出主线程 */
 const ROBOT_QUEUE_DELAY_MS = 0;
-const ROBOT_QUEUE_TIMEOUT_MS = 8000;
+/** 队列 watchdog：单步未在时限内完成则兜底过牌（须小于浏览器无响应阈值） */
+const ROBOT_QUEUE_TIMEOUT_MS = 2800;
 /** 单步机器人计算超过此阈值（ms）时打警告 */
 const ROBOT_STEP_SLOW_MS = 500;
-/** 单帧内最多连推几手机器人，减少反复「思考中」渲染 */
-const ROBOT_BATCH_MAX_STEPS = 10;
-const ROBOT_BATCH_YIELD_MS = 120;
+/** 严格每手一步；批内不连推，主线程必须喘息 */
+const ROBOT_BATCH_MAX_STEPS = 1;
 let robotQueueActive = false;
+/** 队列超时兜底触发后，侧栏展示走牌超时提示 */
+let robotQueueTimedOut = false;
+/** 当前机器人队列开始时刻（performance.now），用于停滞检测 */
+let robotQueueStartedAt = 0;
+/** 侧栏停滞超过此秒数则强制兜底（不展示累加秒数，避免「已延迟30秒」） */
+const ROBOT_STALL_RECOVER_SEC = 2;
 let progressPanelDirty = true;
 
 /*
@@ -244,6 +293,16 @@ const elements = {
   theirLevel: document.querySelector("#theirLevel"),
   players: document.querySelector("#players"),
   seatPlays: document.querySelector("#seatPlays"),
+  mobileTable: document.querySelector("#mobileTable"),
+  centerActions: document.querySelector("#centerActions"),
+  centerTurnHint: document.querySelector("#centerTurnHint"),
+  handFan: document.querySelector("#handFan"),
+  portraitBlocker: document.querySelector("#portraitBlocker"),
+  portraitBlockerDismiss: document.querySelector("#portraitBlockerDismiss"),
+  portraitBlockerReview: document.querySelector("#portraitBlockerReview"),
+  mobileA2hsHint: document.querySelector("#mobileA2hsHint"),
+  mobileA2hsText: document.querySelector("#mobileA2hsText"),
+  mobileA2hsClose: document.querySelector("#mobileA2hsClose"),
   turnTitle: document.querySelector("#turnTitle"),
   turnHint: document.querySelector("#turnHint"),
   scoreboard: document.querySelector("#scoreboard"),
@@ -254,9 +313,10 @@ const elements = {
   playRecommended: document.querySelector("#playRecommended"),
   adoptHint: document.querySelector("#adoptHint"),
   hintBanner: document.querySelector("#hintBanner"),
+  mobileAdviceStrip: document.querySelector("#mobileAdviceStrip"),
   keyPauseBanner: document.querySelector("#keyPauseBanner"),
-  reportReminderBanner: document.querySelector("#reportReminderBanner"),
   passTurn: document.querySelector("#passTurn"),
+  playDockActions: document.querySelector(".table-action-dock .actions"),
   sortHand: document.querySelector("#sortHand"),
   exportLog: document.querySelector("#exportLog"),
   saveTrainingSample: document.querySelector("#saveTrainingSample"),
@@ -307,8 +367,13 @@ const elements = {
   savedDivergenceDetail: document.querySelector("#savedDivergenceDetail"),
   drillPanel: document.querySelector("#drillPanel"),
   drillPracticeList: document.querySelector("#drillPracticeList"),
+  mobileDrillPracticeList: document.querySelector("#mobileDrillPracticeList"),
+  mobileDrillPanel: document.querySelector("#mobileDrillPanel"),
+  mobileOpenDrill: document.querySelector("#mobileOpenDrill"),
   drillFocusBanner: document.querySelector("#drillFocusBanner"),
   openDrillPanel: document.querySelector("#openDrillPanel"),
+  startMustBeatSfDrill: document.querySelector("#startMustBeatSfDrill"),
+  mobileStartMustBeatSfDrill: document.querySelector("#mobileStartMustBeatSfDrill"),
   rulesBtn: document.querySelector("#rulesBtn"),
   rulesDrawer: document.querySelector("#rulesDrawer"),
   rulesBackdrop: document.querySelector("#rulesBackdrop"),
@@ -317,10 +382,532 @@ const elements = {
   firstTipText: document.querySelector("#firstTipText"),
   firstTipDismiss: document.querySelector("#firstTipDismiss"),
   firstTipSkipAll: document.querySelector("#firstTipSkipAll"),
+  landscapeRoot: document.querySelector("#landscapeRoot"),
+  mlSeats: document.querySelector("#mlSeats"),
+  mlSeatPlays: document.querySelector("#mlSeatPlays"),
+  mlHand: document.querySelector("#mlHand"),
+  mlTurnCaption: document.querySelector("#mlTurnCaption"),
+  mlCenter: document.querySelector("#mlCenter"),
+  mlNewGame: document.querySelector("#mlNewGame"),
+  mlPassTurn: document.querySelector("#mlPassTurn"),
+  mlPlayRecommended: document.querySelector("#mlPlayRecommended"),
+  mlPlaySelected: document.querySelector("#mlPlaySelected"),
+  mlSortHand: document.querySelector("#mlSortHand"),
+  mlCoachFab: document.querySelector("#mlCoachFab"),
+  mlHudTeammate: document.querySelector("#mlHudTeammate"),
+  mlHudAdvice: document.querySelector("#mlHudAdvice"),
+  mlKeyPauseBanner: document.querySelector("#mlKeyPauseBanner"),
+  mlHintBanner: document.querySelector("#mlHintBanner"),
+  dismissGameReview: document.querySelector("#dismissGameReview"),
+  reviewRotateHint: document.querySelector("#reviewRotateHint"),
+  mlBanners: document.querySelector("#mlBanners"),
+  mobileRulesHud: document.querySelector("#mobileRulesHud"),
+  mobileTopBar: document.querySelector("#mobileTopBar"),
+  mobileLevelRank: document.querySelector("#mobileLevelRank"),
+  mobileOurLevel: document.querySelector("#mobileOurLevel"),
+  mobileTheirLevel: document.querySelector("#mobileTheirLevel"),
+  mobileTurnChip: document.querySelector("#mobileTurnChip"),
+  mobileTrialVersion: document.querySelector("#mobileTrialVersion"),
+  mobileMenuBtn: document.querySelector("#mobileMenuBtn"),
+  mobileMenuBackdrop: document.querySelector("#mobileMenuBackdrop"),
+  mobileMenuDrawer: document.querySelector("#mobileMenuDrawer"),
+  mobileMenuClose: document.querySelector("#mobileMenuClose"),
+  mobileMenuStatus: document.querySelector("#mobileMenuStatus"),
+  mobileLevelSelect: document.querySelector("#mobileLevelSelect"),
+  mobileNewGame: document.querySelector("#mobileNewGame"),
+  mobileNewMatch: document.querySelector("#mobileNewMatch"),
+  mobileNextMatch: document.querySelector("#mobileNextMatch"),
+  mobileViewReview: document.querySelector("#mobileViewReview"),
+  mobileRules: document.querySelector("#mobileRules"),
+  mobileImport: document.querySelector("#mobileImport"),
+  mobileExport: document.querySelector("#mobileExport"),
+  mobileTrialFeedback: document.querySelector("#mobileTrialFeedback"),
+  mobileKeyPause: document.querySelector("#mobileKeyPause"),
+  mobileMlPolicy: document.querySelector("#mobileMlPolicy"),
+  mobileGuideTips: document.querySelector("#mobileGuideTips"),
+  coachSheetAdvice: document.querySelector("#coachSheetAdvice"),
 };
 
 if (elements.useMlPolicy) elements.useMlPolicy.checked = useMlPolicy;
 if (elements.useKeyPause) elements.useKeyPause.checked = keyPauseEnabled;
+if (elements.mobileMlPolicy) elements.mobileMlPolicy.checked = useMlPolicy;
+if (elements.mobileKeyPause) elements.mobileKeyPause.checked = keyPauseEnabled;
+if (elements.mobileGuideTips) elements.mobileGuideTips.checked = guidesEnabled();
+
+function isTouchMobileDevice() {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.matchMedia("(pointer: coarse)").matches) return true;
+    if (window.matchMedia("(hover: none)").matches) return true;
+  } catch {
+    /* 部分 WebView 不支持 pointer/hover 查询 */
+  }
+  return (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+}
+
+/** 明显桌面 UA（Windows/macOS/Linux 且无 Mobile 标记），用于过滤触控大屏 PC 窄窗误触 */
+function isObviousDesktopUa() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /Windows NT|Macintosh|CrOS|Linux x86_64|Linux i686/.test(ua)
+    && !/Mobile|Android|iPhone|iPad|iPod|Tablet/i.test(ua);
+}
+
+/** 手机/平板 UA（隧道外网试玩优先识别） */
+function isMobileUa() {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini|MicroMessenger/i.test(ua);
+}
+
+/** 细指针（鼠标/trackpad）桌面：永不走手机横屏 DOM */
+function isFinePointerDesktop() {
+  if (typeof window === "undefined") return true;
+  try {
+    return window.matchMedia("(pointer: fine)").matches;
+  } catch {
+    return true;
+  }
+}
+
+/** 窄屏视口：≤932px 或横屏手机典型矮视口（高度 ≤520px） */
+function isNarrowMobileViewport() {
+  if (typeof window === "undefined") return false;
+  if (MOBILE_LAYOUT_MQ?.matches ?? false) return true;
+  try {
+    if (window.matchMedia("(orientation: landscape) and (max-height: 520px)").matches) return true;
+    if (isMobileUa() && window.matchMedia("(orientation: landscape) and (max-width: 960px)").matches) {
+      return true;
+    }
+  } catch {
+    /* 部分 WebView 不支持 orientation 查询 */
+  }
+  return false;
+}
+
+/**
+ * 手机横屏布局：窄屏（≤932px）+ 手机 UA / 触控 / 粗指针 任一。
+ * 隧道手机 UA 优先；细指针 PC 窄窗仍走 desktop-shell。
+ */
+function isMobileLayout() {
+  if (typeof window === "undefined") return false;
+  const narrow = isNarrowMobileViewport();
+  if (!narrow) return false;
+  if (isMobileUa()) return true;
+  try {
+    if (window.matchMedia("(max-width: 932px) and (any-pointer: coarse)").matches) return true;
+    if (window.matchMedia("(max-width: 932px) and (pointer: coarse)").matches) return true;
+  } catch {
+    /* ignore */
+  }
+  if ((typeof navigator !== "undefined" ? navigator.maxTouchPoints : 0) > 0 && !isObviousDesktopUa()) {
+    return true;
+  }
+  if (isTouchMobileDevice()) {
+    if (isObviousDesktopUa()) return false;
+    return true;
+  }
+  if (isFinePointerDesktop()) return false;
+  return false;
+}
+
+/** 手机竖屏（含触控大屏竖屏） */
+function isMobilePortraitMode() {
+  if (!isMobileLayout()) return false;
+  if (MOBILE_ORIENTATION_PORTRAIT_MQ?.matches ?? false) return true;
+  return MOBILE_PORTRAIT_MQ?.matches ?? false;
+}
+
+/** 手机横屏 DOM 已由 bootMobileLayout 点亮（与 isMobileLayout 判定兜底对齐） */
+function isMobileLandscapeDomActive() {
+  if (typeof document === "undefined") return false;
+  return document.body.classList.contains("mobile-layout")
+    && document.body.classList.contains("mobile-landscape")
+    && elements.landscapeRoot
+    && !elements.landscapeRoot.hidden;
+}
+
+/** 手机横屏牌桌模式（竞品式布局） */
+function isMobileLandscape() {
+  if (isMobileLandscapeDomActive()) return true;
+  return isMobileLayout() && !isMobilePortraitMode();
+}
+
+function isStandaloneDisplayMode() {
+  if (typeof window === "undefined") return false;
+  if (window.matchMedia("(display-mode: standalone)").matches) return true;
+  return Boolean(window.navigator.standalone);
+}
+
+/** Android 等 env(safe-area-inset-*) 为 0 时，用 visualViewport 间隙估算手势条高度 */
+function syncMobileSafeInsets() {
+  if (!isMobileLayout() || typeof document === "undefined") return;
+  const root = document.documentElement;
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isAndroid = /Android/i.test(ua);
+  let gestureMin = isAndroid ? 20 : 0;
+  const vv = window.visualViewport;
+  if (vv) {
+    const vvGap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    gestureMin = Math.max(gestureMin, vvGap);
+  }
+  root.style.setProperty("--safe-gesture-min", `${Math.round(gestureMin)}px`);
+}
+
+/** 同步 visualViewport 高度，消化移动端地址栏伸缩 */
+function syncMobileViewportHeight() {
+  if (!isMobileLayout() || typeof document === "undefined") return;
+  syncMobileSafeInsets();
+  const vv = window.visualViewport;
+  const height = vv?.height ?? window.innerHeight;
+  if (height > 0) {
+    const px = `${Math.round(height)}px`;
+    document.documentElement.style.setProperty("--app-vh", px);
+    if (elements.landscapeRoot) {
+      elements.landscapeRoot.style.height = px;
+      elements.landscapeRoot.style.maxHeight = px;
+      elements.landscapeRoot.style.minHeight = px;
+    }
+  }
+}
+
+let mobileFullscreenTried = false;
+
+/** 首次用户手势尝试全屏（需浏览器允许；失败则静默） */
+function tryMobileFullscreen() {
+  if (mobileFullscreenTried || !isMobileLayout() || isStandaloneDisplayMode()) return;
+  mobileFullscreenTried = true;
+  const root = document.documentElement;
+  const req = root.requestFullscreen?.()
+    ?? root.webkitRequestFullscreen?.()
+    ?? root.webkitEnterFullscreen?.();
+  if (req && typeof req.catch === "function") req.catch(() => {});
+}
+
+function syncMobileThemeColor() {
+  if (typeof document === "undefined") return;
+  const meta = document.querySelector('meta[name="theme-color"][data-mobile-felt]')
+    ?? document.querySelector('meta[name="theme-color"]');
+  if (!meta) return;
+  meta.setAttribute("content", isMobileLayout() ? "#124830" : "#e8efe6");
+}
+
+function renderMobileA2hsHint() {
+  const hint = elements.mobileA2hsHint;
+  if (!hint) return;
+  const mobile = isMobileLayout();
+  const dismissed = safeGetItem(MOBILE_A2HS_DISMISS_STORAGE, "") === "1";
+  const portraitDismissed = safeGetItem(MOBILE_PORTRAIT_DISMISS_STORAGE, "") === "1";
+  const showPortraitBlocker = mobile
+    && isMobilePortraitMode()
+    && !portraitDismissed;
+  const show = mobile
+    && !dismissed
+    && !isStandaloneDisplayMode()
+    && isMobileLandscape()
+    && !showPortraitBlocker;
+  hint.hidden = !show;
+  if (!show || !elements.mobileA2hsText) return;
+  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+  const isIOS = /iPhone|iPad|iPod/i.test(ua);
+  elements.mobileA2hsText.textContent = isIOS
+    ? "Safari：分享 →「添加到主屏幕」可隐藏地址栏全屏玩"
+    : "Chrome：菜单 →「添加到主屏幕」或「安装应用」可全屏玩";
+}
+
+function activePlayersEl() {
+  return isMobileLandscape() ? elements.mlSeats : elements.players;
+}
+
+function activeSeatPlaysEl() {
+  return isMobileLandscape() ? elements.mlSeatPlays : elements.seatPlays;
+}
+
+function activeHandEl() {
+  return isMobileLandscape() ? elements.mlHand : elements.hand;
+}
+
+/** 细指针桌面：清空手机横屏骨架，避免叠在牌桌上 */
+function purgeMobileLandscapeDom() {
+  if (elements.landscapeRoot) elements.landscapeRoot.hidden = true;
+  if (elements.mlHand) elements.mlHand.replaceChildren();
+  if (elements.mlSeats) elements.mlSeats.replaceChildren();
+  if (elements.mlSeatPlays) elements.mlSeatPlays.replaceChildren();
+}
+
+/** 手机模式：禁止 desktop #hand 残留竖列牌 */
+function purgeDesktopHandOnMobile() {
+  if (!isMobileLayout() || !elements.hand) return;
+  elements.hand.replaceChildren();
+  elements.hand.classList.remove("hand-fan");
+  elements.hand.ondragover = null;
+  elements.hand.ondrop = null;
+}
+
+function mirrorMobileBanner(desktopEl, mobileEl) {
+  if (!mobileEl) return;
+  if (!isMobileLandscape() || !desktopEl || desktopEl.hidden) {
+    mobileEl.hidden = true;
+    mobileEl.replaceChildren();
+    return;
+  }
+  mobileEl.hidden = false;
+  mobileEl.innerHTML = desktopEl.innerHTML;
+}
+
+function isGameReviewOverlayOpen() {
+  return Boolean(
+    state
+    && isGameOver(state)
+    && !gameReviewOverlayDismissed,
+  );
+}
+
+function syncMobileLayoutClass() {
+  const mobile = isMobileLayout();
+  const portrait = mobile && isMobilePortraitMode();
+  const landscape = mobile && !portrait;
+  const portraitDismissed = safeGetItem(MOBILE_PORTRAIT_DISMISS_STORAGE, "") === "1";
+  const mobileReview = mobile && isGameReviewOverlayOpen();
+  document.documentElement.classList.toggle("mobile-layout", mobile);
+  document.body.classList.toggle("mobile-layout", mobile);
+  document.body.classList.toggle("mobile-landscape", landscape);
+  document.body.classList.toggle("mobile-portrait", portrait && !portraitDismissed && !mobileReview);
+  document.body.classList.toggle("mobile-portrait-review", mobileReview);
+  syncMobileThemeColor();
+  if (elements.portraitBlocker) {
+    elements.portraitBlocker.hidden = !portrait || portraitDismissed || mobileReview;
+  }
+  if (elements.reviewRotateHint) {
+    elements.reviewRotateHint.hidden = !(landscape && mobileReview);
+  }
+  if (!mobile) {
+    purgeMobileLandscapeDom();
+    setMobileMenuOpen(false);
+    setCoachFabOpen(false);
+    document.body.classList.remove("mobile-menu-open", "coach-fab-open");
+    document.documentElement.classList.remove("mobile-boot", "mobile-landscape-boot");
+    document.documentElement.style.removeProperty("--app-vh");
+    if (elements.landscapeRoot) {
+      elements.landscapeRoot.style.removeProperty("height");
+      elements.landscapeRoot.style.removeProperty("max-height");
+      elements.landscapeRoot.style.removeProperty("min-height");
+    }
+    if (elements.mobileA2hsHint) elements.mobileA2hsHint.hidden = true;
+    return;
+  }
+  document.documentElement.classList.toggle("mobile-boot", true);
+  document.documentElement.classList.toggle("mobile-landscape-boot", landscape);
+  purgeDesktopHandOnMobile();
+  if (elements.landscapeRoot) elements.landscapeRoot.hidden = !landscape;
+  syncMobileViewportHeight();
+  syncMobileHandMetrics();
+  syncMobileSeatPlayMetrics();
+  syncMobileActionBandMetrics();
+  renderMobileA2hsHint();
+  if (portrait && !portraitDismissed) {
+    setMobileMenuOpen(false);
+    setCoachFabOpen(false);
+  }
+}
+
+let lastMobileLandscapeActive = false;
+
+/** 同步手机横屏布局（启动时与 resize/orientation 变更时调用） */
+function syncMobileLayout() {
+  const wasLandscape = lastMobileLandscapeActive;
+  syncMobileLayoutClass();
+  const nowLandscape = isMobileLandscape();
+  lastMobileLandscapeActive = nowLandscape;
+  if (bootComplete && wasLandscape !== nowLandscape) {
+    render({ immediate: true });
+  }
+}
+
+function setMobileMenuOpen(open) {
+  mobileMenuOpen = open;
+  if (elements.mobileMenuBackdrop) elements.mobileMenuBackdrop.hidden = !open;
+  if (elements.mobileMenuDrawer) elements.mobileMenuDrawer.hidden = !open;
+  document.body.classList.toggle("mobile-menu-open", open && isMobileLandscape());
+}
+
+function toggleMobileMenu() {
+  const next = !mobileMenuOpen;
+  setMobileMenuOpen(next);
+  if (next) renderDrillPracticePanel();
+}
+
+function initMobileLevelSelect() {
+  if (!elements.mobileLevelSelect || !elements.levelRank) return;
+  if (elements.mobileLevelSelect.options.length > 0) return;
+  for (const option of elements.levelRank.options) {
+    const clone = document.createElement("option");
+    clone.value = option.value;
+    clone.textContent = option.textContent;
+    if (option.selected) clone.selected = true;
+    elements.mobileLevelSelect.append(clone);
+  }
+}
+
+function syncMobileLevelSelect() {
+  if (!elements.mobileLevelSelect || !elements.levelRank) return;
+  elements.mobileLevelSelect.value = elements.levelRank.value;
+}
+
+function renderTrialVersionBadge() {
+  if (!elements.mobileTrialVersion) return;
+  const label = `试玩 v${TRIAL_PLAY_VERSION}`;
+  elements.mobileTrialVersion.textContent = label;
+  elements.mobileTrialVersion.title = `掼蛋教练 Pro 试玩版 ${TRIAL_PLAY_VERSION}`;
+}
+
+async function openTrialFeedback() {
+  setMobileMenuOpen(false);
+  const { formUrl, wechatId, email, note } = TRIAL_FEEDBACK;
+  const versionLine = `试玩 ${TRIAL_PLAY_VERSION}`;
+
+  if (formUrl) {
+    try {
+      window.open(formUrl, "_blank", "noopener,noreferrer");
+      showCoachToast("已打开反馈表单");
+    } catch {
+      showCoachToast("无法打开表单，请检查链接配置");
+    }
+    return;
+  }
+
+  if (wechatId) {
+    try {
+      await navigator.clipboard.writeText(wechatId);
+      showCoachToast(`微信号已复制：${wechatId}`);
+    } catch {
+      showCoachToast(`微信号：${wechatId}（请手动复制）`);
+    }
+    return;
+  }
+
+  if (email) {
+    const subject = encodeURIComponent(`掼蛋教练试玩反馈 (${TRIAL_PLAY_VERSION})`);
+    const body = encodeURIComponent(`${note}\n\n版本：${versionLine}\n`);
+    window.location.href = `mailto:${email}?subject=${subject}&body=${body}`;
+    return;
+  }
+
+  showCoachToast("反馈渠道待配置，见 docs/TRIAL-PLAY-GUIDE.md");
+}
+
+function renderMobileChrome() {
+  syncMobileLayout();
+  if (!isMobileLandscape()) return;
+
+  renderTrialVersionBadge();
+
+  const levelRank = elements.levelRank?.value ?? "6";
+  if (elements.mobileLevelRank) elements.mobileLevelRank.textContent = levelRank;
+  if (elements.mobileOurLevel) elements.mobileOurLevel.textContent = elements.ourLevel?.textContent ?? "6";
+  if (elements.mobileTheirLevel) elements.mobileTheirLevel.textContent = elements.theirLevel?.textContent ?? "6";
+  syncMobileLevelSelect();
+
+  const noGame = !state;
+  const gameOver = state && isGameOver(state);
+  const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !gameOver;
+  let turnText = "点菜单开新局";
+  if (noGame) {
+    turnText = "点新开一局开始";
+  } else if (gameOver) {
+    turnText = gameReviewOverlayDismissed ? "本局结束 · 看复盘" : "本局结束";
+  } else if (humanTurn) {
+    turnText = `轮到你 · ${state.turnNumber} 手`;
+  } else if (state) {
+    turnText = `${PLAYER_NAMES[state.currentPlayerIndex]} · ${state.turnNumber} 手`;
+  }
+  if (elements.mobileTurnChip) {
+    elements.mobileTurnChip.textContent = turnText;
+    elements.mobileTurnChip.classList.toggle("waiting", noGame || !humanTurn);
+    elements.mobileTurnChip.classList.toggle("active-turn", !!humanTurn);
+  }
+  syncGameReviewReopenUi();
+
+  syncMobileCenterActions();
+  syncMlHandToolsChrome();
+
+  if (elements.mobileMenuStatus) {
+    const statusTitle = elements.matchStatus?.textContent ?? "单局练习";
+    const statusBody = elements.matchSummary?.textContent ?? "竞技赛未开始；可先用单局继续练习。";
+    elements.mobileMenuStatus.innerHTML = `<strong>${escapeHtml(statusTitle)}</strong><span>${escapeHtml(statusBody)}</span>`;
+  }
+  if (elements.mobileNextMatch) {
+    elements.mobileNextMatch.hidden = elements.nextMatchGame?.hidden ?? true;
+    elements.mobileNextMatch.disabled = elements.nextMatchGame?.disabled ?? true;
+  }
+  if (elements.mobileKeyPause) elements.mobileKeyPause.checked = keyPauseEnabled;
+  if (elements.mobileMlPolicy) elements.mobileMlPolicy.checked = useMlPolicy;
+  if (elements.mobileGuideTips) elements.mobileGuideTips.checked = guidesEnabled();
+
+  if (elements.mlHudTeammate && state) {
+    const teammate = state.players[2];
+    const active = teammate.seatIndex === state.currentPlayerIndex;
+    elements.mlHudTeammate.innerHTML =
+      `<span class="ml-teammate-chip${active ? " active" : ""}" data-avatar="${PLAYER_AVATARS[2]}"><span>${PLAYER_NAMES[2]} · ${teammate.hand.length}</span></span>`;
+  } else if (elements.mlHudTeammate) {
+    elements.mlHudTeammate.replaceChildren();
+  }
+}
+
+function renderCenterTurnHint() {
+  const mobile = isMobileLandscape();
+  const noGame = !state;
+  const show = mobile && state && !isGameOver(state);
+  const humanTurn = show && state.currentPlayerIndex === HUMAN_INDEX;
+  const hint = !show
+    ? (noGame && mobile ? "点「新开一局」开始" : "")
+    : humanTurn
+      ? `轮到你 · 第 ${state.turnNumber} 手`
+      : `${PLAYER_NAMES[state.currentPlayerIndex]} 出牌中 · 第 ${state.turnNumber} 手`;
+
+  if (elements.centerTurnHint) {
+    elements.centerTurnHint.hidden = !show;
+    elements.centerTurnHint.textContent = hint;
+  }
+  if (elements.mlTurnCaption) {
+    const matchLine = elements.matchSummary?.textContent?.trim();
+    const arenaCaption = matchLine && !/^竞技赛未开始/.test(matchLine)
+      ? matchLine
+      : (state ? `单局练习 · 级牌 ${state.levelRank ?? elements.levelRank?.value ?? "6"}` : "");
+    if (mobile && show) {
+      elements.mlTurnCaption.textContent = "";
+    } else {
+      elements.mlTurnCaption.textContent = hint || arenaCaption;
+    }
+  }
+}
+
+function renderCoachSheetAdvice() {
+  if (!elements.coachSheetAdvice) return;
+  const mobile = isMobileLandscape();
+  const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
+  if (!mobile || !coachFabOpen || !humanTurn || !currentAdvice) {
+    elements.coachSheetAdvice.hidden = true;
+    elements.coachSheetAdvice.replaceChildren();
+    return;
+  }
+  const rec = currentAdvice.recommendation;
+  const reason = firstReasonForUser(rec.reasons);
+  const label = rec.candidate.label || (rec.candidate.type === PLAY_TYPES.pass ? "过牌" : "推荐牌");
+  elements.coachSheetAdvice.hidden = false;
+  elements.coachSheetAdvice.innerHTML = `
+    <strong>推荐1</strong>
+    <span class="coach-sheet-play">${escapeHtml(label)}</span>
+    <span class="coach-sheet-reason">${escapeHtml(reason)}</span>
+  `;
+}
+
+function flashHandColumn(columnIndex) {
+  const columnNode = activeHandEl()?.querySelector(`.hand-column[data-column-index="${columnIndex}"]`);
+  if (!columnNode) return;
+  columnNode.classList.add("column-swipe-flash");
+  window.setTimeout(() => columnNode.classList.remove("column-swipe-flash"), 420);
+}
 
 async function loadMlPolicyModel() {
   if (globalThis.__GUANDAN_ML_MODEL__) {
@@ -356,6 +943,45 @@ function playLabel(play, levelRank = state?.levelRank) {
   const label = playTypeLabel(play.type);
   if (!levelRank || !LEVEL_MAIN_PLAY_TYPES.has(play.type)) return label;
   return play.mainRank === levelRank ? `级牌${label}` : label;
+}
+
+function isHighControlOpponentPlay(play) {
+  if (!play || play.type === PLAY_TYPES.pass) return false;
+  if ([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb].includes(play.type)) return true;
+  return play.type === PLAY_TYPES.pair && (play.mainRank === "BJ" || play.mainRank === "SJ");
+}
+
+function trickPromptLabel(gameState = state) {
+  if (isCatchWindPending(gameState)) {
+    return "轮到你领出（接风），优先成组减手";
+  }
+  if (!gameState?.lastActivePlay) {
+    return "你拥有本轮牌权，可以主动出牌";
+  }
+  const leaderIndex = resolveTrickLeaderIndex(gameState, HUMAN_INDEX) ?? gameState.lastActivePlayerIndex;
+  const leaderName = PLAYER_NAMES[leaderIndex];
+  const playText = playLabel(gameState.lastActivePlay);
+  if (isTeammate(HUMAN_INDEX, leaderIndex)) {
+    const pending = opponentsPendingAfterPlayer(gameState, HUMAN_INDEX);
+    if (pending.length > 0) {
+      const oppNames = pending.map((idx) => PLAYER_NAMES[idx]).join("、");
+      const guardCtx = {
+        state: gameState,
+        playerIndex: HUMAN_INDEX,
+        previousPlay: gameState.lastActivePlay,
+        lastActivePlayerIndex: leaderIndex,
+      };
+      if (partnerLeadNeedsGuard(guardCtx)) {
+        return `队友 ${leaderName} 出 ${playText} 占牌；${oppNames} 尚未表态，宜最小散单防抢权（也可过牌）`;
+      }
+      return `队友 ${leaderName} 出 ${playText} 占牌；${oppNames} 尚未表态，宜过牌让队友（勿用炸弹/同花顺压队友）`;
+    }
+    return `队友 ${leaderName} 占牌 ${playText}，可过牌让队友接风`;
+  }
+  if (isHighControlOpponentPlay(gameState.lastActivePlay)) {
+    return `${leaderName} 出 ${playText} 占牌，难压时可过牌`;
+  }
+  return `本轮需要压过：${leaderName} 的 ${playText}`;
 }
 
 function unfinishedPlayers(gameState) {
@@ -498,6 +1124,60 @@ function appendCoachAdviceRecord(record) {
   return record;
 }
 
+function slimPlayHistoryItem(item) {
+  if (!item) return null;
+  const play = item.play;
+  let label = play?.label;
+  if (!label && play) {
+    label = play.type === PLAY_TYPES.pass
+      ? "过牌"
+      : `${playLabel(play)} ${cardsLabel(play.cards ?? [])}`;
+  }
+  return {
+    turnNumber: item.turnNumber,
+    playerIndex: item.playerIndex,
+    playerName: item.playerName ?? PLAYER_NAMES[item.playerIndex] ?? "—",
+    play: {
+      type: play?.type,
+      label: label ?? "",
+    },
+  };
+}
+
+function slimEndRemainingHands(snapshot) {
+  const finished = snapshot?.finishedPlayers ?? [];
+  const remainingByIndex = new Map(
+    (snapshot?.remainingHands ?? []).map((hand) => [hand.playerIndex, hand.cards]),
+  );
+  return finished.slice(1, 4).map((entry, index) => ({
+    order: index + 2,
+    playerIndex: entry.playerIndex,
+    playerName: entry.playerName,
+    cards: (remainingByIndex.get(entry.playerIndex) ?? []).map((card) => ({
+      rank: card.rank,
+      suit: card.suit,
+      label: card.label ?? cardLabel(card),
+    })),
+  }));
+}
+
+/** 复盘归档/提交：完整出牌记录（轻量字段） */
+function allReviewPlaysFromSnapshot(snapshot) {
+  const history = snapshot?.playHistory ?? [];
+  return history.map((item) => slimPlayHistoryItem({
+    ...item,
+    playerName: item.playerName ?? PLAYER_NAMES[item.playerIndex],
+  }));
+}
+
+function allReviewPlaysFromState() {
+  const history = state?.playHistory ?? [];
+  return history.map((item) => slimPlayHistoryItem({
+    ...item,
+    playerName: PLAYER_NAMES[item.playerIndex],
+  }));
+}
+
 /** 复盘提交用轻量快照，避免 playHistory/明牌等大字段卡死主线程 */
 function slimGameSnapshotForReview(snapshot) {
   if (!snapshot) return null;
@@ -513,6 +1193,9 @@ function slimGameSnapshotForReview(snapshot) {
     completedTeam: snapshot.completedTeam,
     drillFocus: snapshot.drillFocus ?? null,
     coachAdviceTimeline: timeline,
+    recentPlays: allReviewPlaysFromSnapshot(snapshot),
+    endRemainingHands: slimEndRemainingHands(snapshot),
+    playHistoryTotal: snapshot.playHistory?.length ?? 0,
   };
 }
 
@@ -650,57 +1333,118 @@ const HUMAN_ADVICE_MAX_RETRIES = 2;
 
 /** 本手是否已发起过建议计算（防止 render 循环反复触发） */
 let adviceScheduledTableKey = null;
+let cachedHumanAdviceContext = { key: "", value: null };
 
-function buildHumanAdviceContext() {
+function isAdvicePhaseComplete(advice = currentAdvice) {
+  return Boolean(advice && !isAdviceStale(advice) && (advice._phase ?? "full") === "full");
+}
+
+function isHumanPressing(gameState = state) {
+  return Boolean(
+    gameState?.lastActivePlay
+    && gameState.lastActivePlay.type !== PLAY_TYPES.pass
+    && !isCatchWindPending(gameState),
+  );
+}
+
+function buildHumanAdviceContext({ lightweight = false } = {}) {
+  const key = buildAdviceTableKey();
+  if (cachedHumanAdviceContext.key === key && cachedHumanAdviceContext.value) {
+    return cachedHumanAdviceContext.value;
+  }
   const hand = state.players[HUMAN_INDEX].hand;
-  const pressing = Boolean(state.lastActivePlay && state.lastActivePlay.type !== PLAY_TYPES.pass);
+  const pressing = isHumanPressing(state);
+  if (lightweight) {
+    const columnGroups = pressing ? currentHandPlayGroups() : [];
+    const preferredGroups = pressing && columnGroups.length > 0
+      ? mergePremiumStrategicGroups(
+        columnGroups,
+        hand,
+        state.levelRank,
+        buildStrategicGroups(hand, state.levelRank),
+      )
+      : columnGroups;
+    const ctx = {
+      pressing,
+      preferredGroups,
+      handProfile: null,
+    };
+    cachedHumanAdviceContext = { key, value: ctx };
+    return ctx;
+  }
   const columnGroups = pressing ? currentHandPlayGroups() : [];
-  const preferredGroups = columnGroups.length > 0
-    ? columnGroups
-    : buildStrategicGroups(hand, state.levelRank);
-  return {
+  const strategicGroups = buildStrategicGroups(hand, state.levelRank, { skipStraightFlush: pressing });
+  const strategicGroupsForMerge = pressing
+    ? buildStrategicGroups(hand, state.levelRank)
+    : strategicGroups;
+  const preferredGroups = pressing
+    ? mergePremiumStrategicGroups(
+      columnGroups.length > 0 ? columnGroups : strategicGroups,
+      hand,
+      state.levelRank,
+      strategicGroupsForMerge,
+    )
+    : strategicGroups;
+  const ctx = {
     pressing,
     preferredGroups,
     handProfile: evaluateHandProfile(hand, state.levelRank, { preferredGroups }),
   };
+  cachedHumanAdviceContext = { key, value: ctx };
+  return ctx;
 }
 
-function humanAdviceOptionsQuick() {
-  const pressing = Boolean(state.lastActivePlay && state.lastActivePlay.type !== PLAY_TYPES.pass);
-  const hand = state.players[HUMAN_INDEX].hand;
-  const preferredGroups = pressing ? [] : buildStrategicGroups(hand, state.levelRank);
+function humanAdviceOptionsQuick(abortCheck = null) {
+  const ctx = buildHumanAdviceContext();
   return {
     alternatives: HUMAN_ADVICE_ALTERNATIVES_QUICK,
-    maxCandidates: pressing ? 24 : HUMAN_ADVICE_MAX_CANDIDATES_OPEN,
-    preferredGroups,
-    handProfile: pressing
-      ? null
-      : evaluateHandProfile(hand, state.levelRank, { preferredGroups }),
+    maxCandidates: ctx.pressing ? 12 : HUMAN_ADVICE_MAX_CANDIDATES_OPEN,
+    preferredGroups: ctx.preferredGroups,
+    handProfile: ctx.handProfile,
     mlModel: null,
     mlFusionMode: "off",
     lite: true,
+    scoringAudience: "human-lite",
+    deadline: performance.now() + 2500,
+    abortCheck,
   };
 }
 
-function humanAdviceOptionsFull(ctx) {
+function humanAdviceOptionsFull(ctx, abortCheck = null) {
   const opening = !ctx.pressing;
   const useMl = useMlPolicy && mlPolicyModel && ctx.pressing;
   return {
     preferredGroups: ctx.preferredGroups,
     handProfile: ctx.handProfile,
-    maxCandidates: opening ? 28 : HUMAN_ADVICE_MAX_CANDIDATES_PRESS,
+    maxCandidates: opening ? 20 : HUMAN_ADVICE_MAX_CANDIDATES_PRESS,
     alternatives: HUMAN_ADVICE_ALTERNATIVES_FULL,
     mlModel: useMl ? mlPolicyModel : null,
     mlFusionMode: useMl ? mlFusionModeForUi() : "off",
-    lite: false,
+    lite: true,
+    scoringAudience: "human-lite",
+    deadline: performance.now() + 6000,
+    abortCheck,
   };
 }
 
-function robotAdviceOptions() {
+function robotAdviceOptions(actorIndex = state?.currentPlayerIndex ?? 1) {
+  if (state) {
+    return {
+      alternatives: 0,
+      handProfile: null,
+      scoringAudience: "robot",
+      ...buildFormalRobotPlayOptions(state, actorIndex),
+    };
+  }
   return {
-    alternatives: 6,
-    mlModel: useMlPolicy && mlPolicyModel ? mlPolicyModel : null,
-    mlFusionMode: mlFusionModeForUi(),
+    alternatives: 0,
+    handProfile: null,
+    lite: true,
+    scoringAudience: "robot",
+    maxCandidates: ROBOT_LITE_MAX_CANDIDATES,
+    mlModel: null,
+    mlFusionMode: "off",
+    deadline: performance.now() + ROBOT_STEP_DEADLINE_MS,
   };
 }
 
@@ -713,8 +1457,11 @@ function buildAdviceTableKey(gameState = state) {
   if (!gameState) return "";
   const hand = gameState.players[HUMAN_INDEX]?.hand ?? [];
   const handSig = hand.map((card) => cardId(card)).sort().join("|");
-  const mustBeatSig = gameState.lastActivePlay ? playSignature(gameState.lastActivePlay) : "";
-  return `${gameState.turnNumber}|${mustBeatSig}|${handSig}`;
+  const mustBeatSig = effectivePreviousPlay(gameState)
+    ? playSignature(effectivePreviousPlay(gameState))
+    : "";
+  const leaderIdx = resolveTrickLeaderIndex(gameState, HUMAN_INDEX);
+  return `${gameState.turnNumber}|${mustBeatSig}|${leaderIdx ?? ""}|${handSig}`;
 }
 
 function isAdviceStale(advice) {
@@ -725,29 +1472,55 @@ function isAdviceStale(advice) {
 
 function invalidateStaleAdvice() {
   if (currentAdvice && isAdviceStale(currentAdvice)) currentAdvice = null;
+  cachedHumanAdviceContext = { key: "", value: null };
 }
 
-function getHumanAdviceQuick() {
-  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsQuick());
+function getHumanAdviceQuick(abortCheck = null) {
+  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsQuick(abortCheck));
   advice.tableKey = buildAdviceTableKey();
   advice._phase = "quick";
   return advice;
 }
 
-function getHumanAdviceFromContext(ctx, phase = "full") {
-  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsFull(ctx));
+function getHumanAdviceFromContext(ctx, phase = "full", abortCheck = null) {
+  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsFull(ctx, abortCheck));
   advice.tableKey = buildAdviceTableKey();
   advice._phase = phase;
   return advice;
 }
 
+const ADVICE_PHASE_RANK = { emergency: 0, quick: 1, full: 2 };
+
 function applyHumanAdviceIfCurrent(advice, generation) {
   if (generation !== adviceComputeGeneration.value) return false;
   if (advice.tableKey !== buildAdviceTableKey()) return false;
+  const incomingPhase = advice._phase ?? "full";
+  const currentPhase = currentAdvice?._phase;
+  if (currentPhase
+    && (ADVICE_PHASE_RANK[incomingPhase] ?? 0) < (ADVICE_PHASE_RANK[currentPhase] ?? 0)) {
+    return false;
+  }
   currentAdvice = advice;
   adviceScheduledTableKey = advice.tableKey;
   adviceComputeState.retryCount = 0;
   return true;
+}
+
+/** 人类回合立即写入毫秒级兜底，避免侧栏长时间停在「正在计算」 */
+function ensureHumanAdvicePlaceholder() {
+  if (!state || isGameOver(state) || state.currentPlayerIndex !== HUMAN_INDEX) return false;
+  const key = buildAdviceTableKey();
+  if (currentAdvice?.tableKey === key && !isAdviceStale(currentAdvice)) return true;
+  try {
+    const emergency = buildEmergencyHumanAdvice();
+    if (emergency.tableKey !== key) return false;
+    currentAdvice = emergency;
+    adviceScheduledTableKey = key;
+    return true;
+  } catch (error) {
+    console.error("教练建议兜底失败", error);
+    return false;
+  }
 }
 
 function cancelIdleTask(idRef) {
@@ -772,7 +1545,7 @@ const adviceComputeState = {
   watchdogTimer: null,
   retryCount: 0,
 };
-const ADVICE_COMPUTE_TIMEOUT_MS = 8_000;
+const ADVICE_COMPUTE_TIMEOUT_MS = 4_500;
 
 function clearAdviceSlowTimer() {
   if (adviceComputeState.slowTimer !== null) {
@@ -798,11 +1571,14 @@ function finishAdviceCompute({ generation, refreshUi = true } = {}) {
     if (adviceComputeState.pendingRefresh) scheduleHumanAdviceRefresh();
     return;
   }
-  if (!state || isGameOver(state) || state.currentPlayerIndex !== HUMAN_INDEX) return;
+  if (!state || isGameOver(state) || state.currentPlayerIndex !== HUMAN_INDEX) {
+    return;
+  }
   if (hintAwaiting && currentAdvice) applyHintFromAdvice(currentAdvice);
   if (refreshUi) {
     renderAdvice({ computeAdvice: false });
     renderControls();
+    if (!robotQueueActive) renderGameReviewPanel();
   }
   if (
     !currentAdvice
@@ -814,6 +1590,7 @@ function finishAdviceCompute({ generation, refreshUi = true } = {}) {
     scheduleHumanAdviceRefresh({ force: true });
   } else {
     adviceComputeState.pendingRefresh = false;
+    if (!currentAdvice) adviceScheduledTableKey = null;
   }
 }
 
@@ -828,6 +1605,13 @@ function cancelAdviceCompute() {
   adviceComputeState.pendingRefresh = false;
   adviceComputeState.retryCount = 0;
   adviceScheduledTableKey = null;
+}
+
+function shouldAbortAdviceCompute(generation) {
+  if (generation !== adviceComputeGeneration.value) return true;
+  if (robotQueueActive && state?.currentPlayerIndex !== HUMAN_INDEX) return true;
+  if (!state || isGameOver(state)) return true;
+  return false;
 }
 
 function advicePendingMessage() {
@@ -852,7 +1636,8 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
   clearAdviceSlowTimer();
   clearAdviceComputeWatchdog();
   adviceComputeState.slowTimer = setTimeout(() => {
-    if (generation !== adviceComputeGeneration.value || currentAdvice) return;
+    if (generation !== adviceComputeGeneration.value) return;
+    if (currentAdvice?._phase === "full") return;
     adviceComputeState.slowNotice = true;
     if (refreshUi && state?.currentPlayerIndex === HUMAN_INDEX) {
       renderAdvice({ computeAdvice: false });
@@ -861,45 +1646,92 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
   adviceComputeState.watchdogTimer = setTimeout(() => {
     if (!adviceComputeState.inFlight || generation !== adviceComputeGeneration.value) return;
     console.warn("教练建议计算超时，中止本轮");
-    adviceComputeState.inFlight = false;
+    adviceComputeGeneration.value += 1;
     adviceComputeState.slowNotice = true;
-    adviceScheduledTableKey = buildAdviceTableKey();
-    if (refreshUi && state?.currentPlayerIndex === HUMAN_INDEX) {
-      renderAdvice({ computeAdvice: false });
-    }
+    ensureHumanAdvicePlaceholder();
+    finishAdviceCompute({ generation, refreshUi });
   }, ADVICE_COMPUTE_TIMEOUT_MS);
 
   window.setTimeout(() => {
     try {
-      if (generation !== adviceComputeGeneration.value) return;
-      if (!state || isGameOver(state)) return;
+      if (shouldAbortAdviceCompute(generation)) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
       const forHuman = state.currentPlayerIndex === HUMAN_INDEX;
-      if (refreshUi && !forHuman) return;
-      if (!refreshUi && forHuman) return;
+      if (refreshUi && !forHuman) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
+      if (!refreshUi && forHuman) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
 
-      const quickAdvice = getHumanAdviceQuick();
-      applyHumanAdviceIfCurrent(quickAdvice, generation);
+      applyHumanAdviceIfCurrent(buildEmergencyHumanAdvice(), generation)
+        || ensureHumanAdvicePlaceholder();
+      if (refreshUi) {
+        renderAdvice({ computeAdvice: false });
+        renderControls();
+      }
 
-      if (hintAwaiting && useMlPolicy && mlPolicyModel && generation === adviceComputeGeneration.value) {
-        const ctx = buildHumanAdviceContext();
-        if (ctx.pressing) {
+      window.setTimeout(() => {
+        try {
+          if (shouldAbortAdviceCompute(generation)) {
+            finishAdviceCompute({ generation, refreshUi });
+            return;
+          }
+          if (state.currentPlayerIndex !== HUMAN_INDEX) {
+            finishAdviceCompute({ generation, refreshUi });
+            return;
+          }
+
+          const abortCheck = () => shouldAbortAdviceCompute(generation);
+          const quickAdvice = getHumanAdviceQuick(abortCheck);
+          if (shouldAbortAdviceCompute(generation)) {
+            finishAdviceCompute({ generation, refreshUi });
+            return;
+          }
+          applyHumanAdviceIfCurrent(quickAdvice, generation);
+          if (refreshUi) {
+            renderAdvice({ computeAdvice: false });
+            renderControls();
+          }
+
           window.setTimeout(() => {
             try {
-              if (generation !== adviceComputeGeneration.value) return;
-              const fullAdvice = getHumanAdviceFromContext(ctx, "full");
+              if (shouldAbortAdviceCompute(generation)) return;
+              if (state.currentPlayerIndex !== HUMAN_INDEX) return;
+
+              const abortCheck = () => shouldAbortAdviceCompute(generation);
+              const ctx = buildHumanAdviceContext();
+              const fullAdvice = getHumanAdviceFromContext(ctx, "full", abortCheck);
+              if (shouldAbortAdviceCompute(generation)) return;
+              adviceComputeState.slowNotice = false;
               if (applyHumanAdviceIfCurrent(fullAdvice, generation) && refreshUi) {
                 renderAdvice({ computeAdvice: false });
                 renderControls();
               }
             } catch (error) {
-              console.error("教练建议 ML 精算失败", error);
+              console.error("教练建议精算失败", error);
+              ensureHumanAdvicePlaceholder();
+            } finally {
+              finishAdviceCompute({ generation, refreshUi });
             }
           }, 0);
+        } catch (error) {
+          console.error("教练建议计算失败", error);
+          if (!shouldAbortAdviceCompute(generation) && !currentAdvice) {
+            ensureHumanAdvicePlaceholder();
+          }
+          finishAdviceCompute({ generation, refreshUi });
         }
-      }
+      }, 0);
     } catch (error) {
-      console.error("教练建议计算失败", error);
-    } finally {
+      console.error("教练建议初始化失败", error);
+      if (!shouldAbortAdviceCompute(generation) && !currentAdvice) {
+        ensureHumanAdvicePlaceholder();
+      }
       finishAdviceCompute({ generation, refreshUi });
     }
   }, 0);
@@ -909,12 +1741,23 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
 function scheduleIdleHumanAdviceRefresh() {
   if (robotQueueActive) return;
   cancelIdleTask(adviceRefreshIdleRef);
+  if (!state || isGameOver(state)) return;
+  // 非人类回合：优先恢复机器人队列，勿抢主线程预算人类 advice（否则勇哥等会卡死）
+  if (state.currentPlayerIndex !== HUMAN_INDEX) {
+    queueRobotTurns();
+    return;
+  }
   const generation = adviceComputeGeneration.value;
   const run = () => {
     adviceRefreshIdleRef.value = null;
     if (generation !== adviceComputeGeneration.value) return;
     if (robotQueueActive) return;
-    if (!state || isGameOver(state) || state.currentPlayerIndex === HUMAN_INDEX) return;
+    if (!state || isGameOver(state) || state.currentPlayerIndex !== HUMAN_INDEX) {
+      if (state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
+        queueRobotTurns();
+      }
+      return;
+    }
     if (currentAdvice || adviceComputeState.inFlight) return;
     runHumanAdviceCompute({ refreshUi: false });
   };
@@ -927,22 +1770,37 @@ function scheduleIdleHumanAdviceRefresh() {
 
 /** 人类回合延后全量建议，避免 newGame / lite 渲染路径同步 getHumanAdvice 卡死主线程 */
 function scheduleHumanAdviceRefresh({ force = false } = {}) {
+  if (state?.currentPlayerIndex === HUMAN_INDEX && robotQueueActive) {
+    robotQueueActive = false;
+    robotQueueStartedAt = 0;
+    cancelRobotQueueTimers();
+  }
   cancelIdleTask(adviceRefreshIdleRef);
   invalidateStaleAdvice();
   const tableKey = buildAdviceTableKey();
-  if (currentAdvice && !isAdviceStale(currentAdvice)) {
+  if (isAdvicePhaseComplete()) {
     renderAdvice({ computeAdvice: false });
     if (hintAwaiting) applyHintFromAdvice(currentAdvice);
     return;
   }
-  if (!force && adviceScheduledTableKey === tableKey) {
+  if (
+    !force
+    && adviceScheduledTableKey === tableKey
+    && (adviceComputeState.inFlight || isAdvicePhaseComplete())
+  ) {
     return;
   }
   if (adviceComputeState.inFlight) {
     adviceComputeState.pendingRefresh = true;
+    if (!currentAdvice?.tableKey || currentAdvice.tableKey !== tableKey) {
+      ensureHumanAdvicePlaceholder();
+    }
     return;
   }
   adviceScheduledTableKey = tableKey;
+  if (!currentAdvice?.tableKey || currentAdvice.tableKey !== tableKey) {
+    ensureHumanAdvicePlaceholder();
+  }
   const generation = adviceComputeGeneration.value;
   const run = () => {
     adviceRefreshIdleRef.value = null;
@@ -1200,6 +2058,27 @@ function showCoachToast(text) {
   }, 1800);
 }
 
+/** 手机版底栏按钮被禁用时给出可见反馈（footer 已隐藏） */
+function showPlayDockDisabledHint(buttonId) {
+  if (!isMobileLandscape()) return;
+  const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
+  if (buttonId === "passTurn") {
+    showCoachToast(humanTurn ? "你拥有牌权，不能直接过牌" : "尚未轮到你出牌");
+    return;
+  }
+  if (buttonId === "playRecommended" && hintAwaiting) {
+    showCoachToast("推荐计算中，请稍候…");
+    return;
+  }
+  showCoachToast("尚未轮到你出牌");
+}
+
+/** 手机版操作反馈：message 写入 footer，同时 toast 提示 */
+function notifyActionMessage(text) {
+  message = text;
+  if (isMobileLandscape() && text) showCoachToast(text);
+}
+
 async function saveFabFeedback(record) {
   const result = await pushCoachFeedbackForQuestion(record.question, record);
   showCoachToast(result.online
@@ -1246,7 +2125,8 @@ function renderFabChatLog() {
     entry.append(question, answer, actions);
     elements.coachFabLog.append(entry);
   }
-  elements.coachFabLog.scrollTop = elements.coachFabLog.scrollHeight;
+  const scrollEl = elements.coachFabLog.closest(".coach-fab-body") ?? elements.coachFabLog;
+  scrollEl.scrollTop = scrollEl.scrollHeight;
 }
 
 function renderFabQaLimitHint() {
@@ -1261,15 +2141,18 @@ function renderFabQaLimitHint() {
 }
 
 function syncCoachFabMobileChrome(open) {
-  const mobile = MOBILE_LAYOUT_MQ?.matches ?? false;
+  const mobile = isMobileLandscape();
   if (elements.coachFabBackdrop) {
     elements.coachFabBackdrop.hidden = !(open && mobile);
   }
   document.body.classList.toggle("coach-fab-open", open && mobile);
-  if (open && mobile && elements.coachFabQuestion) {
-    requestAnimationFrame(() => {
-      elements.coachFabQuestion?.focus({ preventScroll: true });
-    });
+  if (open && mobile) {
+    renderCoachSheetAdvice();
+    if (elements.coachFabQuestion) {
+      requestAnimationFrame(() => {
+        elements.coachFabQuestion?.focus({ preventScroll: true });
+      });
+    }
   }
 }
 
@@ -1585,7 +2468,7 @@ function renderExpandedReviewGameDetail() {
   html += `<p>共 <strong>${game.divergenceCount}</strong> 处与推荐不同（${game.totalHands} 手）。</p>`;
 
   if (top3.length > 0) {
-    html += "<div class=\"review-history-top3\"><p class=\"muted\">最该改的三处（教练更对）：</p>";
+    html += "<div class=\"review-history-top3\"><p class=\"muted\">建议重点学习的三处：</p>";
     for (const item of top3) {
       const reason = item.verdictNote || "详见差异说明";
       html += `<article class="improve-card saved-improve-card" data-game-id="${escapeHtml(game.gameId)}" data-hand-index="${item.turnNumber}" role="button" tabindex="0" title="点击查看推荐对比">
@@ -1598,7 +2481,7 @@ function renderExpandedReviewGameDetail() {
   } else if (game.divergenceCount === 0) {
     html += "<p class=\"muted\">该局与推荐1完全一致。</p>";
   } else {
-    html += "<p class=\"muted\">暂无「教练更对」类差异摘要。</p>";
+    html += "<p class=\"muted\">暂无「建议学习点」类差异摘要。</p>";
   }
 
   elements.reviewHistoryDetail.hidden = false;
@@ -1627,12 +2510,10 @@ function renderReviewHistoryList() {
     });
     const level = game.levelRank ?? "—";
     const active = expandedReviewGameId === game.gameId ? " review-history-item--active" : "";
-    const alignPct = game.totalHands > 0
-      ? Math.round((game.top1AlignRate ?? 0) * 100)
-      : 0;
+    const learningPts = (game.coachBetterCount ?? 0) + (game.coachQuestionableCount ?? 0);
     html += `<li class="review-history-item${active}" data-game-id="${escapeHtml(game.gameId)}" role="button" tabindex="0" title="点击查看该局摘要">
       <div><strong>打 ${escapeHtml(String(level))}</strong> · ${game.divergenceCount} 处差异 · ${game.totalHands} 手</div>
-      <div class="review-history-item-meta"><span>${escapeHtml(dateStr)}</span><span>推荐1一致 ${alignPct}%</span></div>
+      <div class="review-history-item-meta"><span>${escapeHtml(dateStr)}</span><span>学习点 ${learningPts || game.divergenceCount}</span></div>
     </li>`;
   }
   html += "</ul>";
@@ -1645,6 +2526,7 @@ function renderProgressPanel() {
   if (!progressPanelDirty) return;
   progressPanelDirty = false;
   const stats = loadProgressStats();
+  const learningPts = formatLearningPoints(stats);
   const alignRate = formatAlignRate(stats);
   const lastSaved = loadReviewHistory().games.at(-1);
   const recentSavedLine = lastSaved
@@ -1653,54 +2535,108 @@ function renderProgressPanel() {
   elements.progressStats.innerHTML = `
     <div class="progress-stats-grid">
       <div class="progress-stat-card"><strong>${stats.totalGames}</strong><span>累计局数</span></div>
-      <div class="progress-stat-card"><strong>${alignRate}</strong><span>推荐1一致率</span></div>
-      <div class="progress-stat-card"><strong>${stats.totalHands}</strong><span>累计决策手</span></div>
+      <div class="progress-stat-card"><strong>${learningPts}</strong><span>累计学习点</span></div>
+      <div class="progress-stat-card"><strong>${stats.drillSessions?.length ?? 0}</strong><span>专项练习</span></div>
     </div>
     ${recentSavedLine}
-    <p class="muted">近 7 局推荐1对齐趋势（保存复盘后更新）</p>
+    <p class="muted">近 7 局建议学习点（次要：推荐1一致 ${alignRate}）</p>
     ${renderRecentTrendBars(stats.recentGames)}
   `;
   renderReviewHistoryList();
   renderDrillPracticePanel();
 }
 
+function wireDrillPracticeButtons(root) {
+  if (!root) return;
+  for (const btn of root.querySelectorAll(".drill-practice-btn[data-drill-tag]")) {
+    if (btn.dataset.drillBound === "1") continue;
+    btn.dataset.drillBound = "1";
+    btn.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      void startDrillPractice(btn.dataset.drillTag);
+    });
+  }
+}
+
 function renderDrillPracticePanel() {
-  if (!elements.drillPracticeList) return;
   const weaknesses = analyzeWeaknesses({
     currentTimeline: currentGameMeta?.coachAdviceTimeline ?? null,
     limit: 5,
   });
-  elements.drillPracticeList.innerHTML = renderDrillPracticeListHtml(weaknesses);
+  const html = renderDrillPracticeListHtml(weaknesses);
+  if (elements.drillPracticeList) {
+    elements.drillPracticeList.innerHTML = html;
+    wireDrillPracticeButtons(elements.drillPracticeList);
+  }
+  if (elements.mobileDrillPracticeList) {
+    elements.mobileDrillPracticeList.innerHTML = html;
+    wireDrillPracticeButtons(elements.mobileDrillPracticeList);
+  }
 }
 
 function openDrillPracticePanel() {
+  renderDrillPracticePanel();
+  if (isMobileLandscape()) {
+    setMobileMenuOpen(true);
+    if (elements.mobileDrillPanel) elements.mobileDrillPanel.open = true;
+    showCoachToast("点「练这个」进入预设局面");
+    return;
+  }
   if (elements.drillPanel) {
     elements.drillPanel.open = true;
     progressPanelDirty = true;
     renderProgressPanel();
     elements.drillPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
+  elements.aiPanel?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+  showCoachToast("右侧已展开专项列表，点「练这个」开局");
 }
 
-function startDrillPractice(tag) {
-  if (!tag) return;
+/** 顶栏「专项练习」：直接进入置顶教学局面 */
+async function startFeaturedDrillPractice() {
+  const trigger = elements.openDrillPanel ?? elements.mobileOpenDrill;
+  if (trigger?.disabled) return;
+  if (trigger) trigger.disabled = true;
+  showCoachToast("正在载入须压保同花顺…");
+  try {
+    await startDrillPractice(DRILL_TAGS.MUST_BEAT_KEEP_SF);
+  } finally {
+    if (trigger) trigger.disabled = false;
+  }
+}
+
+async function startDrillPractice(tag) {
+  if (!tag) {
+    showCoachToast("未选择专项标签");
+    return;
+  }
 
   const exitingMatch = Boolean(matchState);
   const matchGameNumber = matchState?.gameNumber;
 
-  newGame({ drillFocus: tag });
+  try {
+    await newGame({ drillFocus: tag });
+  } catch (error) {
+    console.error("专项练习开局失败", error);
+    showCoachToast(`专项开局失败：${error?.message ?? "未知错误"}`);
+    return;
+  }
 
   if (exitingMatch) {
     const prefix = matchGameNumber
       ? `已退出竞技赛第 ${matchGameNumber} 局。`
       : "已退出竞技赛。";
     message = `${prefix}${message}`;
+    if (elements.message) elements.message.textContent = formatBootMessage(message);
   }
 
   if (elements.drillPanel) elements.drillPanel.open = false;
-  elements.hand?.scrollIntoView({ behavior: "smooth", block: "center" });
+  if (elements.mobileDrillPanel) elements.mobileDrillPanel.open = false;
+  setMobileMenuOpen(false);
 
   showCoachToast("已开启专项练习，请出牌");
+  render({ immediate: true, lite: true });
 }
 
 async function askAiCoach() {
@@ -1769,10 +2705,14 @@ function applyHintFromAdvice(advice) {
   hintAwaiting = false;
   const rec = advice.recommendation;
   hintCardIds = new Set((rec.candidate.cards ?? []).map((card) => cardId(card)));
+  // 推荐高亮与选中一致：绿框牌同步上浮，点「出牌」无需再点一遍
+  selectedIds = new Set(hintCardIds);
   const reason = firstReasonForUser(rec.reasons);
   const label = rec.candidate.label || (rec.candidate.type === PLAY_TYPES.pass ? "过牌" : "推荐牌");
   message = `推荐：${label} — ${reason}`;
   advanceOnboarding(2);
+  // 手机横屏：展开推荐后关闭关键时刻卡片，避免与底栏三钮叠层
+  if (keyPauseOverlay) dismissKeyPause();
   render();
 }
 
@@ -1799,6 +2739,12 @@ function markKeyPauseFired(meta, type) {
   if (!fired.includes(type)) meta.keyPauseFired = [...fired, type];
 }
 
+/** 手机横屏：「提示」首次说明未看过前，不弹关键时刻暂停（引导串行） */
+function mobileHintFirstTipPending() {
+  if (!isMobileLandscape() || !onboardingDone() || firstTipsDisabled()) return false;
+  return !readFirstTipsState().hint;
+}
+
 /** 人类回合开始时检测并展示关键时刻暂停 banner */
 function maybeTriggerKeyPause() {
   if (!keyPauseEnabled || !state || !currentGameMeta) return;
@@ -1806,6 +2752,7 @@ function maybeTriggerKeyPause() {
     keyPauseOverlay = null;
     return;
   }
+  if (mobileHintFirstTipPending()) return;
   const fired = keyPauseFiredSet(currentGameMeta);
   const moment = detectKeyMoment(state, {
     humanIndex: HUMAN_INDEX,
@@ -1821,6 +2768,7 @@ function maybeTriggerKeyPause() {
 function dismissKeyPause() {
   keyPauseOverlay = null;
   renderKeyPauseBanner();
+  if (isMobileLandscape()) updateFirstTips();
 }
 
 function keyPauseShowHint() {
@@ -1828,20 +2776,12 @@ function keyPauseShowHint() {
   showHint();
 }
 
-/** 人类出牌后检查是否应提醒报牌（教学提示，不阻断出牌） */
-function maybeRemindReportCards(handCount) {
-  if (!currentGameMeta || handCount <= 0) return;
-
-  if (handCount === 1 && !currentGameMeta.reportOneReminded) {
-    currentGameMeta.reportOneReminded = true;
-    reportReminderText = "按规则应主动报牌：剩 1 张（一牌必报）";
-    return;
-  }
-
-  if (handCount <= 10 && !currentGameMeta.reportTenReminded) {
-    currentGameMeta.reportTenReminded = true;
-    reportReminderText = `按规则应主动报牌：剩 ${handCount} 张`;
-  }
+function cancelHint() {
+  if (!hintShown) return;
+  clearHint();
+  selectedIds = new Set();
+  message = "已取消推荐，可自行选牌出牌。";
+  render();
 }
 
 function adoptHint() {
@@ -1951,15 +2891,12 @@ function applyRestoredSession(data) {
   if (currentGameMeta) {
     currentGameMeta.userDisputes = currentGameMeta.userDisputes ?? [];
     currentGameMeta.gameInsights = currentGameMeta.gameInsights ?? [];
-    currentGameMeta.reportTenReminded = currentGameMeta.reportTenReminded ?? false;
-    currentGameMeta.reportOneReminded = currentGameMeta.reportOneReminded ?? false;
     currentGameMeta.keyPauseFired = currentGameMeta.keyPauseFired ?? [];
     currentGameMeta.divergenceSummaryCache = summarizeGameDivergences(
       currentGameMeta.coachAdviceTimeline ?? [],
       HUMAN_INDEX,
     );
   }
-  syncReportReminderFromMeta();
   matchSettledTurnNumber = data.matchSettledTurnNumber ?? null;
   message = data.message ?? "已恢复上次对局，可继续。";
   aiChatTimeline = data.aiChatTimeline ?? currentGameMeta?.aiChatTimeline ?? [];
@@ -2009,7 +2946,7 @@ function resetToCleanWaitingState() {
   aiChatTimeline = [];
   selectedDivergenceTurn = null;
   keyPauseOverlay = null;
-  reportReminderText = null;
+  gameReviewOverlayDismissed = false;
   resetTableState();
   message = INVALID_SESSION_MESSAGE;
 }
@@ -2072,8 +3009,6 @@ function prepareGame(game, seed, extraMeta = {}) {
     gameInsights: [],
     fabQaCount: 0,
     gameReviewSubmitted: false,
-    reportTenReminded: false,
-    reportOneReminded: false,
     keyPauseFired: [],
     aiChatTimeline,
     initialHands: state.players.map((player, index) => ({
@@ -2082,24 +3017,9 @@ function prepareGame(game, seed, extraMeta = {}) {
       cards: player.hand.map(serializeCard),
     })),
   };
-  reportReminderText = null;
+  gameReviewOverlayDismissed = false;
   keyPauseOverlay = null;
   resetTableState();
-}
-
-function syncReportReminderFromMeta() {
-  if (!currentGameMeta || !state) {
-    reportReminderText = null;
-    return;
-  }
-  const handCount = state.players[HUMAN_INDEX]?.hand?.length ?? 0;
-  if (handCount === 1 && currentGameMeta.reportOneReminded) {
-    reportReminderText = "按规则应主动报牌：剩 1 张（一牌必报）";
-  } else if (handCount <= 10 && handCount > 0 && currentGameMeta.reportTenReminded) {
-    reportReminderText = `按规则应主动报牌：剩 ${handCount} 张`;
-  } else {
-    reportReminderText = null;
-  }
 }
 
 function teamLabel(teamIndex) {
@@ -2140,6 +3060,33 @@ function resetActivePlayQueues() {
   robotQueueGeneration += 1;
   cancelRobotQueueTimers();
   robotQueueActive = false;
+  robotQueueTimedOut = false;
+}
+
+async function triggerNewGame() {
+  reconcileTablePlaysWithState();
+  purgeSeatPlayContainers();
+  if (elements.newGame?.disabled) {
+    if (isMobileLandscape() && elements.mobileTurnChip) {
+      elements.mobileTurnChip.textContent = "正在发牌…";
+      elements.mobileTurnChip.classList.add("waiting");
+    } else {
+      showCoachToast("正在发牌，请稍候…");
+    }
+    return;
+  }
+  if (isMobileLandscape() && elements.mobileTurnChip) {
+    elements.mobileTurnChip.textContent = "正在发牌…";
+    elements.mobileTurnChip.classList.add("waiting");
+    hideFirstTipBar();
+  }
+  syncMobileCenterActions();
+  try {
+    await newGame();
+  } catch (error) {
+    console.error(error);
+    showCoachToast("发牌失败，请重试");
+  }
 }
 
 async function newGame(extraMeta = {}) {
@@ -2151,7 +3098,9 @@ async function newGame(extraMeta = {}) {
   selectedDivergenceTurn = null;
   keyPauseOverlay = null;
 
-  await ensureGameReviewSaved();
+  if (!extraMeta.drillFocus) {
+    await ensureGameReviewSaved();
+  }
 
   try {
     hideDivergenceDetail();
@@ -2160,8 +3109,15 @@ async function newGame(extraMeta = {}) {
     aiChatTimeline = [];
     matchState = null;
     matchSettledTurnNumber = null;
-    elements.newGame.disabled = true;
-    elements.newGame.textContent = "发牌中";
+    if (elements.newGame) {
+      elements.newGame.disabled = true;
+      elements.newGame.textContent = "发牌中";
+    }
+    if (elements.mlNewGame) {
+      elements.mlNewGame.disabled = true;
+      elements.mlNewGame.textContent = "发牌中";
+    }
+    syncMobileCenterActions();
     const drillFocus = extraMeta.drillFocus ?? null;
     const startedAt = new Date().toISOString();
     let seed = Date.now() % 2147483647;
@@ -2207,27 +3163,32 @@ async function newGame(extraMeta = {}) {
         drillScenarioId: null,
         drillScenarioTitle: null,
         coachAdviceTimeline: [],
-        reportTenReminded: false,
-        reportOneReminded: false,
         keyPauseFired: [],
         gameReviewSubmitted: false,
       };
-    reportReminderText = null;
+    gameReviewOverlayDismissed = false;
     resetTableState();
     const scenarioLine = drillFocus ? getDrillScenarioSummary(drillFocus) : null;
     message = drillFocus
       ? (scenarioLine
         ? `专项练习（预设局面）：${scenarioLine} 轮到你时点「提示」。`
         : `专项练习：本局重点练「${drillFocus}」。轮到你时点「提示」看推荐。`)
-      : "新局已发牌。轮到你时点「提示」看推荐，再点「采纳」或再点「提示」出牌。";
+      : "新局已发牌。轮到你时点「提示」看推荐；跟推荐点「采纳」或「出牌」，不想跟再点「取消推荐」。";
     advanceOnboarding(1);
   } catch (error) {
     console.error(error);
     message = `发牌失败：${error.message}`;
   } finally {
-    elements.newGame.textContent = "新开一局";
-    elements.newGame.disabled = false;
+    if (elements.newGame) {
+      elements.newGame.textContent = "新开一局";
+      elements.newGame.disabled = false;
+    }
+    if (elements.mlNewGame) {
+      elements.mlNewGame.textContent = "新开一局";
+      elements.mlNewGame.disabled = false;
+    }
     clearSafeBootMode();
+    syncMobileLayout();
     render({ immediate: true, lite: true });
     scheduleDeferredPanelsRender();
     if (state && !isGameOver(state)) {
@@ -2244,6 +3205,9 @@ async function newGame(extraMeta = {}) {
 async function newCompetitiveMatch() {
   await ensureGameReviewSaved();
   archiveCurrentGame(state && isGameOver(state) ? "complete" : "interrupted");
+  resetActivePlayQueues();
+  cancelAdviceCompute();
+  currentAdvice = null;
   const seed = Date.now() % 2147483647;
   matchState = createCompetitiveMatch({
     random: seededRandom(seed),
@@ -2257,7 +3221,10 @@ async function newCompetitiveMatch() {
     matchLevels: matchState.levels,
   });
   message = "竞技赛已开始：从 2 打起。本局结束后会结算升级，再进入进贡还贡。";
-  render();
+  render({ immediate: true, lite: true });
+  if (state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
+    queueRobotTurns();
+  }
 }
 
 function needsSubmitReminder() {
@@ -2310,10 +3277,10 @@ function verdictBadgeHtml(verdict, label) {
 function formatVerdictStats(summary, { interactive = false, activeFilter = null } = {}) {
   if (!summary.divergenceCount) return "";
   const tabs = [
-    { verdict: DIVERGENCE_VERDICTS.USER_BETTER, label: "你更对", count: summary.userBetterCount ?? 0 },
-    { verdict: DIVERGENCE_VERDICTS.COACH_BETTER, label: "教练更对", count: summary.coachBetterCount ?? 0 },
-    { verdict: DIVERGENCE_VERDICTS.COACH_QUESTIONABLE, label: "教练不合理", count: summary.coachQuestionableCount ?? 0 },
-    { verdict: DIVERGENCE_VERDICTS.STYLE, label: "风格差异", count: summary.styleCount ?? 0 },
+    { verdict: DIVERGENCE_VERDICTS.USER_BETTER, label: verdictUiLabel(DIVERGENCE_VERDICTS.USER_BETTER), count: summary.userBetterCount ?? 0 },
+    { verdict: DIVERGENCE_VERDICTS.COACH_BETTER, label: verdictUiLabel(DIVERGENCE_VERDICTS.COACH_BETTER), count: summary.coachBetterCount ?? 0 },
+    { verdict: DIVERGENCE_VERDICTS.COACH_QUESTIONABLE, label: verdictUiLabel(DIVERGENCE_VERDICTS.COACH_QUESTIONABLE), count: summary.coachQuestionableCount ?? 0 },
+    { verdict: DIVERGENCE_VERDICTS.STYLE, label: verdictUiLabel(DIVERGENCE_VERDICTS.STYLE), count: summary.styleCount ?? 0 },
   ];
   const items = tabs.map(({ verdict, label, count }) => {
     const active = interactive && activeFilter === verdict ? " verdict-stat--active" : "";
@@ -2342,10 +3309,16 @@ function renderDivergenceListHtml(items) {
         : `<button type="button" class="dispute-btn" data-dispute-turn="${item.turnNumber}">我有异议</button>`)
       : "";
     html += `<li class="divergence-item" data-hand-index="${item.turnNumber}" role="button" tabindex="0" title="点击查看推荐对比">`
-      + `${verdictBadgeHtml(item.verdict, item.verdictLabel)}第${item.turnNumber}手：`
-      + `${escapeHtml(item.recommended)} → ${escapeHtml(item.actual)}`
-      + `${item.verdictNote ? `<br><span class="muted">${escapeHtml(item.verdictNote)}</span>` : ""}`
-      + `${disputeBtn ? `<span class="divergence-dispute-inline">${disputeBtn}</span>` : ""}</li>`;
+      + `<div class="divergence-item-head">`
+      + `<span class="divergence-item-turn">第 ${item.turnNumber} 手</span>`
+      + `${verdictBadgeHtml(item.verdict, verdictUiLabel(item.verdict))}`
+      + `</div>`
+      + `<div class="divergence-item-plays">`
+      + `<div class="divergence-play divergence-play-you"><span class="divergence-play-label">你出：</span><span class="divergence-play-text">${escapeHtml(item.actual)}</span></div>`
+      + `<div class="divergence-play divergence-play-rec"><span class="divergence-play-label">推荐：</span><span class="divergence-play-text">${escapeHtml(item.recommended)}</span></div>`
+      + `</div>`
+      + `${item.verdictNote ? `<p class="divergence-item-note">${escapeHtml(item.verdictNote)}</p>` : ""}`
+      + `${disputeBtn ? `<div class="divergence-dispute-inline">${disputeBtn}</div>` : ""}</li>`;
   }
   html += "</ul>";
   return html;
@@ -2415,6 +3388,9 @@ async function submitUserDisputeFromUI(turnNumber) {
 function proceedNextCompetitiveGame() {
   if (!matchState || matchState.complete || !state || !isGameOver(state)) return;
   settleCompetitiveGameIfNeeded();
+  resetActivePlayQueues();
+  cancelAdviceCompute();
+  currentAdvice = null;
   const seed = Date.now() % 2147483647;
   matchState = startNextCompetitiveGame(matchState, { random: seededRandom(seed) });
   matchSettledTurnNumber = null;
@@ -2429,7 +3405,7 @@ function proceedNextCompetitiveGame() {
     ? matchState.pendingTributeEvents.map(tributeEventLabel).join("；")
     : "本局无进贡。";
   message = `第 ${matchState.gameNumber} 局开始，当前打 ${matchState.currentLevelRank}。${tributeText}`;
-  render();
+  render({ immediate: true, lite: true });
   queueRobotTurns();
 }
 
@@ -2498,7 +3474,7 @@ function trainingSamplePayload(note = "") {
     sampleId: `training-${new Date().toISOString().replace(/[:.]/g, "-")}`,
     exportedAt: new Date().toISOString(),
     purpose: "coach-training-feedback",
-    note: note || "真实打牌训练样本：包含教练推荐、实际出牌、理牌列、问教练记录和复盘视角。",
+    note: note || "打牌记录：含教练推荐、实际出牌、理牌列、问教练记录和复盘视角。",
     matchLevels: matchState?.levels ?? null,
     matchGameNumber: matchState?.gameNumber ?? null,
     currentPosition: currentSnapshot,
@@ -2622,7 +3598,7 @@ async function importExternalReplayFiles(fileList) {
 async function saveTrainingSample() {
   const payload = trainingSamplePayload();
   if (!payload.currentPosition && payload.games.length === 0) {
-    message = "还没有可保存的训练样本。先打一局或打到有争议的地方再保存。";
+    message = "还没有可保存的打牌记录。先打一局或打到有争议的地方再保存。";
     render();
     return;
   }
@@ -2636,12 +3612,12 @@ async function saveTrainingSample() {
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `save failed: ${response.status}`);
-    message = "样本已保存。";
+    message = "记录已保存。";
     aiBridgeOnline = true;
   } catch (error) {
     elements.exportOutput.value = text;
     elements.exportPanel.hidden = false;
-    message = "请先运行「点我启动掼蛋教练Pro.cmd」再保存样本；已把内容放到导出区。";
+    message = "请先运行「点我启动掼蛋教练Pro.cmd」再保存记录；已把内容放到导出区。";
   }
   render();
 }
@@ -2653,19 +3629,463 @@ function cardClass(card) {
   return classes.join(" ");
 }
 
+function cancelPendingCardClick() {
+  if (!pendingCardClickTimer) return;
+  window.clearTimeout(pendingCardClickTimer);
+  pendingCardClickTimer = null;
+  pendingCardClickAction = null;
+}
+
+/** 列顶牌向下滑动选中整列（移动端替代双击） */
+function attachColumnSwipeSelect(node, columnIndex) {
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let touchMoved = false;
+
+  node.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+    touchMoved = false;
+  }, { passive: true });
+
+  node.addEventListener("touchmove", (event) => {
+    if (event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+      touchMoved = true;
+      cancelPendingCardClick();
+    }
+  }, { passive: true });
+
+  node.addEventListener("touchend", (event) => {
+    if (!touchMoved) return;
+    const touch = event.changedTouches[0];
+    const dx = touch.clientX - touchStartX;
+    const dy = touch.clientY - touchStartY;
+    const isSwipeDown = dy >= COLUMN_SWIPE_MIN_DOWN
+      && Math.abs(dx) <= COLUMN_SWIPE_MAX_HORIZONTAL
+      && Math.abs(dx) < dy;
+    if (!isSwipeDown) {
+      suppressCardClick = true;
+      window.setTimeout(() => {
+        suppressCardClick = false;
+      }, 320);
+      return;
+    }
+    cancelPendingCardClick();
+    suppressCardClick = true;
+    toggleHandColumnSelection(columnIndex);
+    flashHandColumn(columnIndex);
+    removeAccidentalJokerFromStraightFlush();
+    render();
+    window.setTimeout(() => {
+      suppressCardClick = false;
+    }, 400);
+  }, { passive: true });
+}
+
+/** 手机横屏叠牌列：DOM 末张为视觉顶牌（最高 z-index / peek 顶条） */
+function mlHandTopCardInColumn(columnNode) {
+  if (!columnNode) return null;
+  const cards = columnNode.querySelectorAll(".card[data-card-id]");
+  return cards.length ? cards[cards.length - 1] : null;
+}
+
+function mlHandCardCountInColumn(columnNode) {
+  return columnNode?.querySelectorAll(".card[data-card-id]").length ?? 0;
+}
+
+function mlHandPeekHeightPx() {
+  const root = elements.landscapeRoot;
+  if (!root) return 38;
+  const raw = getComputedStyle(root).getPropertyValue("--ml-hand-peek-h");
+  const parsed = parseFloat(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 38;
+}
+
+/** 叠牌列：按可见顶条 / 顶牌区域命中单张（自顶向下） */
+function mlHandHitCardInColumn(columnNode, clientX, clientY) {
+  const cards = [...columnNode.querySelectorAll(".card[data-card-id]")];
+  if (!cards.length) return null;
+  const colRect = columnNode.getBoundingClientRect();
+  if (clientX < colRect.left || clientX > colRect.right
+    || clientY < colRect.top || clientY > colRect.bottom) {
+    return null;
+  }
+  const peekH = mlHandPeekHeightPx();
+  for (let index = cards.length - 1; index >= 0; index -= 1) {
+    const cardNode = cards[index];
+    const rect = cardNode.getBoundingClientRect();
+    if (clientX < rect.left || clientX > rect.right) continue;
+    const visibleBottom = index === cards.length - 1 ? rect.bottom : rect.top + peekH;
+    if (clientY >= rect.top && clientY <= visibleBottom) return cardNode;
+  }
+  return null;
+}
+
+let pendingMlSingleTapTimer = null;
+
+function cancelPendingMlSingleTap() {
+  if (pendingMlSingleTapTimer !== null) {
+    window.clearTimeout(pendingMlSingleTapTimer);
+    pendingMlSingleTapTimer = null;
+  }
+}
+
+function scheduleMlSingleTap(cardNode, delayMs = 450) {
+  cancelPendingMlSingleTap();
+  pendingMlSingleTapTimer = window.setTimeout(() => {
+    pendingMlSingleTapTimer = null;
+    pickMlHandSingleCard(cardNode);
+  }, delayMs);
+}
+
+function pointInNode(node, clientX, clientY) {
+  if (!node) return false;
+  const rect = node.getBoundingClientRect();
+  return clientX >= rect.left && clientX <= rect.right
+    && clientY >= rect.top && clientY <= rect.bottom;
+}
+
+/** 手机横屏：单牌列单击 toggle */
+function pickMlHandSingleCard(cardNode, { toggle = true } = {}) {
+  const id = cardNode?.dataset?.cardId;
+  if (!id || !state || state.currentPlayerIndex !== HUMAN_INDEX || isGameOver(state)) return;
+  if (toggle && selectedIds.has(id)) selectedIds.delete(id);
+  else selectedIds.add(id);
+  removeAccidentalJokerFromStraightFlush();
+  render();
+}
+
+/** 手机横屏：叠牌列双击 toggle 整列 */
+function pickMlHandColumn(columnNode) {
+  const columnIndex = Number(columnNode?.dataset?.columnIndex);
+  if (!Number.isFinite(columnIndex)) return;
+  if (!state || state.currentPlayerIndex !== HUMAN_INDEX || isGameOver(state)) return;
+  toggleHandColumnSelection(columnIndex);
+  removeAccidentalJokerFromStraightFlush();
+  render();
+}
+
+function canMobileHandReorder() {
+  return isMobileLandscape() && state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
+}
+
+function cancelMobileHandDragTimer() {
+  if (mobileHandDragTimer !== null) {
+    window.clearTimeout(mobileHandDragTimer);
+    mobileHandDragTimer = null;
+  }
+}
+
+function maybeShowMobileReorderTip() {
+  if (safeGetItem(ML_REORDER_TIP_STORAGE, "") === "1") return;
+  safeSetItem(ML_REORDER_TIP_STORAGE, "1");
+  showCoachToast("拖到牌上=合并列，拖到空白=新列");
+}
+
+function columnIdsForMobileDrag(columnNode) {
+  const columnIndex = Number(columnNode?.dataset?.columnIndex);
+  if (!Number.isFinite(columnIndex)) return null;
+  const column = ensureHandColumns()[columnIndex] ?? [];
+  if (column.length <= 1) return null;
+  const allSelected = column.every((id) => selectedIds.has(id));
+  const columnSelected = columnNode.classList.contains("column-selected");
+  if (allSelected || columnSelected) return [...column];
+  return null;
+}
+
+function elementAtPointExcludingGhost(clientX, clientY, ghost) {
+  if (ghost) ghost.style.visibility = "hidden";
+  const el = document.elementFromPoint(clientX, clientY);
+  if (ghost) ghost.style.visibility = "";
+  return el;
+}
+
+function positionMobileHandDragGhost(ghost, clientX, clientY) {
+  if (!ghost) return;
+  const w = ghost.offsetWidth;
+  const h = ghost.offsetHeight;
+  ghost.style.transform = `translate(${clientX - w / 2}px, ${clientY - h / 2}px)`;
+}
+
+function clearMobileHandDragOverHighlight(hand) {
+  hand?.querySelectorAll(".ml-drag-over").forEach((node) => node.classList.remove("ml-drag-over"));
+}
+
+function updateMobileHandDragOverHighlight(hand, clientX, clientY, ghost) {
+  clearMobileHandDragOverHighlight(hand);
+  const el = elementAtPointExcludingGhost(clientX, clientY, ghost);
+  const cardEl = el?.closest?.(".card[data-card-id]");
+  if (cardEl && hand.contains(cardEl)) {
+    cardEl.classList.add("ml-drag-over");
+    return;
+  }
+  const columnEl = el?.closest?.(".hand-column");
+  if (columnEl && hand.contains(columnEl)) columnEl.classList.add("ml-drag-over");
+}
+
+function resolveMlHandDropTarget(clientX, clientY, hand, ghost) {
+  const el = elementAtPointExcludingGhost(clientX, clientY, ghost);
+  if (!el) return null;
+  const cardEl = el.closest?.(".card[data-card-id]");
+  if (cardEl && hand.contains(cardEl)) {
+    const columnNode = cardEl.closest(".hand-column");
+    const columnIndex = Number(columnNode?.dataset?.columnIndex);
+    const targetId = cardEl.dataset.cardId;
+    if (Number.isFinite(columnIndex) && targetId && targetId !== draggedCardId) {
+      return { type: "column", columnIndex };
+    }
+  }
+  const columnEl = el.closest?.(".hand-column");
+  if (columnEl && hand.contains(columnEl)) {
+    const columnIndex = Number(columnEl.dataset.columnIndex);
+    if (Number.isFinite(columnIndex)) return { type: "column", columnIndex };
+  }
+  const scrollEl = hand.closest(".ml-hand-scroll") ?? hand;
+  const scrollRect = scrollEl.getBoundingClientRect();
+  if (clientX >= scrollRect.left && clientX <= scrollRect.right
+    && clientY >= scrollRect.top && clientY <= scrollRect.bottom) {
+    return { type: "new", columnIndex: handDropColumnIndex(clientX, hand) };
+  }
+  return null;
+}
+
+function createMobileHandDragGhost(cardNode, touch) {
+  const ghost = cardNode.cloneNode(true);
+  ghost.classList.add("ml-hand-drag-ghost");
+  ghost.removeAttribute("data-card-id");
+  ghost.style.position = "fixed";
+  ghost.style.left = "0";
+  ghost.style.top = "0";
+  ghost.style.margin = "0";
+  ghost.style.pointerEvents = "none";
+  ghost.style.zIndex = "9999";
+  document.body.append(ghost);
+  positionMobileHandDragGhost(ghost, touch.clientX, touch.clientY);
+  return ghost;
+}
+
+function startMobileHandDrag(hand, cardNode, columnNode, touch) {
+  if (!canMobileHandReorder() || !cardNode || !columnNode) return;
+  const sourceId = cardNode.dataset.cardId;
+  if (!sourceId) return;
+  cancelPendingMlSingleTap();
+  draggedCardId = sourceId;
+  draggedColumnIds = columnIdsForMobileDrag(columnNode);
+  suppressCardClick = true;
+  cardNode.classList.add("dragging");
+  if (draggedColumnIds) columnNode.classList.add("dragging-column");
+  const ghost = createMobileHandDragGhost(cardNode, touch);
+  hand.classList.add("ml-hand-drag-active");
+  mobileHandDrag = {
+    ghost,
+    sourceCardNode: cardNode,
+    sourceColumnNode: columnNode,
+    lastX: touch.clientX,
+    lastY: touch.clientY,
+  };
+}
+
+function scheduleMobileHandDragStart(hand, cardNode, columnNode, touch) {
+  cancelMobileHandDragTimer();
+  if (!cardNode || !columnNode) return;
+  mobileHandDragTimer = window.setTimeout(() => {
+    mobileHandDragTimer = null;
+    startMobileHandDrag(hand, cardNode, columnNode, touch);
+  }, ML_DRAG_LONG_PRESS_MS);
+}
+
+function finishMobileHandDrag(hand, touch, { cancelled = false } = {}) {
+  cancelMobileHandDragTimer();
+  if (!mobileHandDrag) return false;
+  const clientX = touch?.clientX ?? mobileHandDrag.lastX ?? 0;
+  const clientY = touch?.clientY ?? mobileHandDrag.lastY ?? 0;
+  const { ghost, sourceCardNode, sourceColumnNode } = mobileHandDrag;
+  let dropped = false;
+  if (!cancelled && draggedCardId) {
+    const target = resolveMlHandDropTarget(clientX, clientY, hand, ghost);
+    const fakeEvent = { dataTransfer: { getData: () => "" } };
+    if (target?.type === "column") {
+      moveDragPayloadToColumn(fakeEvent, draggedCardId, target.columnIndex);
+      dropped = true;
+    } else if (target?.type === "new") {
+      moveDragPayloadToNewColumn(fakeEvent, draggedCardId, target.columnIndex);
+      dropped = true;
+    }
+  }
+  clearMobileHandDragOverHighlight(hand);
+  sourceCardNode?.classList.remove("dragging");
+  sourceColumnNode?.classList.remove("dragging-column");
+  ghost?.remove();
+  draggedCardId = null;
+  draggedColumnIds = null;
+  mobileHandDrag = null;
+  hand.classList.remove("ml-hand-drag-active");
+  window.setTimeout(() => {
+    suppressCardClick = false;
+  }, 0);
+  if (dropped) maybeShowMobileReorderTip();
+  return dropped;
+}
+
+/** 手机横屏：单牌单击 / 叠牌顶牌双击整列 / 长按拖拽理牌（委托 #mlHand） */
+function bindMobileHandEvents() {
+  const hand = elements.mlHand;
+  if (!hand || hand.dataset.handBound === "1") return;
+  hand.dataset.handBound = "1";
+  const DBL_TAP_MS = 450;
+  let touchState = null;
+  let lastTap = { time: 0, columnNode: null };
+
+  hand.addEventListener("touchstart", (event) => {
+    if (event.touches.length !== 1) {
+      touchState = null;
+      cancelMobileHandDragTimer();
+      return;
+    }
+    const touch = event.touches[0];
+    const columnNode = event.target.closest(".hand-column");
+    const resolvedColumn = columnNode && hand.contains(columnNode) ? columnNode : null;
+    let cardNode = event.target.closest(".card[data-card-id]");
+    if (resolvedColumn) {
+      const hitCard = mlHandHitCardInColumn(resolvedColumn, touch.clientX, touch.clientY);
+      if (hitCard) cardNode = hitCard;
+    }
+    const resolvedCard = cardNode && hand.contains(cardNode) ? cardNode : null;
+    touchState = {
+      x: touch.clientX,
+      y: touch.clientY,
+      columnNode: resolvedColumn,
+      cardNode: resolvedCard,
+    };
+    if (resolvedCard && resolvedColumn && canMobileHandReorder()) {
+      scheduleMobileHandDragStart(hand, resolvedCard, resolvedColumn, touch);
+    }
+  }, { passive: true });
+
+  hand.addEventListener("touchmove", (event) => {
+    if (mobileHandDrag) {
+      event.preventDefault();
+      const touch = event.touches[0];
+      if (!touch) return;
+      mobileHandDrag.lastX = touch.clientX;
+      mobileHandDrag.lastY = touch.clientY;
+      positionMobileHandDragGhost(mobileHandDrag.ghost, touch.clientX, touch.clientY);
+      updateMobileHandDragOverHighlight(hand, touch.clientX, touch.clientY, mobileHandDrag.ghost);
+      return;
+    }
+    if (!touchState || event.touches.length !== 1) return;
+    const touch = event.touches[0];
+    const dx = Math.abs(touch.clientX - touchState.x);
+    const dy = Math.abs(touch.clientY - touchState.y);
+    if (dx > ML_DRAG_MOVE_THRESHOLD || dy > ML_DRAG_MOVE_THRESHOLD) {
+      cancelMobileHandDragTimer();
+    }
+  }, { passive: false });
+
+  hand.addEventListener("touchend", (event) => {
+    if (mobileHandDrag) {
+      event.preventDefault();
+      finishMobileHandDrag(hand, event.changedTouches[0]);
+      touchState = null;
+      lastTap = { time: 0, columnNode: null };
+      return;
+    }
+    cancelMobileHandDragTimer();
+    if (!isMobileLandscape() || suppressCardClick || !touchState) return;
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      touchState = null;
+      return;
+    }
+    const dx = Math.abs(touch.clientX - touchState.x);
+    const dy = Math.abs(touch.clientY - touchState.y);
+    const columnNode = touchState.columnNode;
+    touchState = null;
+    if (dx > 18 || dy > 18 || !columnNode || !hand.contains(columnNode)) return;
+
+    const count = mlHandCardCountInColumn(columnNode);
+    if (count <= 1) {
+      cancelPendingMlSingleTap();
+      const cardNode = event.target.closest(".card[data-card-id]");
+      if (!cardNode || !hand.contains(cardNode)) return;
+      event.preventDefault();
+      pickMlHandSingleCard(cardNode);
+      lastTap = { time: 0, columnNode: null };
+      return;
+    }
+
+    const hitCard = mlHandHitCardInColumn(columnNode, touch.clientX, touch.clientY);
+    if (!hitCard) return;
+
+    const now = Date.now();
+    const isDouble = lastTap.columnNode === columnNode && (now - lastTap.time) <= DBL_TAP_MS;
+    event.preventDefault();
+    if (isDouble) {
+      cancelPendingMlSingleTap();
+      pickMlHandColumn(columnNode);
+      lastTap = { time: 0, columnNode: null };
+    } else {
+      scheduleMlSingleTap(hitCard, DBL_TAP_MS);
+      lastTap = { time: now, columnNode };
+    }
+  }, { passive: false });
+
+  hand.addEventListener("touchcancel", () => {
+    if (mobileHandDrag) finishMobileHandDrag(hand, null, { cancelled: true });
+    cancelMobileHandDragTimer();
+    touchState = null;
+  }, { passive: true });
+
+  hand.addEventListener("dblclick", (event) => {
+    if (!isMobileLandscape() || suppressCardClick) return;
+    const columnNode = event.target.closest(".hand-column");
+    if (!columnNode || !hand.contains(columnNode)) return;
+    if (mlHandCardCountInColumn(columnNode) <= 1) return;
+    const hitCard = mlHandHitCardInColumn(columnNode, event.clientX, event.clientY);
+    if (!hitCard) return;
+    event.preventDefault();
+    cancelPendingMlSingleTap();
+    pickMlHandColumn(columnNode);
+    lastTap = { time: 0, columnNode: null };
+  });
+
+  hand.addEventListener("click", (event) => {
+    if (!isMobileLandscape() || suppressCardClick || event.pointerType === "touch") return;
+    const columnNode = event.target.closest(".hand-column");
+    if (!columnNode || !hand.contains(columnNode)) return;
+    if (mlHandCardCountInColumn(columnNode) !== 1) return;
+    const cardNode = event.target.closest(".card[data-card-id]");
+    if (!cardNode || !hand.contains(cardNode)) return;
+    event.preventDefault();
+    pickMlHandSingleCard(cardNode);
+  });
+}
+
 function renderCard(card, {
   selectable = false,
   reorderable = false,
   columnIndex = null,
   cardIndex = null,
+  mobileColumn = false,
+  tablePlay = false,
 } = {}) {
-  const node = document.createElement(selectable ? "button" : "div");
-  node.className = cardClass(card);
+  const node = document.createElement(selectable && !mobileColumn ? "button" : "div");
+  node.className = [cardClass(card), tablePlay ? "table-play-card" : ""].filter(Boolean).join(" ");
   node.type = selectable ? "button" : undefined;
   node.dataset.cardId = cardId(card);
   node.dataset.cardId = cardId(card);
   if (selectedIds.has(cardId(card))) node.classList.add("selected");
   if (hintCardIds.has(cardId(card))) node.classList.add("hint-recommended");
+  if (mobileColumn && columnIndex !== null) {
+    node.style.setProperty("--ml-card-stack", String(cardIndex + 1));
+    node.style.zIndex = String(cardIndex + 1);
+  }
   const label = cardLabel(card);
   const isJoker = card.rank === "SJ" || card.rank === "BJ";
   const suitLabel = isJoker ? label : SUIT_LABELS[card.suit] ?? card.suit;
@@ -2673,10 +4093,13 @@ function renderCard(card, {
   const rankLabel = isJoker ? "王" : card.rank;
   const rankClass = rankLabel.length > 1 ? "rank wide" : "rank";
   const isLevelCard = state && card.rank === state.levelRank;
+  const cornerInner = (tablePlay || mobileColumn)
+    ? `<span class="${rankClass}">${rankLabel}</span><span class="suit-mark">${suitSymbol}</span>`
+    : `<span class="${rankClass}">${rankLabel}</span>`;
   node.innerHTML = `
-    <span class="corner top"><span class="${rankClass}">${rankLabel}</span></span>
-    <span class="suit-mark">${suitSymbol}</span>
-    <span class="suit">${suitSymbol}</span>
+    <span class="corner top">${cornerInner}</span>
+    ${tablePlay || mobileColumn ? "" : `<span class="suit-mark">${suitSymbol}</span>`}
+    <span class="suit${tablePlay ? " suit-br" : ""}">${suitSymbol}</span>
     <span class="card-name">${suitLabel}</span>
     ${isLevelCard ? `<span class="level-badge">级</span>` : ""}
   `;
@@ -2716,7 +4139,7 @@ function renderCard(card, {
       moveDragPayloadToColumn(event, sourceId, columnIndex);
     });
   }
-  if (selectable) {
+  if (selectable && !mobileColumn) {
     node.title = cardLabel(card);
     node.addEventListener("click", (event) => {
       if (suppressCardClick) return;
@@ -2750,6 +4173,9 @@ function renderCard(card, {
         render();
       }, canSelectColumn ? 320 : 0);
     });
+    if (reorderable && columnIndex !== null && cardIndex === 0) {
+      attachColumnSwipeSelect(node, columnIndex);
+    }
   }
   return node;
 }
@@ -3212,8 +4638,10 @@ function moveDragPayloadToNewColumn(event, fallbackSourceId, targetColumnIndex) 
   moveCardToNewColumnAt(fallbackSourceId, targetColumnIndex);
 }
 
-function handDropColumnIndex(clientX) {
-  const columns = [...elements.hand.querySelectorAll(".hand-column")];
+function handDropColumnIndex(clientX, handEl = null) {
+  const el = handEl ?? (isMobileLandscape() ? elements.mlHand : elements.hand);
+  if (!el) return 0;
+  const columns = [...el.querySelectorAll(".hand-column")];
   const index = columns.findIndex((column) => {
     const rect = column.getBoundingClientRect();
     return clientX < rect.left + rect.width / 2;
@@ -3253,7 +4681,10 @@ function sortHumanHand() {
   const arrangedHand = sortHumanCardsForArrangement(state.players[HUMAN_INDEX].hand);
   updateHumanHand(arrangedHand);
   resetHandColumns(arrangedHand);
-  message = "手牌已竖列整理。拖到牌面=加入该竖列；拖到空白=新建竖列。单击选一张，双击选整列。";
+  selectedIds = new Set();
+  message = isMobileLandscape()
+    ? "手牌已重新整理。"
+    : "手牌已竖列整理。拖到牌面=加入该竖列；拖到空白=新建竖列。单击选一张，双击/列顶下滑选整列。";
   render();
 }
 
@@ -3384,12 +4815,8 @@ function tryPlay(cards, successMessage, { advice = null, source = "human-manual"
     const play = classifyPlay(cards, state.levelRank);
     const adviceBeforePlay = advice ?? (actorIndex === HUMAN_INDEX
       ? (currentAdvice ?? hintAdvice ?? buildMinimalHumanAdviceForPlay(play))
-      : getTurnAdvice(state, actorIndex, robotAdviceOptions()));
+      : buildMinimalHumanAdviceForPlay(play));
     const adviceRecord = serializeCoachAdvice(adviceBeforePlay, play, source);
-    if (play.type !== PLAY_TYPES.pass && !state.lastActivePlay) {
-      tablePlays = new Map();
-      tableTrickLeaderIndex = null;
-    }
     state = playCards(state, cards);
     const stuckRepair = repairTurnStuck(state);
     if (stuckRepair.repaired) {
@@ -3401,22 +4828,16 @@ function tryPlay(cards, successMessage, { advice = null, source = "human-manual"
       showCoachToast("打得好 ✓");
     }
     captureHeadTourReviewIfNeeded();
-    tablePlays.set(actorIndex, play);
-    if (play.type !== PLAY_TYPES.pass) tableTrickLeaderIndex = actorIndex;
+    syncTablePlaysForCurrentTrick(actorIndex, play);
     selectedIds = new Set();
     message = successMessage;
     settleCompetitiveGameIfNeeded();
     if (isGameOver(state)) onGameOverDetected();
     const humanJustPlayed = actorIndex === HUMAN_INDEX;
-    if (humanJustPlayed && play.type !== PLAY_TYPES.pass) {
-      maybeRemindReportCards(state.players[HUMAN_INDEX].hand.length);
-    }
     if (humanJustPlayed) {
       cancelAdviceCompute();
       currentAdvice = null;
-      robotQueueActive = true;
       render({ immediate: true, lite: true });
-      scheduleIdleHumanAdviceRefresh();
       scheduleDeferredPanelsRender();
       queueRobotTurns();
     } else {
@@ -3425,7 +4846,12 @@ function tryPlay(cards, successMessage, { advice = null, source = "human-manual"
     }
   } catch (error) {
     message = toFriendlyError(error.message);
-    render();
+    robotQueueActive = false;
+    robotQueueStartedAt = 0;
+    if (state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
+      queueRobotTurns();
+    }
+    render({ immediate: true, lite: true });
   }
 }
 
@@ -3439,20 +4865,25 @@ function toFriendlyError(errorMessage) {
 
 function playSelected() {
   if (!state) return;
-  const cards = selectedCards();
+  let cards = selectedCards();
+  // 防御：高亮推荐但未同步 selected 时，仍按 Top1 出牌（用户未手动改选牌）
+  if (cards.length === 0 && hintShown && hintCardIds.size > 0) {
+    adoptHint();
+    return;
+  }
   if (cards.length === 0) {
-    message = "请先点选你想出的牌（选中后会向上浮起），再点「出牌」。";
+    notifyActionMessage("请先点选你想出的牌（选中后会向上浮起），再点「出牌」。");
     render();
     return;
   }
 
   const play = classifyPlay(cards, state.levelRank);
   if (play.type === PLAY_TYPES.invalid) {
-    message = cards.length > 1
+    notifyActionMessage(cards.length > 1
       ? `已选 ${cards.length} 张（${cardsLabel(cards)}），不能作为一手牌打出，请只选一手合法牌型。`
       : play.reason
         ? `这组牌不合法：${play.reason}`
-        : "这组牌型不合法，请重新选牌。";
+        : "这组牌型不合法，请重新选牌。");
     render();
     return;
   }
@@ -3462,7 +4893,7 @@ function playSelected() {
 function playRecommended() {
   if (!state) return;
   if (hintShown) {
-    adoptHint();
+    cancelHint();
     return;
   }
   showHint();
@@ -3484,6 +4915,38 @@ function playAdviceChoice(index) {
     advice,
     source: `human-accepted-suggestion-${index + 1}`,
   });
+}
+
+/** 计算超时/异常时的轻量建议，避免侧栏一直停在「正在计算」 */
+function buildEmergencyHumanAdvice() {
+  const hand = state.players[HUMAN_INDEX].hand;
+  const pressing = isHumanPressing(state);
+  const columnGroups = pressing ? currentHandPlayGroups() : [];
+  const preferredGroups = pressing && columnGroups.length > 0
+    ? mergePremiumStrategicGroups(
+      columnGroups,
+      hand,
+      state.levelRank,
+      buildStrategicGroups(hand, state.levelRank),
+    )
+    : columnGroups;
+  const previousPlay = effectivePreviousPlay(state);
+  const rec = humanAdviceFallback(hand, state.levelRank, previousPlay, preferredGroups, {
+    state,
+    playerIndex: HUMAN_INDEX,
+    lastActivePlayerIndex: state.lastActivePlayerIndex,
+  });
+  return {
+    playerIndex: HUMAN_INDEX,
+    levelRank: state.levelRank,
+    mustBeat: previousPlay ? serializePlay(previousPlay) : null,
+    handProfile: null,
+    recommendation: rec,
+    alternatives: [],
+    canPlay: rec.candidate.type !== PLAY_TYPES.pass,
+    tableKey: buildAdviceTableKey(),
+    _phase: "emergency",
+  };
 }
 
 /** 手动出牌时尚未算出 advice 时的占位记录，避免 tryPlay 同步全量评分 */
@@ -3527,6 +4990,51 @@ function passTurn() {
   });
 }
 
+function robotWaitSeconds() {
+  if (!robotQueueStartedAt || !robotQueueActive) return 0;
+  return Math.max(0, Math.floor((performance.now() - robotQueueStartedAt) / 1000));
+}
+
+function clearRobotQueueActiveIfCurrent(generation) {
+  if (generation === robotQueueGeneration) {
+    robotQueueActive = false;
+    robotQueueStartedAt = 0;
+  }
+}
+
+/** 主线程长时间阻塞时 setTimeout watchdog 也会滞后，用渲染帧检测并强制兜底 */
+function maybeRecoverStalledRobotQueue() {
+  if (!state || isGameOver(state) || state.currentPlayerIndex === HUMAN_INDEX || autoGameRunning) return;
+
+  if (!robotQueueActive) {
+    queueRobotTurns();
+    return;
+  }
+
+  // 假活跃：标志为 true 但从未真正调度（异常路径遗留）
+  if (robotQueueActive && !robotQueueStartedAt) {
+    console.warn("机器人队列假活跃，重启推进");
+    robotQueueActive = false;
+    queueRobotTurns();
+    return;
+  }
+
+  if (robotWaitSeconds() < ROBOT_STALL_RECOVER_SEC) return;
+  console.warn(`机器人队列停滞 ${robotWaitSeconds()}s，强制兜底恢复`);
+  robotQueueTimedOut = true;
+  robotQueueActive = false;
+  robotQueueStartedAt = 0;
+  cancelRobotQueueTimers();
+  message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌较慢，已自动兜底继续。`;
+  if (kickStuckSession({ timeout: true })) {
+    render({ immediate: true, lite: true });
+    queueRobotTurns();
+  } else {
+    render({ immediate: true, lite: true });
+    queueRobotTurns();
+  }
+}
+
 function cancelRobotQueueWatchdog(generation) {
   if (generation !== robotQueueGeneration || robotQueueWatchdog === null) return;
   clearTimeout(robotQueueWatchdog);
@@ -3550,6 +5058,53 @@ function syncTableAfterTrickRepair(repairedState) {
   tableTrickLeaderIndex = null;
 }
 
+/** 一圈结束（lastActivePlay 清空）时清桌心出牌；本 trick 内则追加该 seat 出牌 */
+function syncTablePlaysForCurrentTrick(actorIndex, play) {
+  if (!state?.lastActivePlay) {
+    tablePlays = new Map();
+    tableTrickLeaderIndex = null;
+    if (play.type !== PLAY_TYPES.pass) {
+      tablePlays.set(actorIndex, play);
+      tableTrickLeaderIndex = actorIndex;
+    }
+    return;
+  }
+  tablePlays.set(actorIndex, play);
+  if (play.type !== PLAY_TYPES.pass) {
+    tableTrickLeaderIndex = actorIndex;
+  }
+}
+
+/** 局末/未开局：桌心不应残留上一圈出牌 */
+function shouldClearTablePlays() {
+  return !state || isGameOver(state);
+}
+
+/** 渲染前对齐：state 已清台但 tablePlays 仍留上一圈时强制清空（含存档恢复） */
+function reconcileTablePlaysWithState() {
+  if (shouldClearTablePlays()) {
+    if (tablePlays.size > 0 || tableTrickLeaderIndex !== null) {
+      tablePlays = new Map();
+      tableTrickLeaderIndex = null;
+    }
+    return;
+  }
+  if (!state.lastActivePlay) {
+    if (tablePlays.size > 0 || tableTrickLeaderIndex !== null) {
+      tablePlays = new Map();
+      tableTrickLeaderIndex = null;
+    }
+    return;
+  }
+  if (
+    tableTrickLeaderIndex !== state.lastActivePlayerIndex
+    && state.lastActivePlayerIndex !== null
+    && state.lastActivePlayerIndex !== undefined
+  ) {
+    tableTrickLeaderIndex = state.lastActivePlayerIndex;
+  }
+}
+
 /** 修复 currentPlayer 与历史矛盾，必要时强制机器人过牌兜底 */
 function kickStuckSession({ timeout = false, silent = false } = {}) {
   if (!state || isGameOver(state)) return false;
@@ -3562,21 +5117,38 @@ function kickStuckSession({ timeout = false, silent = false } = {}) {
     return true;
   }
 
-  if (!timeout || state.currentPlayerIndex === HUMAN_INDEX || !state.lastActivePlay) {
+  if (!timeout || state.currentPlayerIndex === HUMAN_INDEX) {
     return false;
   }
 
   const actorIndex = state.currentPlayerIndex;
   try {
-    const play = classifyPlay([], state.levelRank);
-    state = playCards(state, []);
-    tablePlays.set(actorIndex, play);
+    let play;
+    const previousPlay = effectivePreviousPlay(state);
+    if (previousPlay) {
+      play = classifyPlay([], state.levelRank);
+      state = playCards(state, []);
+    } else {
+      const player = state.players[actorIndex];
+      const tableCtx = {
+        state,
+        playerIndex: actorIndex,
+        lastActivePlayerIndex: state.lastActivePlayerIndex,
+        previousPlay: null,
+      };
+      const fallback = fastRobotFallback(player.hand, state.levelRank, null, tableCtx);
+      play = fallback.candidate;
+      state = playCards(state, play.cards);
+    }
+    syncTablePlaysForCurrentTrick(actorIndex, play);
     if (!silent) {
-      message = `${PLAYER_NAMES[actorIndex]}：过牌（自动兜底）`;
+      message = play.type === PLAY_TYPES.pass
+        ? `${PLAYER_NAMES[actorIndex]}：过牌（自动兜底）`
+        : `${PLAYER_NAMES[actorIndex]}：${cardsLabel(play.cards)}（自动兜底）`;
     }
     return true;
   } catch (error) {
-    console.warn("机器人兜底过牌失败", error);
+    console.warn("机器人兜底出牌失败", error);
     return false;
   }
 }
@@ -3594,24 +5166,18 @@ function buildRobotTurnAdvice(actorIndex, recommendation) {
 }
 
 function applyRobotTurnResult(actorIndex, result, adviceRecord) {
-  const startsNewTrick = !state.lastActivePlay;
-  if (result.recommendation.candidate.type !== PLAY_TYPES.pass && startsNewTrick) {
-    tablePlays = new Map();
-    tableTrickLeaderIndex = null;
-  }
   state = result.state;
   appendCoachAdviceRecord(adviceRecord);
   captureHeadTourReviewIfNeeded();
-  tablePlays.set(actorIndex, result.recommendation.candidate);
-  if (result.recommendation.candidate.type !== PLAY_TYPES.pass) {
-    tableTrickLeaderIndex = actorIndex;
-  }
+  syncTablePlaysForCurrentTrick(actorIndex, result.recommendation.candidate);
   const playerName = PLAYER_NAMES[actorIndex];
   message = `${playerName}：${result.recommendation.candidate.type === PLAY_TYPES.pass ? "过牌" : cardsLabel(result.recommendation.candidate.cards)}`;
 }
 
 function finishRobotQueueToHuman(generation) {
   robotQueueActive = false;
+  robotQueueTimedOut = false;
+  robotQueueStartedAt = 0;
   cancelRobotQueueWatchdog(generation);
   invalidateStaleAdvice();
   currentAdvice = null;
@@ -3629,16 +5195,52 @@ function finishRobotQueueToHuman(generation) {
 
 function finishRobotQueueGameOver(generation) {
   robotQueueActive = false;
+  robotQueueTimedOut = false;
+  robotQueueStartedAt = 0;
   cancelRobotQueueWatchdog(generation);
   onGameOverDetected();
   render({ immediate: true, lite: true });
   scheduleDeferredPanelsRender();
 }
 
-/** 单帧可连推多手机器人，仅结束时渲染一次，避免勇哥/老史/毛蛋各卡一轮 UI */
+/** 正式对局机器人单步：推荐失败或超时时走 fastRobotFallback，避免队列卡死 */
+function executeFormalRobotTurn(gameState, actorIndex) {
+  const { state: normalized, repaired } = repairTurnStuck(gameState);
+  const workingState = repaired ? normalized : gameState;
+  if (repaired && workingState !== gameState) {
+    state = workingState;
+    syncTableAfterTrickRepair(workingState);
+  }
+  const player = workingState.players[actorIndex];
+  const previousPlay = effectivePreviousPlay(workingState);
+  const tableCtx = {
+    state: workingState,
+    playerIndex: actorIndex,
+    lastActivePlayerIndex: workingState.lastActivePlayerIndex,
+    previousPlay,
+  };
+  const opts = buildFormalRobotPlayOptions(workingState, actorIndex);
+  try {
+    return playRecommendedTurn(workingState, opts);
+  } catch (error) {
+    console.warn(`${PLAYER_NAMES[actorIndex]} 推荐异常，走兜底`, error);
+    const fallback = fastRobotFallback(
+      player.hand,
+      workingState.levelRank,
+      previousPlay,
+      tableCtx,
+    );
+    return {
+      state: playCards(workingState, fallback.candidate.cards),
+      recommendation: fallback,
+    };
+  }
+}
+
+/** 单帧仅推一手机器人，步末 setTimeout(0) 让出主线程且 watchdog 能触发 */
 function runRobotQueueStep(generation) {
   if (generation !== robotQueueGeneration || !state || isGameOver(state)) {
-    robotQueueActive = false;
+    clearRobotQueueActiveIfCurrent(generation);
     cancelRobotQueueWatchdog(generation);
     if (state && isGameOver(state)) onGameOverDetected();
     return;
@@ -3648,64 +5250,55 @@ function runRobotQueueStep(generation) {
     return;
   }
 
+  if (adviceComputeState.inFlight) {
+    cancelAdviceCompute();
+  }
+  cancelIdleTask(adviceRefreshIdleRef);
+
   kickStuckSession({ silent: true });
   if (state.currentPlayerIndex === HUMAN_INDEX) {
     finishRobotQueueToHuman(generation);
     return;
   }
 
-  const batchStarted = performance.now();
-  let stepsDone = 0;
+  if (detectTurnStuck(state)) {
+    kickStuckSession({ silent: true });
+    render({ immediate: true, lite: true });
+    if (state.currentPlayerIndex === HUMAN_INDEX) {
+      finishRobotQueueToHuman(generation);
+      return;
+    }
+  }
+
   let stepOk = true;
 
-  while (
-    generation === robotQueueGeneration
-    && state
-    && !isGameOver(state)
-    && state.currentPlayerIndex !== HUMAN_INDEX
-    && stepsDone < ROBOT_BATCH_MAX_STEPS
-    && (performance.now() - batchStarted) < ROBOT_BATCH_YIELD_MS
-  ) {
-    if (detectTurnStuck(state)) {
-      kickStuckSession({ silent: true });
-      if (state.currentPlayerIndex === HUMAN_INDEX) break;
-    }
+  const actorIndex = state.currentPlayerIndex;
+  const playerName = PLAYER_NAMES[actorIndex];
+  const stepStarted = performance.now();
 
-    const actorIndex = state.currentPlayerIndex;
-    const playerName = PLAYER_NAMES[actorIndex];
-    const stepStarted = performance.now();
-
-    try {
-      const result = playRecommendedTurn(state, {
-        mlModel: null,
-        mlFusionMode: "off",
-        lite: true,
-      });
-      const adviceBeforePlay = buildRobotTurnAdvice(actorIndex, result.recommendation);
-      const adviceRecord = serializeCoachAdvice(
-        adviceBeforePlay,
-        result.recommendation.candidate,
-        "robot-auto",
-      );
-      applyRobotTurnResult(actorIndex, result, adviceRecord);
-    } catch (error) {
-      console.error(`${playerName} 自动出牌失败`, error);
-      if (!kickStuckSession({ timeout: true, silent: true })) {
-        stepOk = false;
-        break;
-      }
+  try {
+    const result = executeFormalRobotTurn(state, actorIndex);
+    const adviceBeforePlay = buildRobotTurnAdvice(actorIndex, result.recommendation);
+    const adviceRecord = serializeCoachAdvice(
+      adviceBeforePlay,
+      result.recommendation.candidate,
+      "robot-auto",
+    );
+    applyRobotTurnResult(actorIndex, result, adviceRecord);
+  } catch (error) {
+    console.error(`${playerName} 自动出牌失败`, error);
+    if (!kickStuckSession({ timeout: true, silent: true })) {
+      stepOk = false;
     }
+  }
 
-    const stepElapsed = performance.now() - stepStarted;
-    if (stepElapsed > ROBOT_STEP_SLOW_MS) {
-      console.warn(`机器人单步耗时 ${Math.round(stepElapsed)}ms（${playerName}）`);
-    }
-    stepsDone += 1;
-    settleCompetitiveGameIfNeeded();
-    if (state?.currentPlayerIndex === HUMAN_INDEX || isGameOver(state)) break;
+  const stepElapsed = performance.now() - stepStarted;
+  if (stepElapsed > ROBOT_STEP_SLOW_MS) {
+    console.warn(`机器人单步耗时 ${Math.round(stepElapsed)}ms（${playerName}）`);
   }
 
   cancelRobotQueueWatchdog(generation);
+  settleCompetitiveGameIfNeeded();
 
   if (state && isGameOver(state)) {
     finishRobotQueueGameOver(generation);
@@ -3716,17 +5309,25 @@ function runRobotQueueStep(generation) {
     return;
   }
   if (detectTurnStuck(state)) {
-    robotQueueActive = false;
-    if (kickStuckSession({ silent: true })) {
-      render({ immediate: true, lite: true });
-      if (state?.currentPlayerIndex === HUMAN_INDEX) scheduleHumanAdviceRefresh();
-      else scheduleRobotStep(generation);
+    clearRobotQueueActiveIfCurrent(generation);
+    let recovered = kickStuckSession({ silent: true });
+    if (!recovered) recovered = kickStuckSession({ timeout: true, silent: true });
+    render({ immediate: true, lite: true });
+    if (state?.currentPlayerIndex === HUMAN_INDEX) {
+      scheduleHumanAdviceRefresh();
+    } else if (recovered) {
+      scheduleRobotStep(generation);
+    } else {
+      queueRobotTurns();
     }
     return;
   }
   if (!stepOk || generation !== robotQueueGeneration) {
-    robotQueueActive = false;
+    clearRobotQueueActiveIfCurrent(generation);
     render({ immediate: true, lite: true });
+    if (!stepOk && generation === robotQueueGeneration && state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
+      queueRobotTurns();
+    }
     return;
   }
 
@@ -3734,7 +5335,7 @@ function runRobotQueueStep(generation) {
   scheduleRobotStep(generation);
 }
 
-/** 每步 setTimeout 调度 1 手，步骤间主线程可喘息且 watchdog 能触发 */
+/** 每手 setTimeout(0) 调度下一步，让出主线程且 watchdog 能触发；无人为思考 delay */
 function scheduleRobotStep(generation) {
   if (robotQueueTimer !== null) {
     clearTimeout(robotQueueTimer);
@@ -3748,12 +5349,21 @@ function scheduleRobotStep(generation) {
   robotQueueWatchdog = window.setTimeout(() => {
     if (generation !== robotQueueGeneration) return;
     if (!state || isGameOver(state) || state.currentPlayerIndex === HUMAN_INDEX) {
-      robotQueueActive = false;
+      if (state?.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state)) {
+        scheduleHumanAdviceRefresh();
+      }
+      clearRobotQueueActiveIfCurrent(generation);
+      robotQueueTimedOut = false;
       return;
     }
     console.warn("机器人出牌超时，尝试修复并继续。");
-    robotQueueActive = false;
+    robotQueueTimedOut = true;
+    clearRobotQueueActiveIfCurrent(generation);
+    message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌超时，已自动兜底过牌并继续。`;
     if (kickStuckSession({ timeout: true })) {
+      render({ immediate: true, lite: true });
+      queueRobotTurns();
+    } else {
       render({ immediate: true, lite: true });
       queueRobotTurns();
     }
@@ -3767,7 +5377,13 @@ function scheduleRobotStep(generation) {
 }
 
 function queueRobotTurns() {
+  cancelIdleTask(adviceRefreshIdleRef);
+  if (adviceComputeState.inFlight) {
+    cancelAdviceCompute();
+  }
   robotQueueGeneration += 1;
+  robotQueueTimedOut = false;
+  robotQueueStartedAt = performance.now();
   cancelRobotQueueTimers();
   scheduleRobotStep(robotQueueGeneration);
 }
@@ -3799,17 +5415,18 @@ function autoGame() {
     let batch = 0;
     while (state && !isGameOver(state) && transcript.length < 600 && batch < 6) {
       const actorIndex = state.currentPlayerIndex;
-      const startsNewTrick = !state.lastActivePlay;
-      const adviceBeforePlay = getTurnAdvice(state, actorIndex, robotAdviceOptions());
+      const robotOpts = buildFormalRobotPlayOptions(state, actorIndex);
+      const adviceBeforePlay = getTurnAdvice(state, actorIndex, {
+        ...robotOpts,
+        alternatives: 3,
+        handProfile: null,
+      });
       const adviceRecord = serializeCoachAdvice(
         adviceBeforePlay,
         adviceBeforePlay.recommendation.candidate,
         "auto-game",
       );
-      const result = playRecommendedTurn(state, {
-        mlModel: robotMlModel(),
-        mlFusionMode: mlFusionModeForUi(),
-      });
+      const result = playRecommendedTurn(state, robotOpts);
       // 自动打完代打不计入人类复盘
       if (actorIndex !== HUMAN_INDEX) {
         appendCoachAdviceRecord(adviceRecord);
@@ -3823,14 +5440,7 @@ function autoGame() {
       });
       state = result.state;
       captureHeadTourReviewIfNeeded();
-      if (result.recommendation.candidate.type !== PLAY_TYPES.pass && startsNewTrick) {
-        tablePlays = new Map();
-        tableTrickLeaderIndex = null;
-      }
-      tablePlays.set(actorIndex, result.recommendation.candidate);
-      if (result.recommendation.candidate.type !== PLAY_TYPES.pass) {
-        tableTrickLeaderIndex = actorIndex;
-      }
+      syncTablePlaysForCurrentTrick(actorIndex, result.recommendation.candidate);
       batch += 1;
     }
 
@@ -3838,7 +5448,7 @@ function autoGame() {
     render();
 
     if (state && !isGameOver(state) && transcript.length < 600) {
-      window.setTimeout(step, 48);
+      window.setTimeout(step, 0);
       return;
     }
     finishAutoGame(Boolean(state && isGameOver(state)));
@@ -3874,20 +5484,22 @@ async function runSelfTraining() {
 }
 
 function renderPlayers() {
-  elements.players.replaceChildren();
+  const container = activePlayersEl();
+  if (!container) return;
+  container.replaceChildren();
   if (!state) return;
 
   for (const player of state.players) {
     const node = document.createElement("div");
     const isActive = player.seatIndex === state.currentPlayerIndex;
-    const isThinking = isActive
+    const isRobotWalking = isActive
       && state.currentPlayerIndex !== HUMAN_INDEX
       && robotQueueActive
       && !isGameOver(state);
     node.className = [
       "player",
       isActive ? "active" : "",
-      isThinking ? "thinking" : "",
+      isRobotWalking ? "robot-walking" : "",
     ].filter(Boolean).join(" ");
     node.dataset.seat = String(player.seatIndex);
     node.dataset.avatar = PLAYER_AVATARS[player.seatIndex];
@@ -3895,17 +5507,64 @@ function renderPlayers() {
     node.innerHTML = `
       <div class="player-title">
         <span>${PLAYER_NAMES[player.seatIndex]}</span>
-        <span>${player.hand.length} 张</span>
+        <span>${player.hand.length}</span>
       </div>
       ${finishedMeta}
     `;
-    elements.players.append(node);
+    container.append(node);
+  }
+}
+
+function purgeSeatPlayContainers() {
+  if (elements.seatPlays) elements.seatPlays.replaceChildren();
+  if (elements.mlSeatPlays) elements.mlSeatPlays.replaceChildren();
+}
+
+/** 人类轮次且桌心三钮可见（须跟牌或领出空白 trick） */
+function isMobileHumanActionsVisible() {
+  if (!isMobileLandscape() || !state || isGameOver(state)) return false;
+  const dealing = Boolean(elements.newGame?.disabled);
+  if (dealing || state.currentPlayerIndex !== HUMAN_INDEX) return false;
+  const trickReadyForHumanActions = !state.lastActivePlay ? tablePlays.size === 0 : true;
+  return trickReadyForHumanActions;
+}
+
+/** 手机横屏：本 trick 内各家出牌显示在对应座位前；须压牌高亮但不挪到桌心 */
+function renderMobileSeatPlays(container) {
+  const hideOwnPlay = isMobileHumanActionsVisible();
+  for (let seatIndex = 0; seatIndex < PLAYER_NAMES.length; seatIndex += 1) {
+    if (hideOwnPlay && seatIndex === HUMAN_INDEX) continue;
+    if (!tablePlays.has(seatIndex)) continue;
+    const play = tablePlays.get(seatIndex);
+    const isActivePlay = tableTrickLeaderIndex === seatIndex && play && play.type !== PLAY_TYPES.pass;
+    const node = document.createElement("div");
+    node.className = [
+      "seat-play",
+      play && play.type === PLAY_TYPES.pass ? "pass" : "",
+      isActivePlay ? "active-play" : "",
+    ].filter(Boolean).join(" ");
+    node.dataset.seat = String(seatIndex);
+    const cards = document.createElement("div");
+    cards.className = "seat-cards ml-seat-play-cards";
+    if (play && play.type !== PLAY_TYPES.pass) {
+      for (const card of play.cards) {
+        cards.append(renderCard(card, { tablePlay: true }));
+      }
+    }
+    node.append(cards);
+    container.append(node);
   }
 }
 
 function renderSeatPlays() {
-  elements.seatPlays.replaceChildren();
-  if (!state) return;
+  purgeSeatPlayContainers();
+  const container = activeSeatPlaysEl();
+  if (!container || shouldClearTablePlays()) return;
+  const mobile = isMobileLandscape();
+  if (mobile) {
+    renderMobileSeatPlays(container);
+    return;
+  }
   for (let seatIndex = 0; seatIndex < PLAYER_NAMES.length; seatIndex += 1) {
     const play = tablePlays.get(seatIndex);
     const node = document.createElement("div");
@@ -3934,7 +5593,7 @@ function renderSeatPlays() {
     }
     node.innerHTML = `<strong>${PLAYER_NAMES[seatIndex]}：${label}</strong>`;
     node.append(cards);
-    elements.seatPlays.append(node);
+    container.append(node);
   }
 }
 
@@ -3948,11 +5607,13 @@ function renderTable() {
   elements.turnHint.textContent = noGame
     ? "点击“新开一局”发牌"
     : gameOver
-      ? "点击“新开一局”继续练牌"
+      ? (gameReviewOverlayDismissed && !isMobileLayout()
+        ? "点击此处看复盘"
+        : "点击“新开一局”继续练牌")
     : state.currentPlayerIndex === HUMAN_INDEX
       ? "轮到你出牌"
       : robotQueueActive
-        ? `等待 ${PLAYER_NAMES[state.currentPlayerIndex]} 出牌…`
+        ? `${PLAYER_NAMES[state.currentPlayerIndex]} 正在走牌…`
         : `轮到 ${PLAYER_NAMES[state.currentPlayerIndex]}`;
   elements.turnCount.textContent = noGame ? "0 手" : `${state.turnNumber} 手`;
 
@@ -3969,7 +5630,7 @@ function renderTable() {
   if (!state || !state.lastActivePlay) {
     elements.lastPlayTitle.textContent = "桌面暂无出牌";
   } else {
-    elements.lastPlayTitle.textContent = `本轮需要压过：${PLAYER_NAMES[state.lastActivePlayerIndex]} 的 ${playLabel(state.lastActivePlay)}`;
+    elements.lastPlayTitle.textContent = trickPromptLabel(state);
     for (const card of state.lastActivePlay.cards) {
       elements.lastCards.append(renderCard(card));
     }
@@ -3981,7 +5642,16 @@ function renderMatch() {
   elements.matchStrip?.classList.toggle("match-active", Boolean(matchState));
   if (!matchState) {
     elements.matchStatus.textContent = "单局练习";
-    elements.matchSummary.textContent = buildSingleGameMatchSummary(currentGameMeta?.drillFocus);
+    if (state && !isGameOver(state)) {
+      const drillLine = buildSingleGameMatchSummary(currentGameMeta?.drillFocus);
+      elements.matchSummary.textContent = currentGameMeta?.drillFocus
+        ? drillLine
+        : `本局进行中 · 第 ${state.turnNumber} 手；可先理牌再出牌。`;
+    } else if (state && isGameOver(state)) {
+      elements.matchSummary.textContent = "本局已结束；可新开一局继续练习。";
+    } else {
+      elements.matchSummary.textContent = buildSingleGameMatchSummary(currentGameMeta?.drillFocus);
+    }
     if (elements.tributePanel) elements.tributePanel.classList.remove("visible");
     if (elements.nextMatchGame) {
       elements.nextMatchGame.hidden = !shouldShowNextMatchGame(matchState);
@@ -4028,33 +5698,269 @@ function renderMatch() {
   }
 }
 
-function renderHand() {
-  elements.hand.replaceChildren();
-  if (!state) return;
-  if (isGameOver(state)) return;
-  elements.hand.ondragover = handleHandDragOver;
-  elements.hand.ondrop = handleHandDrop;
-  const cardById = new Map(state.players[HUMAN_INDEX].hand.map((card) => [cardId(card), card]));
-  const columns = ensureHandColumns();
+/** 人类手牌；ensureHandColumns 空时 fallback 每张一列 */
+function resolveHandColumnIds(hand) {
+  let columns = ensureHandColumns();
+  if (columns.length === 0 && hand.length > 0) {
+    columns = hand.map((card) => [cardId(card)]);
+  }
+  return columns;
+}
+
+/** 桌面/手机共用：向指定容器写入 hand-column + card */
+function renderHandColumnsTo(handEl, { reorderable = false, mobileColumn = false } = {}) {
+  if (!handEl) return;
+  handEl.replaceChildren();
+  if (!state || isGameOver(state)) return;
+  handEl.classList.remove("hand-fan");
+  if (reorderable) {
+    handEl.ondragover = handleHandDragOver;
+    handEl.ondrop = handleHandDrop;
+  } else {
+    handEl.ondragover = null;
+    handEl.ondrop = null;
+  }
+  const hand = state.players[HUMAN_INDEX].hand;
+  const cardById = new Map(hand.map((card) => [cardId(card), card]));
+  const columns = resolveHandColumnIds(hand);
+  const selectable = state.currentPlayerIndex === HUMAN_INDEX;
   for (let columnIndex = 0; columnIndex < columns.length; columnIndex += 1) {
     const column = columns[columnIndex];
     const columnNode = document.createElement("div");
     columnNode.className = "hand-column";
     columnNode.dataset.columnIndex = String(columnIndex);
-    columnNode.addEventListener("dragover", handleColumnDragOver);
-    columnNode.addEventListener("drop", (event) => handleColumnDrop(event, columnIndex));
+    if (reorderable) {
+      columnNode.addEventListener("dragover", handleColumnDragOver);
+      columnNode.addEventListener("drop", (event) => handleColumnDrop(event, columnIndex));
+    }
     const cards = column.map((id) => cardById.get(id)).filter(Boolean);
+    const allSelected = cards.length > 0 && column.every((id) => selectedIds.has(id));
+    if (allSelected) columnNode.classList.add("column-selected");
     for (let cardIndex = 0; cardIndex < cards.length; cardIndex += 1) {
       const card = cards[cardIndex];
       columnNode.append(renderCard(card, {
-        selectable: state.currentPlayerIndex === HUMAN_INDEX,
-        reorderable: true,
+        selectable,
+        reorderable,
+        mobileColumn,
         columnIndex,
         cardIndex,
       }));
     }
-    elements.hand.append(columnNode);
+    handEl.append(columnNode);
   }
+}
+
+/** 按毡区宽度同步各家出牌单牌尺寸（最多横排 8 张） */
+function syncMobileSeatPlayMetrics() {
+  const root = elements.landscapeRoot;
+  if (!isMobileLandscape() || !root) {
+    root?.style.removeProperty("--ml-seat-play-zone-w");
+    root?.style.removeProperty("--ml-seat-side-zone-w");
+    root?.style.removeProperty("--ml-seat-card-w");
+    root?.style.removeProperty("--ml-seat-card-h");
+    root?.style.removeProperty("--ml-seat-side-card-w");
+    root?.style.removeProperty("--ml-seat-side-card-h");
+    return;
+  }
+  const vw = window.visualViewport?.width ?? window.innerWidth ?? 800;
+  const gap = 3;
+  const slots = 8;
+  const zoneW = Math.min(vw - 120, vw * 0.85);
+  const sideZoneW = Math.min(Math.round(vw * 0.36), zoneW);
+  const cardW = Math.min(56, Math.max(30, Math.floor((zoneW - (slots - 1) * gap) / slots)));
+  const sideCardW = Math.min(56, Math.max(28, Math.floor((sideZoneW - (slots - 1) * gap) / slots)));
+  const cardH = Math.round(cardW * 1.5);
+  const sideCardH = Math.round(sideCardW * 1.5);
+  root.style.setProperty("--ml-seat-play-zone-w", `${Math.round(zoneW)}px`);
+  root.style.setProperty("--ml-seat-side-zone-w", `${sideZoneW}px`);
+  root.style.setProperty("--ml-seat-card-w", `${cardW}px`);
+  root.style.setProperty("--ml-seat-card-h", `${cardH}px`);
+  root.style.setProperty("--ml-seat-side-card-w", `${sideCardW}px`);
+  root.style.setProperty("--ml-seat-side-card-h", `${sideCardH}px`);
+}
+
+/** 桌面桌心三钮：仅人类回合显示 */
+function syncDesktopCenterActions() {
+  if (isMobileLandscape()) return;
+  const center = elements.centerActions;
+  if (!center) return;
+  const gameOver = state && isGameOver(state);
+  const dealing = Boolean(elements.newGame?.disabled);
+  const humanTurn = Boolean(
+    state && !gameOver && !dealing && state.currentPlayerIndex === HUMAN_INDEX,
+  );
+  center.hidden = !humanTurn;
+  center.classList.toggle("center-actions-hidden", !humanTurn);
+}
+
+/** 手机横屏桌心三钮显隐：仅人类可行动时显示，其余不占位隐藏 */
+function syncMobileCenterActions() {
+  if (!isMobileLandscape()) return;
+  const center = elements.mlCenter;
+  if (!center) return;
+
+  const noGame = !state;
+  const gameOver = state && isGameOver(state);
+  const dealing = Boolean(elements.newGame?.disabled);
+  const showMlNewGame = noGame || gameOver;
+  const humanTurn = Boolean(
+    state && !gameOver && !dealing && state.currentPlayerIndex === HUMAN_INDEX,
+  );
+  const showActions = humanTurn && !showMlNewGame && isMobileHumanActionsVisible();
+
+  if (elements.mlNewGame) elements.mlNewGame.hidden = !showMlNewGame;
+  for (const id of ["mlPassTurn", "mlPlayRecommended", "mlPlaySelected"]) {
+    const btn = elements[id];
+    if (btn) btn.hidden = !showActions;
+  }
+
+  const showCenter = showMlNewGame || showActions;
+  center.hidden = !showCenter;
+  center.classList.toggle("ml-center-hidden", !showCenter);
+}
+
+/** 量测桌心三钮带高度，供 seat-0 上浮定位（避免 bbox 与 #mlCenter 交叉） */
+function syncMobileActionBandMetrics() {
+  const root = elements.landscapeRoot;
+  if (!isMobileLandscape() || !root || !elements.mlCenter) {
+    root?.style.removeProperty("--ml-action-band-h");
+    return;
+  }
+  const center = elements.mlCenter;
+  const hidden = center.hidden
+    || center.classList.contains("ml-center-hidden")
+    || center.offsetParent === null;
+  if (hidden) {
+    root.style.setProperty("--ml-action-band-h", "0px");
+    return;
+  }
+  const bandH = Math.ceil(center.getBoundingClientRect().height);
+  root.style.setProperty("--ml-action-band-h", `${Math.max(40, bandH)}px`);
+}
+
+/** 手机横屏手牌工具列内容高度（双钮 + 间距；safe-area 由 CSS padding 承担，避免量测偏小裁切教练） */
+function mlHandToolsMinHeight() {
+  const tools = document.querySelector("#landscapeRoot .ml-hand-tools");
+  const theoretical = 32 + 8 + 32 + 4;
+  if (!tools) return theoretical;
+  const measured = Math.ceil(tools.scrollHeight || tools.offsetHeight);
+  return Math.max(theoretical, measured);
+}
+
+/** 手机横屏：理牌/教练 FAB 始终可见（与理牌并列） */
+function syncMlHandToolsChrome() {
+  if (!isMobileLandscape()) return;
+  for (const btn of [elements.mlSortHand, elements.mlCoachFab]) {
+    if (!btn) continue;
+    btn.hidden = false;
+    btn.style.removeProperty("display");
+    btn.style.removeProperty("visibility");
+    btn.style.removeProperty("opacity");
+  }
+}
+
+/** 手机横屏手牌：牌高比（仅底栏叠列，非出牌区 3:2） */
+const ML_HAND_CARD_ASPECT = 1.28;
+/** 叠牌列可见顶条：占牌高比例（与 mobile-ui.css --ml-hand-peek-h 同步） */
+const ML_HAND_PEEK_RATIO = 0.44;
+const ML_HAND_PEEK_MIN = 32;
+const ML_HAND_PEEK_MAX = 42;
+const ML_HAND_PEEK_FLOOR = 26;
+/** 按列深算 stack/bar；bar 必 ≥ stack + safe-bottom，超预算时缩 peek / cardW 而非裁底牌 */
+function syncMobileHandMetrics() {
+  const root = elements.landscapeRoot;
+  if (!isMobileLandscape() || !root || !state || isGameOver(state)) {
+    root?.style.removeProperty("--ml-hand-stack-h");
+    root?.style.removeProperty("--ml-hand-bar-h");
+    root?.style.removeProperty("--ml-hand-peek-h");
+    root?.style.removeProperty("--ml-hand-col-overlap");
+    root?.style.removeProperty("--ml-card-w");
+    root?.style.removeProperty("--ml-card-h");
+    root?.style.removeProperty("--ml-card-aspect");
+    return;
+  }
+  const columns = resolveHandColumnIds(state.players[HUMAN_INDEX].hand);
+  const maxDepth = Math.max(1, ...columns.map((col) => col.length));
+  const vh = window.visualViewport?.height ?? window.innerHeight;
+  const rootStyle = getComputedStyle(root);
+  const hudH = parseFloat(rootStyle.getPropertyValue("--ml-hud-h")) || 40;
+  const safeBottom = parseFloat(rootStyle.getPropertyValue("--safe-bottom")) || 0;
+  const barPadBottom = 4 + safeBottom;
+  const barPadExtra = 4;
+  const toolsColH = mlHandToolsMinHeight();
+  const stageH = Math.max(120, vh - hudH);
+  const handBarBudget = Math.min(vh * 0.44, stageH * 0.5, 252);
+
+  const sampleCard = elements.mlHand?.querySelector(".hand-column .card");
+  const vw = window.visualViewport?.width ?? window.innerWidth ?? 800;
+  const defaultCardW = Math.min(58, Math.max(42, vw * 0.1));
+  let cardW = sampleCard
+    ? parseFloat(getComputedStyle(sampleCard).width) || defaultCardW
+    : parseFloat(rootStyle.getPropertyValue("--ml-card-w")) || defaultCardW;
+  const minCardW = 38;
+
+  function metricsFor(cardWidth, peekH) {
+    const cH = Math.ceil(cardWidth * ML_HAND_CARD_ASPECT);
+    const stack = Math.ceil(cH + (maxDepth - 1) * peekH + barPadExtra);
+    const bar = Math.ceil(Math.max(stack + barPadBottom, toolsColH + barPadBottom) + barPadExtra);
+    return { cardH: cH, stackH: stack, barH: bar, peekH: peekH };
+  }
+
+  function targetPeekFor(cardWidth) {
+    return Math.round(Math.min(
+      ML_HAND_PEEK_MAX,
+      Math.max(ML_HAND_PEEK_MIN, cardWidth * ML_HAND_CARD_ASPECT * ML_HAND_PEEK_RATIO),
+    ));
+  }
+
+  let peekHeight = targetPeekFor(cardW);
+  let m = metricsFor(cardW, peekHeight);
+
+  while (m.barH > handBarBudget && peekHeight > ML_HAND_PEEK_FLOOR) {
+    peekHeight -= 1;
+    m = metricsFor(cardW, peekHeight);
+  }
+  while (m.barH > handBarBudget && cardW > minCardW) {
+    cardW -= 1;
+    peekHeight = targetPeekFor(cardW);
+    while (m.barH > handBarBudget && peekHeight > ML_HAND_PEEK_FLOOR) {
+      peekHeight -= 1;
+      m = metricsFor(cardW, peekHeight);
+    }
+    m = metricsFor(cardW, peekHeight);
+  }
+
+  root.style.setProperty("--ml-hand-peek-h", `${peekHeight}px`);
+  root.style.setProperty("--ml-hand-col-overlap", `calc((${m.cardH}px - ${peekHeight}px) * -1)`);
+  root.style.setProperty("--ml-hand-stack-h", `${m.stackH}px`);
+  root.style.setProperty("--ml-hand-bar-h", `${m.barH}px`);
+  root.style.setProperty("--ml-card-w", `${cardW}px`);
+  root.style.setProperty("--ml-card-h", `${m.cardH}px`);
+  root.style.setProperty("--ml-card-aspect", String(ML_HAND_CARD_ASPECT));
+}
+
+function renderMobileHandColumns() {
+  renderHandColumnsTo(elements.mlHand, { reorderable: false, mobileColumn: true });
+  syncMobileHandMetrics();
+  syncMlHandToolsChrome();
+}
+
+function renderDesktopHand() {
+  renderHandColumnsTo(elements.hand, { reorderable: true, mobileColumn: false });
+}
+
+function renderHand() {
+  if (isMobileLandscape()) {
+    purgeDesktopHandOnMobile();
+    renderMobileHandColumns();
+    return;
+  }
+  if (isMobileLayout()) {
+    purgeDesktopHandOnMobile();
+    if (elements.mlHand) elements.mlHand.replaceChildren();
+    return;
+  }
+  renderDesktopHand();
 }
 
 function openHandsReviewSource() {
@@ -4125,25 +6031,111 @@ function currentDivergenceSummary() {
   return summarizeGameDivergences(currentGameMeta?.coachAdviceTimeline ?? [], HUMAN_INDEX);
 }
 
+function keyPauseRecommendLine() {
+  const advice = currentAdvice;
+  if (advice?.recommendation) {
+    const rec = advice.recommendation;
+    const label = rec.candidate.label || (rec.candidate.type === PLAY_TYPES.pass ? "过牌" : "推荐牌");
+    const reason = firstReasonForUser(rec.reasons);
+    return reason ? `${label}（${reason}）` : label;
+  }
+  const context = keyPauseOverlay?.message?.replace(/^关键时刻：/, "") ?? "";
+  return context || "正在计算推荐…";
+}
+
+function handleKeyPauseAction(action) {
+  if (action === "think") dismissKeyPause();
+  else if (action === "hint") keyPauseShowHint();
+  else if (action === "disable") {
+    if (elements.useKeyPause) elements.useKeyPause.checked = false;
+    if (elements.mobileKeyPause) elements.mobileKeyPause.checked = false;
+    onKeyPauseToggle();
+  }
+}
+
 function renderKeyPauseBanner() {
   if (!elements.keyPauseBanner) return;
-  if (!keyPauseOverlay) {
+  const mobileLandscape = isMobileLandscape();
+  if (!keyPauseOverlay || (mobileLandscape && hintShown)) {
     elements.keyPauseBanner.hidden = true;
     elements.keyPauseBanner.replaceChildren();
+    mirrorMobileBanner(elements.keyPauseBanner, elements.mlKeyPauseBanner);
+    return;
+  }
+  // 横屏：推荐走顶栏 #mlHudAdvice，桌心 ml-banners 不渲染（避免绝对定位+父高塌陷裁切白条）
+  if (mobileLandscape) {
+    elements.keyPauseBanner.hidden = true;
+    elements.keyPauseBanner.replaceChildren();
+    mirrorMobileBanner(elements.keyPauseBanner, elements.mlKeyPauseBanner);
     return;
   }
   elements.keyPauseBanner.hidden = false;
   elements.keyPauseBanner.innerHTML = `
-    <strong>先想再出</strong>
-    <span class="key-pause-msg">${escapeHtml(keyPauseOverlay.message)}</span>
-    <div class="key-pause-actions">
-      <button class="btn" type="button" data-key-pause-action="think">我先想</button>
-      <button class="btn primary" type="button" data-key-pause-action="hint">看推荐</button>
+    <div class="key-pause-head">
+      <strong>推荐</strong>
+      <button class="key-pause-never" type="button" data-key-pause-action="disable" title="关闭关键时刻推荐">不再提示</button>
     </div>
+    <p class="key-pause-msg">这手建议：${escapeHtml(keyPauseRecommendLine())}</p>
+    <div class="key-pause-actions">
+      <button class="btn" type="button" data-key-pause-action="think" title="关闭弹窗，自己选牌出牌">取消</button>
+      <button class="btn primary" type="button" data-key-pause-action="hint" title="展开教练推荐并高亮牌">看推荐</button>
+    </div>
+  `;
+  mirrorMobileBanner(elements.keyPauseBanner, elements.mlKeyPauseBanner);
+}
+
+function syncMobileCoachHudLine() {
+  if (!elements.mlHudAdvice) return;
+  const mobile = isMobileLandscape();
+  const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
+  if (mobile && !guidesEnabled() && !hintShown && !keyPauseOverlay && (!state || isGameOver(state))) {
+    elements.mlHudAdvice.hidden = false;
+    elements.mlHudAdvice.innerHTML =
+      `<strong>试玩</strong><span>点「新开一局」开始 · 底栏「教练」可看推荐与提问</span>`;
+    return;
+  }
+  if (mobile && humanTurn && keyPauseOverlay && !hintShown) {
+    elements.mlHudAdvice.hidden = false;
+    elements.mlHudAdvice.innerHTML = `
+      <strong>推荐</strong>
+      <span>这手建议：${escapeHtml(keyPauseRecommendLine())}</span>
+      <button class="ml-hud-link" type="button" data-key-pause-action="think">知道了</button>
+      <button class="ml-hud-link" type="button" data-key-pause-action="disable">不再提示</button>
+    `;
+    return;
+  }
+  if (!mobile || !humanTurn || !hintShown || !hintAdvice) {
+    elements.mlHudAdvice.hidden = true;
+    elements.mlHudAdvice.replaceChildren();
+    return;
+  }
+  const rec = hintAdvice.recommendation;
+  const reason = firstReasonForUser(rec.reasons);
+  const label = rec.candidate.label || (rec.candidate.type === PLAY_TYPES.pass ? "过牌" : "推荐牌");
+  const drillTip = buildDrillAdviceTip(
+    { reasons: rec.reasons, candidate: rec.candidate },
+    currentGameMeta?.drillFocus,
+  );
+  elements.mlHudAdvice.hidden = false;
+  elements.mlHudAdvice.innerHTML = `
+    <strong>推荐</strong>
+    <span>${escapeHtml(label)} · ${escapeHtml(reason)}${drillTip ? ` · ${escapeHtml(drillTip)}` : ""}</span>
   `;
 }
 
 function renderHintBanner() {
+  syncMobileCoachHudLine();
+  if (isMobileLandscape()) {
+    if (elements.hintBanner) {
+      elements.hintBanner.hidden = true;
+      elements.hintBanner.replaceChildren();
+    }
+    if (elements.mlHintBanner) {
+      elements.mlHintBanner.hidden = true;
+      elements.mlHintBanner.replaceChildren();
+    }
+    return;
+  }
   if (!elements.hintBanner) return;
   if (!hintShown || !hintAdvice) {
     elements.hintBanner.hidden = true;
@@ -4173,19 +6165,66 @@ function renderDrillFocusBanner() {
   }
 }
 
-function renderReportReminderBanner() {
-  if (!elements.reportReminderBanner) return;
-  const gameOver = state && isGameOver(state);
-  if (!reportReminderText || gameOver) {
-    elements.reportReminderBanner.hidden = true;
-    elements.reportReminderBanner.replaceChildren();
-    return;
+function canReopenGameReview() {
+  return Boolean(state && isGameOver(state));
+}
+
+function openGameReviewOverlay() {
+  if (!canReopenGameReview()) return;
+  gameReviewOverlayDismissed = false;
+  setMobileMenuOpen(false);
+  syncMobileLayoutClass();
+  renderGameReviewPanel();
+  renderControls();
+}
+
+function dismissGameReviewOverlay() {
+  if (!isGameReviewOverlayOpen()) return;
+  gameReviewOverlayDismissed = true;
+  syncMobileLayoutClass();
+  renderGameReviewPanel();
+  renderControls();
+}
+
+/** 局末关闭复盘后，同步菜单/竖屏遮罩/顶栏 chip / 桌面状态条的「再看复盘」入口 */
+function syncGameReviewReopenUi() {
+  const reviewReopen = canReopenGameReview() && gameReviewOverlayDismissed;
+  if (elements.mobileViewReview) {
+    elements.mobileViewReview.hidden = !reviewReopen;
   }
-  elements.reportReminderBanner.hidden = false;
-  elements.reportReminderBanner.innerHTML = `
-    <strong>报牌提醒</strong>
-    <span>${escapeHtml(reportReminderText)}（只报张数，不报牌型）</span>
-  `;
+  if (elements.portraitBlockerReview) {
+    elements.portraitBlockerReview.hidden = !reviewReopen;
+  }
+  if (elements.mobileTurnChip && isMobileLandscape() && canReopenGameReview()) {
+    elements.mobileTurnChip.textContent = reviewReopen ? "本局结束 · 看复盘" : "本局结束";
+    elements.mobileTurnChip.classList.toggle("review-reopen", reviewReopen);
+    if (reviewReopen) {
+      elements.mobileTurnChip.setAttribute("role", "button");
+      elements.mobileTurnChip.tabIndex = 0;
+      elements.mobileTurnChip.title = "点此再看本局复盘";
+      elements.mobileTurnChip.setAttribute("aria-label", "点此再看本局复盘");
+    } else {
+      elements.mobileTurnChip.removeAttribute("role");
+      elements.mobileTurnChip.removeAttribute("tabindex");
+      elements.mobileTurnChip.removeAttribute("title");
+      elements.mobileTurnChip.removeAttribute("aria-label");
+    }
+  }
+  const turnStatusEntry = elements.turnTitle?.closest(".status");
+  if (turnStatusEntry && !isMobileLayout()) {
+    turnStatusEntry.classList.toggle("review-reopen-entry", reviewReopen);
+    if (reviewReopen) {
+      turnStatusEntry.setAttribute("role", "button");
+      turnStatusEntry.tabIndex = 0;
+      turnStatusEntry.setAttribute("aria-label", "打开本局复盘");
+      turnStatusEntry.title = "点击看本局复盘";
+    } else {
+      turnStatusEntry.removeAttribute("role");
+      turnStatusEntry.removeAttribute("tabindex");
+      turnStatusEntry.removeAttribute("aria-label");
+      turnStatusEntry.removeAttribute("title");
+    }
+  }
 }
 
 /** 从复盘推荐对比跳转到左侧出牌记录对应手数 */
@@ -4208,12 +6247,119 @@ function scrollToHistoryHand(handIndex) {
   window.setTimeout(() => target.classList.remove("history-action-highlight"), 2200);
 }
 
+/** 局末「本可更好」优先教练更对 / 存疑，最多 5 条 */
+function pickImproveItems(summary, limit = 5) {
+  const priority = [
+    DIVERGENCE_VERDICTS.COACH_BETTER,
+    DIVERGENCE_VERDICTS.COACH_QUESTIONABLE,
+    DIVERGENCE_VERDICTS.STYLE,
+  ];
+  const items = [];
+  for (const verdict of priority) {
+    for (const item of divergencesByVerdict(summary, verdict)) {
+      items.push(item);
+      if (items.length >= limit) return items;
+    }
+  }
+  return items;
+}
+
+function renderGameResultLine() {
+  if (!state || !isGameOver(state)) return "";
+  const winner = completedTeam(state);
+  const rankLine = state.finishedPlayers
+    .map((index, order) => `第${order + 1} ${PLAYER_NAMES[index]}`)
+    .join(" · ");
+  if (winner) {
+    return `<p class="game-result-line"><strong>${escapeHtml(winner.label)}${escapeHtml(winner.result)}</strong> · ${escapeHtml(rankLine)}</p>`;
+  }
+  return `<p class="game-result-line">${escapeHtml(rankLine)}</p>`;
+}
+
+function formatReviewPlayText(item) {
+  if (item.play.type === PLAY_TYPES.pass) return "过牌";
+  return `${playLabel(item.play)} ${cardsLabel(item.play.cards)}`;
+}
+
+function reviewPlayItemsFromArchive(archive) {
+  const stored = archive?.playHistory ?? archive?.recentPlays ?? [];
+  return Array.isArray(stored) ? stored : [];
+}
+
+function renderReviewCardChipsHtml(cards) {
+  if (!cards?.length) return "<span class=\"review-empty\">已出完</span>";
+  return sortCardsForDisplay(cards)
+    .map((card) => `<span class="review-card-chip">${escapeHtml(card.label ?? cardLabel(card))}</span>`)
+    .join("");
+}
+
+function renderReviewRemainingHandsHtml(archive = null) {
+  let rows = [];
+  if (state && isGameOver(state) && state.finishedPlayers.length >= 2) {
+    rows = state.finishedPlayers.slice(1, 4).map((playerIndex, index) => ({
+      orderLabel: ["二游", "三游", "四游"][index] ?? `第${index + 2}名`,
+      playerName: PLAYER_NAMES[playerIndex],
+      cards: sortCardsForDisplay(state.players[playerIndex].hand),
+    }));
+  } else if (archive?.endRemainingHands?.length) {
+    rows = archive.endRemainingHands.map((entry) => ({
+      orderLabel: ["二游", "三游", "四游"][entry.order - 2] ?? `第${entry.order}名`,
+      playerName: entry.playerName,
+      cards: entry.cards ?? [],
+    }));
+  }
+  if (rows.length === 0) return "";
+
+  let html = "<details class=\"review-block review-remaining-hands\" open><summary>局末剩牌</summary><div class=\"review-remaining-list\">";
+  for (const row of rows) {
+    html += `<div class="review-remaining-row">`
+      + `<div class="review-remaining-title"><strong>${escapeHtml(row.orderLabel)} · ${escapeHtml(row.playerName)}</strong>`
+      + `<span>${row.cards.length} 张</span></div>`
+      + `<div class="review-remaining-cards">${renderReviewCardChipsHtml(row.cards)}</div>`
+      + "</div>";
+  }
+  html += "</div></details>";
+  return html;
+}
+
+function renderReviewPlayHistoryHtml(summary, archive = null) {
+  const items = archive ? reviewPlayItemsFromArchive(archive) : allReviewPlaysFromState();
+  if (items.length === 0) return "";
+  const total = archive?.playHistoryTotal ?? state?.playHistory?.length ?? items.length;
+  const note = `（共 ${total} 手）`;
+
+  let html = `<details class="review-block review-play-history" open><summary>本局出牌 ${note}</summary><ol class="review-play-list">`;
+  for (const item of items) {
+    const diverged = (summary?.divergences ?? []).some((d) => d.turnNumber === item.turnNumber);
+    const playerName = item.playerName ?? PLAYER_NAMES[item.playerIndex] ?? "—";
+    const playText = item.play?.label
+      ?? (item.play?.type === PLAY_TYPES.pass ? "过牌" : formatReviewPlayText(item));
+    html += `<li class="review-play-row${diverged ? " review-play-row--diverged" : ""}" data-hand-index="${item.turnNumber}">`
+      + `<span class="review-play-turn">第 ${item.turnNumber} 手</span> `
+      + `<strong>${escapeHtml(playerName)}</strong> `
+      + `<span>${escapeHtml(playText)}</span></li>`;
+  }
+  html += "</ol></details>";
+  return html;
+}
+
+function buildReviewArchiveExtras() {
+  const snapshot = currentGameSnapshot("complete");
+  const plays = allReviewPlaysFromState();
+  return {
+    playHistory: plays,
+    recentPlays: plays,
+    endRemainingHands: slimEndRemainingHands(snapshot),
+    playHistoryTotal: state?.playHistory?.length ?? plays.length,
+  };
+}
+
 function renderImproveCards(summary) {
   if (!elements.improveCards) return;
   const gameOver = state && isGameOver(state);
-  const top3 = divergencesByVerdict(summary, DIVERGENCE_VERDICTS.COACH_BETTER).slice(0, 3);
+  const improveItems = pickImproveItems(summary, 5);
 
-  if (!gameOver || top3.length === 0) {
+  if (!gameOver || improveItems.length === 0) {
     elements.improveCards.hidden = true;
     elements.improveCards.classList.remove("improve-cards--highlight");
     elements.improveCards.replaceChildren();
@@ -4222,26 +6368,51 @@ function renderImproveCards(summary) {
 
   elements.improveCards.hidden = false;
   elements.improveCards.classList.add("improve-cards--highlight");
-  let html = "<h3>本局最该改的三处</h3><div class=\"improve-cards-list\">";
-  for (const item of top3) {
-    const reason = item.verdictNote || firstReasonForUser(item.recommendedReasons, "详见下方差异列表");
+  let html = `<h3>本可更好</h3><p class="muted improve-cards-sub">共 ${improveItems.length} 处，点手数可看对比</p><div class="improve-cards-list">`;
+  for (const item of improveItems) {
+    const reason = item.verdictNote || firstReasonForUser(item.recommendedReasons, "详见差异说明");
     html += `<article class="improve-card" data-hand-index="${item.turnNumber}" role="button" tabindex="0" title="点击查看推荐对比并定位出牌记录">
       <span class="improve-card-turn">第 ${item.turnNumber} 手</span>
-      <p>你出了 <strong>${escapeHtml(item.actual)}</strong>，推荐 <strong>${escapeHtml(item.recommended)}</strong></p>
-      <p class="improve-card-reason">原因：${escapeHtml(reason)}</p>
+      <p>你出 <strong>${escapeHtml(item.actual)}</strong>，可试 <strong>${escapeHtml(item.recommended)}</strong></p>
+      <p class="improve-card-reason">${escapeHtml(reason)}</p>
     </article>`;
   }
   html += "</div>";
   elements.improveCards.innerHTML = html;
 }
 
+function renderMobileAdviceStrip() {
+  renderCoachSheetAdvice();
+  if (!elements.mobileAdviceStrip || isMobileLayout()) return;
+  const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
+  if (!humanTurn || !currentAdvice) {
+    elements.mobileAdviceStrip.hidden = true;
+    elements.mobileAdviceStrip.replaceChildren();
+    return;
+  }
+  const rec = currentAdvice.recommendation;
+  const reason = firstReasonForUser(rec.reasons);
+  const label = rec.candidate.label || (rec.candidate.type === PLAY_TYPES.pass ? "过牌" : "推荐牌");
+  elements.mobileAdviceStrip.hidden = false;
+  elements.mobileAdviceStrip.innerHTML = `
+    <strong>推荐</strong>
+    <span class="mobile-advice-play">${escapeHtml(label)}</span>
+    <span class="mobile-advice-reason">${escapeHtml(reason)}</span>
+  `;
+}
+
 const ONBOARDING_STEPS = [
-  { step: 1, target: () => elements.newGame, text: "第一步：点「新开一局」发牌开始练习。" },
+  { step: 1, target: () => (isMobileLandscape() ? elements.mlNewGame : elements.newGame), text: "第一步：点「新开一局」发牌开始练习。" },
   { step: 2, target: () => elements.playRecommended, text: "第二步：轮到你时点「提示」，先看推荐牌和理由。" },
-  { step: 3, target: () => elements.improveCards?.hidden ? elements.submitGameReview : elements.improveCards, text: "第三步：打完一局后，右侧会自动记录复盘，教练会持续优化推荐。" },
+  { step: 3, target: () => elements.improveCards?.hidden ? elements.submitGameReview : elements.improveCards, text: "第三步：打完一局后，右侧会自动给出「本可更好」简要复盘。" },
 ];
 
+function guidesEnabled() {
+  return safeGetItem(GUIDE_ENABLED_STORAGE, "0") === "1";
+}
+
 function onboardingDone() {
+  if (!guidesEnabled()) return true;
   return safeGetItem(ONBOARDING_STORAGE, "") === "1";
 }
 
@@ -4279,7 +6450,7 @@ function isValidOnboardingContext() {
 }
 
 function renderOnboarding() {
-  if (onboardingDone() || onboardingStep <= 0) {
+  if (!guidesEnabled() || onboardingDone() || onboardingStep <= 0) {
     if (elements.onboardingOverlay) elements.onboardingOverlay.hidden = true;
     if (elements.onboardingRing) elements.onboardingRing.hidden = true;
     return;
@@ -4337,7 +6508,11 @@ function positionOnboardingRing(target) {
 }
 
 function initOnboarding() {
-  if (onboardingDone()) return;
+  if (!guidesEnabled() || onboardingDone()) {
+    if (elements.onboardingOverlay) elements.onboardingOverlay.hidden = true;
+    if (elements.onboardingRing) elements.onboardingRing.hidden = true;
+    return;
+  }
   if (state && !isGameOver(state)) {
     onboardingStep = 0;
     if (elements.onboardingOverlay) elements.onboardingOverlay.hidden = true;
@@ -4355,10 +6530,10 @@ const FIRST_TIP_ITEMS = [
   { id: "newGame", text: "点「新开一局」发牌，开始单局练习。" },
   { id: "hint", text: "轮到你时点「提示」，查看推荐出牌和理由。" },
   { id: "adopt", text: "看中推荐后点「采纳」，可一键选中对应手牌。" },
-  { id: "coachFab", text: "点「问教练」可向本机规则引擎提问，与左侧推荐一致。" },
+  { id: "coachFab", text: "点「教练」可看推荐1与理由，并向本机规则引擎提问。" },
   { id: "rules", text: "「规则」可随时查看牌型、贡牌等速查说明。" },
-  { id: "drill", text: "「专项练习」针对弱项开一局，教练会标【专项】提示。" },
-  { id: "saveReview", text: "打完一局后，复盘会自动保存，教练会持续优化推荐。" },
+  { id: "drill", text: "菜单（⋯）→「专项练习」可按弱项开预设局，教练会标【专项】。" },
+  { id: "saveReview", text: "打完一局后，会自动给出「本可更好」简要复盘。" },
 ];
 
 function readFirstTipsState() {
@@ -4376,6 +6551,7 @@ function writeFirstTipsState(next) {
 }
 
 function firstTipsDisabled() {
+  if (!guidesEnabled()) return true;
   const saved = readFirstTipsState();
   return saved._allDone === true;
 }
@@ -4408,7 +6584,7 @@ function firstTipWhen(item) {
     case "rules":
       return true;
     case "drill":
-      return Boolean(elements.drillPanel);
+      return isMobileLandscape() || Boolean(elements.drillPanel);
     case "saveReview":
       return Boolean(state && isGameOver(state) && !currentGameMeta?.gameReviewSubmitted);
     default:
@@ -4433,6 +6609,10 @@ function showFirstTip(item) {
     hideFirstTipBar();
     return;
   }
+  if (isMobileLandscape() && keyPauseOverlay) {
+    hideFirstTipBar();
+    return;
+  }
   if (!onboardingDone() || elements.onboardingOverlay?.hidden === false) {
     hideFirstTipBar();
     return;
@@ -4450,6 +6630,10 @@ function updateFirstTips() {
     hideFirstTipBar();
     return;
   }
+  if (isMobileLandscape() && keyPauseOverlay) {
+    hideFirstTipBar();
+    return;
+  }
   showFirstTip(nextPendingFirstTip());
 }
 
@@ -4461,24 +6645,25 @@ function dismissCurrentFirstTip() {
   }
   markFirstTipSeen(item.id);
   updateFirstTips();
+  if (isMobileLandscape() && state?.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state)) {
+    maybeTriggerKeyPause();
+    renderKeyPauseBanner();
+  }
 }
 
 function renderAdvice({ computeAdvice = true } = {}) {
   elements.advice.replaceChildren();
+  invalidateStaleAdvice();
   if (!state) {
     currentAdvice = null;
     elements.advice.innerHTML = `<div class="advice-box"><p>开局后自动记录你与推荐的差异。</p></div>`;
     return;
   }
 
-  const divSummary = currentDivergenceSummary();
   const autoBox = document.createElement("div");
   autoBox.className = "advice-box advice-auto";
   autoBox.innerHTML = `
-    <h3>差异统计</h3>
-    <p>已记 <strong>${divSummary.totalHands}</strong> 手，<strong>${divSummary.divergenceCount}</strong> 处与你出牌和推荐1不同。</p>
-    ${formatVerdictStats(divSummary)}
-    <p class="muted">专注打牌即可，局末会自动记录复盘。</p>
+    <p class="muted">专注打牌即可，局末会自动给你简要复盘。</p>
   `;
   elements.advice.append(autoBox);
 
@@ -4531,17 +6716,24 @@ function renderAdvice({ computeAdvice = true } = {}) {
     const wait = document.createElement("div");
     wait.className = "advice-box";
     const actorName = PLAYER_NAMES[state.currentPlayerIndex];
-    wait.innerHTML = robotQueueActive
-      ? `<h3>对手出牌中</h3><p>${actorName} 等机器人在走牌（已批量加速，通常几秒内回到你）。</p>`
-      : `<h3>等待出牌</h3><p>轮到你时，这里会显示推荐1～3与理由。</p>`;
+    wait.innerHTML = robotQueueTimedOut
+      ? `<h3>对手走牌中</h3><p>${actorName} 走牌超时，已自动兜底；若仍卡住请刷新页面。</p>`
+      : robotQueueActive
+        ? `<h3>对手走牌中</h3><p>${actorName} 正在走牌，很快轮到你。</p>`
+        : `<h3>等待出牌</h3><p>轮到你时，这里会显示推荐与理由。</p>`;
     elements.advice.append(wait);
     return;
   }
 
-  if (!currentAdvice) {
-    if (computeAdvice) {
+  if (computeAdvice) {
+    if (!isAdvicePhaseComplete() && !adviceComputeState.inFlight) {
       scheduleHumanAdviceRefresh();
     }
+  }
+  if (!currentAdvice) {
+    ensureHumanAdvicePlaceholder();
+  }
+  if (!currentAdvice) {
     const pending = document.createElement("div");
     pending.className = "advice-box";
     pending.innerHTML = `<h3>教练建议</h3><p>${advicePendingMessage()}</p>`;
@@ -4550,16 +6742,14 @@ function renderAdvice({ computeAdvice = true } = {}) {
   }
 
   const advice = currentAdvice;
-  const liveMustBeat = state.lastActivePlay
-    ? `需要压过：${PLAYER_NAMES[state.lastActivePlayerIndex]} 的 ${playLabel(state.lastActivePlay)}`
-    : null;
+  const liveMustBeat = trickPromptLabel(state);
 
   const recommendation = document.createElement("div");
   recommendation.className = "advice-box";
   const choices = adviceChoices(advice);
   recommendation.innerHTML = `
     <h3>教练建议</h3>
-    <p>${liveMustBeat ?? "你拥有本轮牌权，可以主动出牌。"}</p>
+    <p>${liveMustBeat}</p>
   `;
   if (advice.handProfile) {
     const profile = document.createElement("p");
@@ -4572,6 +6762,13 @@ function renderAdvice({ computeAdvice = true } = {}) {
     choiceList.append(renderChoiceCard(choices[index], index));
   }
   recommendation.append(choiceList);
+
+  const buildTag = document.createElement("p");
+  buildTag.className = "advice-build-tag";
+  buildTag.style.cssText = "font-size:11px;opacity:0.55;margin-top:8px;";
+  const build = globalThis.__GUANDAN_BUILD__ ?? "未知";
+  buildTag.textContent = `策略 build ${build} · rev ${COACH_STRATEGY_REVISION}`;
+  recommendation.append(buildTag);
 
   const insightWrap = document.createElement("div");
   insightWrap.className = "in-play-insight";
@@ -4628,6 +6825,7 @@ function renderAdvice({ computeAdvice = true } = {}) {
 
   recommendation.append(insightWrap);
   elements.advice.append(recommendation);
+  if (keyPauseOverlay) renderKeyPauseBanner();
 }
 
 function renderGameReviewPanel() {
@@ -4644,55 +6842,71 @@ function renderGameReviewPanel() {
     return;
   }
 
-  let html = `<p>本局 <strong>${summary.divergenceCount}</strong> 处与推荐不同（共 ${summary.totalHands} 手）。</p>`;
-  html += formatVerdictStats(summary, { interactive: true, activeFilter: divergenceVerdictFilter });
-  if (summary.divergenceCount > 0) {
-    html += renderDivergenceListHtml(divergencesByVerdict(summary, divergenceVerdictFilter));
-    const disputeCount = (currentGameMeta?.userDisputes ?? []).length;
-    if (disputeCount > 0) {
-      html += `<p class="muted">已记录 <strong>${disputeCount}</strong> 条你的意见。</p>`;
+  let html = "";
+  if (gameOver) {
+    html += renderGameResultLine();
+    html += renderReviewRemainingHandsHtml();
+    const reviewArchive = submitted ? findReviewHistoryGame(currentGameMeta?.gameId) : null;
+    html += renderReviewPlayHistoryHtml(summary, reviewArchive);
+    const improveItems = pickImproveItems(summary);
+    if (improveItems.length === 0 && summary.divergenceCount === 0 && summary.totalHands > 0) {
+      html += "<p class=\"muted\">本局与教练推荐一致，打得不错。</p>";
     }
-  } else if (summary.totalHands > 0) {
-    html += "<p class=\"muted\">你与推荐1完全一致，继续保持。</p>";
+    if (summary.divergenceCount > 0) {
+      html += `<details class="review-advanced-details"><summary>查看全部差异（${summary.divergenceCount} 处）</summary>`;
+      html += formatVerdictStats(summary, { interactive: true, activeFilter: divergenceVerdictFilter });
+      html += renderDivergenceListHtml(divergencesByVerdict(summary, divergenceVerdictFilter));
+      const disputeCount = (currentGameMeta?.userDisputes ?? []).length;
+      if (disputeCount > 0) {
+        html += `<p class="muted">已记录 <strong>${disputeCount}</strong> 条你的意见。</p>`;
+      }
+      html += "</details>";
+    }
+  } else {
+    html += `<p class="muted">本局进行中，打完会自动记录复盘。</p>`;
+    if (summary.divergenceCount > 0) {
+      html += `<details class="review-advanced-details"><summary>进行中差异（${summary.divergenceCount} 处）</summary>`;
+      html += formatVerdictStats(summary, { interactive: true, activeFilter: divergenceVerdictFilter });
+      html += renderDivergenceListHtml(divergencesByVerdict(summary, divergenceVerdictFilter));
+      html += "</details>";
+    }
   }
 
   const insights = currentGameMeta?.gameInsights ?? [];
-  const adoptedInsights = insights.filter((i) => i.verdict === INSIGHT_VERDICTS.ADOPTED);
-  const recordedInsights = insights.filter((i) => i.verdict === INSIGHT_VERDICTS.RECORDED);
   const reviewInsights = insights.filter(
     (i) => i.verdict === INSIGHT_VERDICTS.ADOPTED || i.verdict === INSIGHT_VERDICTS.RECORDED,
   );
-  if (reviewInsights.length > 0) {
+  if (reviewInsights.length > 0 && !gameOver) {
     html += "<div class=\"game-insights-block\">";
     html += "<h4>本局你的意见</h4>";
-    html += `<p>已采纳优化 <strong>${adoptedInsights.length}</strong> 条 / 已记录待观察 <strong>${recordedInsights.length}</strong> 条</p>`;
     html += "<ul class=\"game-insights-list\">";
     for (const item of reviewInsights) {
-      const status = INSIGHT_STATUS_LABELS[item.verdict] ?? item.verdict;
       const summaryText = item.analysis?.length > 48
         ? `${item.analysis.slice(0, 48)}…`
         : (item.analysis || "—");
       html += `<li class="game-insight-item insight-${item.verdict}">`
         + `<span class="insight-turn">第${item.turnNumber}手</span> `
         + `<span class="insight-user">${escapeHtml(item.question)}</span> `
-        + `<span class="insight-reply muted">${escapeHtml(summaryText)}</span> `
-        + `<span class="insight-status">${escapeHtml(status)}</span>`
+        + `<span class="insight-reply muted">${escapeHtml(summaryText)}</span>`
         + "</li>";
     }
     html += "</ul></div>";
   }
 
   if (submitted) {
-    html += "<p><strong>本局已记录</strong>，教练会根据你的打法持续优化。</p>";
+    html += "<p class=\"muted\">本局复盘已保存。</p>";
   } else if (gameOver) {
-    html += "<p class=\"muted\">正在保存本局记录…</p>";
-  } else {
-    html += "<p class=\"muted\">打完本局后会自动记录复盘。</p>";
+    html += "<p class=\"muted\">正在保存本局复盘…</p>";
   }
 
   elements.gameReviewSummary.innerHTML = html;
+  const showReviewOverlay = gameOver && !gameReviewOverlayDismissed;
   elements.aiPanel?.classList.toggle("submit-pending", Boolean(gameOver && !submitted));
-  elements.aiPanel?.classList.toggle("game-over-review", Boolean(gameOver));
+  elements.aiPanel?.classList.toggle("game-over-review", showReviewOverlay);
+  if (elements.dismissGameReview) {
+    elements.dismissGameReview.hidden = !showReviewOverlay || !isMobileLayout();
+  }
+  syncMobileLayoutClass();
   if (gameOver && elements.progressPanel?.open) {
     elements.progressPanel.open = false;
   }
@@ -4703,6 +6917,7 @@ function renderGameReviewPanel() {
   if (gameOver && onboardingStep === 3 && !onboardingDone()) {
     renderOnboarding();
   }
+  syncGameReviewReopenUi();
 }
 
 async function submitGameReview() {
@@ -4748,13 +6963,20 @@ async function submitGameReview() {
     feedbackSubmitCount += result.online ? 1 : 0;
 
     await yieldToMainThread();
+    const reviewArchiveExtras = buildReviewArchiveExtras();
     saveReviewHistoryEntry({
       gameId: currentGameMeta.gameId,
       levelRank: state.levelRank,
       totalHands: payload.divergenceSummary.totalHands,
       divergenceCount: payload.divergenceSummary.divergenceCount,
+      coachBetterCount: payload.divergenceSummary.coachBetterCount ?? 0,
+      coachQuestionableCount: payload.divergenceSummary.coachQuestionableCount ?? 0,
       divergences: payload.divergenceSummary.divergences,
       coachAdviceTimeline: slimTimeline,
+      playHistory: reviewArchiveExtras.playHistory,
+      recentPlays: reviewArchiveExtras.recentPlays,
+      endRemainingHands: reviewArchiveExtras.endRemainingHands,
+      playHistoryTotal: reviewArchiveExtras.playHistoryTotal,
     });
     updateProgressFromReview(payload.divergenceSummary, currentGameMeta.gameId);
     const focusHits = countDrillFocusHits(
@@ -4771,8 +6993,8 @@ async function submitGameReview() {
 
     if (elements.aiStatus) {
       elements.aiStatus.textContent = result.online
-        ? "本局已记录，教练会根据你的打法持续优化。"
-        : "本局已暂存到本机，下次启动后会自动同步。";
+        ? "本局复盘已保存。"
+        : "本局复盘已暂存到本机，下次启动后会自动同步。";
     }
     if (elements.aiQuestion) elements.aiQuestion.value = "";
     advanceOnboarding(3);
@@ -4793,8 +7015,8 @@ async function submitGameReview() {
 
 function adviceChoices(advice) {
   const seen = new Set();
-  const previousPlay = (state?.currentPlayerIndex === HUMAN_INDEX && state.lastActivePlay)
-    ? state.lastActivePlay
+  const previousPlay = (state?.currentPlayerIndex === HUMAN_INDEX)
+    ? effectivePreviousPlay(state)
     : (advice.mustBeat
       ? classifyPlay(advice.mustBeat.cards ?? [], advice.levelRank)
       : null);
@@ -4912,8 +7134,17 @@ function readablePairRankScore(rank, levelRank) {
   return 100 + power;
 }
 
-function renderChoiceCard(choice, index) {
+function adviceChoiceBadgeLabel(index) {
   const priorityLabels = ["最优", "备选", "谨慎"];
+  if (index !== 0) return priorityLabels[index] ?? "可选";
+  const phase = currentAdvice?._phase;
+  if (phase === "emergency") return "临时";
+  if (phase === "quick" || adviceComputeState.inFlight || adviceComputeState.slowNotice) return "精算中";
+  return priorityLabels[0];
+}
+
+function renderChoiceCard(choice, index) {
+  const badgeLabel = adviceChoiceBadgeLabel(index);
   const reasons = filterReasonsForUser(choice.reasons, "这是当前评分较好的合法选择", {
     play: choice.candidate,
     previousPlay: currentAdvice?.mustBeat ?? null,
@@ -4930,7 +7161,7 @@ function renderChoiceCard(choice, index) {
   title.className = "choice-title";
   title.innerHTML = `
     <strong>推荐${index + 1}</strong>
-    <span class="choice-badge">${priorityLabels[index] ?? "可选"}</span>
+    <span class="choice-badge">${badgeLabel}</span>
   `;
   button.append(title);
 
@@ -4942,8 +7173,19 @@ function renderChoiceCard(choice, index) {
     pass.textContent = "过牌";
     cards.append(pass);
   } else {
-    for (const card of choice.candidate.cards) {
+    const displayCards = resolvePlayCardsFromHand(state.players[HUMAN_INDEX].hand, choice.candidate);
+    const cardsToShow = displayCards.length > 0 ? displayCards : choice.candidate.cards;
+    for (const card of cardsToShow) {
       cards.append(renderCard(card));
+    }
+    const wildAssignments = choice.candidate.wildcardAssignments ?? [];
+    if (wildAssignments.length > 0) {
+      const wildNote = document.createElement("span");
+      wildNote.className = "choice-wild-note muted";
+      wildNote.textContent = wildAssignments
+        .map((assignment) => `${cardLabel(assignment.from)}当${cardLabel(assignment.as)}`)
+        .join("，");
+      cards.append(wildNote);
     }
   }
   button.append(cards);
@@ -5092,11 +7334,28 @@ function renderHistory() {
   }
 }
 
+function syncMobileActionButtons() {
+  if (!isMobileLandscape()) return;
+  const pairs = [
+    [elements.mlPassTurn, elements.passTurn],
+    [elements.mlPlayRecommended, elements.playRecommended],
+    [elements.mlPlaySelected, elements.playSelected],
+    [elements.mlSortHand, elements.sortHand],
+  ];
+  for (const [mlBtn, deskBtn] of pairs) {
+    if (mlBtn && deskBtn) mlBtn.disabled = deskBtn.disabled;
+  }
+}
+
 function renderControls() {
+  const noGame = !state;
   const humanTurn = state && state.currentPlayerIndex === HUMAN_INDEX && !isGameOver(state);
   const gameOver = state ? isGameOver(state) : false;
   elements.playSelected.disabled = !humanTurn;
   elements.playRecommended.disabled = !humanTurn || hintAwaiting;
+  const hintBtnLabel = hintShown ? "取消推荐" : "提示";
+  elements.playRecommended.textContent = hintBtnLabel;
+  if (elements.mlPlayRecommended) elements.mlPlayRecommended.textContent = hintBtnLabel;
   if (elements.adoptHint) {
     elements.adoptHint.hidden = !humanTurn || !hintShown;
     elements.adoptHint.disabled = !humanTurn || !hintShown;
@@ -5106,9 +7365,14 @@ function renderControls() {
   elements.autoGame.disabled = autoGameRunning || !state || gameOver;
   if (elements.autoGame && !autoGameRunning) elements.autoGame.textContent = "自动打完";
   elements.exportLog.disabled = false;
+  if (noGame && /新局已发牌|轮到你/.test(message)) {
+    message = "点击「新开一局」发牌开始练习。";
+  }
   elements.message.textContent = gameOver
     ? `本局结束。${message}`
     : message;
+  syncDesktopCenterActions();
+  syncMobileActionButtons();
 }
 
 function renderNow({ lite = false } = {}) {
@@ -5123,6 +7387,14 @@ function renderNow({ lite = false } = {}) {
     if (!humanTurn && hintShown) clearHint();
     if (!humanTurn) keyPauseOverlay = null;
     else maybeTriggerKeyPause();
+    maybeRecoverStalledRobotQueue();
+    reconcileTablePlaysWithState();
+    if (isMobileLandscape()) {
+      syncMobileCenterActions();
+      syncMobileActionBandMetrics();
+    } else {
+      syncDesktopCenterActions();
+    }
     renderMatch();
     renderPlayers();
     renderSeatPlays();
@@ -5131,11 +7403,21 @@ function renderNow({ lite = false } = {}) {
     renderKeyPauseBanner();
     renderDrillFocusBanner();
     renderHintBanner();
-    renderReportReminderBanner();
+    renderMobileAdviceStrip();
+    renderCenterTurnHint();
+    renderMobileChrome();
+    if (isMobileLandscape()) {
+      requestAnimationFrame(() => {
+        syncMobileActionBandMetrics();
+        syncMobileHandMetrics();
+        syncMlHandToolsChrome();
+      });
+    }
     renderAdvice({ computeAdvice: !lite });
     if (lite) {
-      // 机器人连推期间跳过复盘面板 DOM 重绘，回到人类回合再刷新
-      if (!robotQueueActive) {
+      // 机器人连推 / 教练精算 / 尚无建议时跳过复盘面板，避免与建议计算抢主线程
+      const deferReviewPanel = state.currentPlayerIndex === HUMAN_INDEX && !currentAdvice;
+      if (!robotQueueActive && !adviceComputeState.inFlight && !deferReviewPanel) {
         renderGameReviewPanel();
       }
       renderControls();
@@ -5195,9 +7477,9 @@ document.addEventListener("click", (event) => {
   }
 
   const drillPracticeBtn = event.target.closest(".drill-practice-btn[data-drill-tag]");
-  if (drillPracticeBtn) {
+  if (drillPracticeBtn && drillPracticeBtn.dataset.drillBound !== "1") {
     event.preventDefault();
-    startDrillPractice(drillPracticeBtn.dataset.drillTag);
+    void startDrillPractice(drillPracticeBtn.dataset.drillTag);
     return;
   }
 
@@ -5300,8 +7582,157 @@ elements.coachFabQuestion?.addEventListener("keydown", (event) => {
 elements.coachFabBackdrop?.addEventListener("click", () => setCoachFabOpen(false));
 
 MOBILE_LAYOUT_MQ?.addEventListener("change", () => {
+  syncMobileLayout();
+  renderMobileChrome();
+  renderCenterTurnHint();
   if (coachFabOpen) syncCoachFabMobileChrome(true);
+  renderPlayers();
+  renderSeatPlays();
+  renderHand();
 });
+MOBILE_PORTRAIT_MQ?.addEventListener("change", () => {
+  syncMobileLayout();
+  renderMobileChrome();
+  renderCenterTurnHint();
+  renderMobileA2hsHint();
+  if (coachFabOpen) setCoachFabOpen(false);
+  renderHand();
+});
+
+MOBILE_ORIENTATION_PORTRAIT_MQ?.addEventListener("change", () => {
+  syncMobileLayout();
+  renderMobileChrome();
+  renderCenterTurnHint();
+  renderMobileA2hsHint();
+  if (coachFabOpen) setCoachFabOpen(false);
+  renderPlayers();
+  renderSeatPlays();
+  renderHand();
+});
+
+MOBILE_LANDSCAPE_MQ?.addEventListener("change", () => {
+  syncMobileLayout();
+  renderMobileA2hsHint();
+  renderPlayers();
+  renderSeatPlays();
+  renderHand();
+});
+
+window.visualViewport?.addEventListener("resize", () => {
+  syncMobileViewportHeight();
+  syncMobileSeatPlayMetrics();
+  syncMobileActionBandMetrics();
+});
+window.visualViewport?.addEventListener("scroll", syncMobileViewportHeight);
+window.addEventListener("resize", () => {
+  syncMobileLayout();
+  syncMobileViewportHeight();
+});
+
+elements.portraitBlockerDismiss?.addEventListener("click", () => {
+  safeSetItem(MOBILE_PORTRAIT_DISMISS_STORAGE, "1");
+  syncMobileLayout();
+  renderMobileA2hsHint();
+});
+
+elements.mobileA2hsClose?.addEventListener("click", () => {
+  safeSetItem(MOBILE_A2HS_DISMISS_STORAGE, "1");
+  if (elements.mobileA2hsHint) elements.mobileA2hsHint.hidden = true;
+});
+
+elements.mobileMenuBtn?.addEventListener("click", toggleMobileMenu);
+elements.mobileMenuClose?.addEventListener("click", () => setMobileMenuOpen(false));
+elements.mobileMenuBackdrop?.addEventListener("click", () => setMobileMenuOpen(false));
+elements.mobileDrillPanel?.addEventListener("toggle", () => {
+  if (elements.mobileDrillPanel?.open) renderDrillPracticePanel();
+});
+
+elements.mobileLevelSelect?.addEventListener("change", () => {
+  if (!elements.levelRank || !elements.mobileLevelSelect) return;
+  elements.levelRank.value = elements.mobileLevelSelect.value;
+  renderMobileChrome();
+});
+
+elements.mobileNewGame?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  void triggerNewGame();
+});
+elements.mobileNewMatch?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  elements.newMatch?.click();
+});
+elements.mobileNextMatch?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  elements.nextMatchGame?.click();
+});
+function handleReviewReopenActivate(event) {
+  if (!canReopenGameReview() || !gameReviewOverlayDismissed) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openGameReviewOverlay();
+}
+
+function bindReviewReopenEntry(node) {
+  if (!node || node.dataset.reviewReopenBound === "1") return;
+  node.dataset.reviewReopenBound = "1";
+  node.addEventListener("click", handleReviewReopenActivate);
+  node.addEventListener("touchend", (event) => {
+    if (!canReopenGameReview() || !gameReviewOverlayDismissed) return;
+    event.preventDefault();
+    handleReviewReopenActivate(event);
+  }, { passive: false });
+  node.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    handleReviewReopenActivate(event);
+  });
+}
+
+elements.mobileViewReview?.addEventListener("click", handleReviewReopenActivate);
+elements.portraitBlockerReview?.addEventListener("click", handleReviewReopenActivate);
+bindReviewReopenEntry(elements.mobileTurnChip);
+bindReviewReopenEntry(elements.turnTitle?.closest(".status"));
+elements.mobileRules?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  elements.rulesBtn?.click();
+});
+elements.mobileImport?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  elements.importReplayBtn?.click();
+});
+elements.mobileExport?.addEventListener("click", () => {
+  setMobileMenuOpen(false);
+  elements.exportLog?.click();
+});
+elements.mobileTrialFeedback?.addEventListener("click", () => {
+  void openTrialFeedback();
+});
+
+elements.mobileKeyPause?.addEventListener("change", () => {
+  if (elements.useKeyPause) elements.useKeyPause.checked = !!elements.mobileKeyPause.checked;
+  onKeyPauseToggle();
+});
+elements.mobileGuideTips?.addEventListener("change", () => {
+  const on = !!elements.mobileGuideTips.checked;
+  safeSetItem(GUIDE_ENABLED_STORAGE, on ? "1" : "0");
+  if (!on) {
+    hideFirstTipBar();
+    onboardingStep = 0;
+    if (elements.onboardingOverlay) elements.onboardingOverlay.hidden = true;
+    if (elements.onboardingRing) elements.onboardingRing.hidden = true;
+  } else if (!onboardingDone()) {
+    initOnboarding();
+  }
+  updateFirstTips();
+  renderOnboarding();
+});
+
+elements.mobileMlPolicy?.addEventListener("change", () => {
+  if (elements.useMlPolicy) elements.useMlPolicy.checked = !!elements.mobileMlPolicy.checked;
+  onMlPolicyToggle();
+});
+
+initMobileLevelSelect();
+syncMobileLayout();
 
 elements.importReplayFiles?.addEventListener("change", async (event) => {
   const files = event.target.files;
@@ -5314,7 +7745,7 @@ function onKeyPauseToggle() {
   keyPauseEnabled = !!elements.useKeyPause?.checked;
   safeSetItem(KEY_PAUSE_STORAGE, keyPauseEnabled ? "1" : "0");
   if (!keyPauseEnabled) dismissKeyPause();
-  message = keyPauseEnabled ? "已开启关键时刻暂停：高价值决策点会先让你想一想。" : "已关闭关键时刻暂停。";
+  message = keyPauseEnabled ? "已开启关键时刻推荐：高价值决策点会弹出教练建议。" : "已关闭关键时刻推荐。";
   render();
 }
 
@@ -5329,16 +7760,181 @@ function onMlPolicyToggle() {
   render();
 }
 
+function bindMobileLandscapeDocumentTap() {
+  if (window.__guandanMlDocTapBound) return;
+  window.__guandanMlDocTapBound = true;
+
+  const invokeMlPlayDock = (btnId) => {
+    const handlers = {
+      mlPassTurn: passTurn,
+      mlPlayRecommended: playRecommended,
+      mlPlaySelected: playSelected,
+    };
+    const handler = handlers[btnId];
+    if (!handler) return;
+    const deskId = btnId.replace(/^mlPassTurn$/, "passTurn")
+      .replace(/^mlPlayRecommended$/, "playRecommended")
+      .replace(/^mlPlaySelected$/, "playSelected");
+    const btn = elements[btnId];
+    if (btn?.disabled) {
+      showPlayDockDisabledHint(deskId);
+      return;
+    }
+    void Promise.resolve(handler()).catch((error) => console.error(error));
+  };
+
+  const handleMobileLandscapeTap = (event) => {
+    if (!isMobileLandscapeDomActive()) return;
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest(".coach-fab-drawer, .mobile-menu-drawer, .rules-drawer, .first-tip-bar, #aiPanel.game-over-review")) {
+      return;
+    }
+
+    const mlAction = target.closest("[data-ml-action]");
+    if (mlAction && elements.landscapeRoot?.contains(mlAction)) {
+      event.preventDefault();
+      if (mlAction.dataset.mlAction === "newGame") void triggerNewGame();
+      return;
+    }
+
+    const toolBtn = target.closest("#mlSortHand, #mlCoachFab");
+    if (toolBtn && elements.landscapeRoot?.contains(toolBtn)) {
+      event.preventDefault();
+      if (toolBtn.id === "mlSortHand") void sortHumanHand();
+      else if (toolBtn.id === "mlCoachFab") toggleCoachFab();
+      return;
+    }
+
+    const dockBtn = target.closest("#mlPassTurn, #mlPlayRecommended, #mlPlaySelected");
+    if (dockBtn && elements.landscapeRoot?.contains(dockBtn)) {
+      event.preventDefault();
+      invokeMlPlayDock(dockBtn.id);
+    }
+  };
+
+  document.addEventListener("click", handleMobileLandscapeTap, true);
+  document.addEventListener("touchend", handleMobileLandscapeTap, { capture: true, passive: false });
+}
+
+function bindMobileLandscapeActions() {
+  bindMobileHandEvents();
+  if (elements.landscapeRoot && elements.landscapeRoot.dataset.bound !== "1") {
+    elements.landscapeRoot.dataset.bound = "1";
+    elements.landscapeRoot.addEventListener("click", (event) => {
+      tryMobileFullscreen();
+      const actionBtn = event.target.closest("[data-ml-action]");
+      if (!actionBtn || !elements.landscapeRoot.contains(actionBtn)) return;
+      event.preventDefault();
+      if (actionBtn.dataset.mlAction === "newGame") {
+        void triggerNewGame();
+      }
+    });
+  }
+  const mlDock = document.querySelector("#landscapeRoot .ml-actions");
+  if (mlDock && mlDock.dataset.bound !== "1") {
+    mlDock.dataset.bound = "1";
+    const handlers = {
+      mlPassTurn: passTurn,
+      mlPlayRecommended: playRecommended,
+      mlPlaySelected: playSelected,
+    };
+    mlDock.addEventListener("click", (event) => {
+      const btn = event.target.closest("button[id]");
+      if (!btn || !mlDock.contains(btn)) return;
+      const handler = handlers[btn.id];
+      if (!handler) return;
+      event.preventDefault();
+      if (btn.disabled) {
+        const deskId = btn.id.replace(/^mlPassTurn$/, "passTurn")
+          .replace(/^mlPlayRecommended$/, "playRecommended")
+          .replace(/^mlPlaySelected$/, "playSelected");
+        showPlayDockDisabledHint(deskId);
+        return;
+      }
+      void Promise.resolve(handler()).catch((error) => console.error(error));
+    });
+  }
+  const mlToolHandlers = {
+    mlSortHand: sortHumanHand,
+    mlCoachFab: toggleCoachFab,
+  };
+  const mlHandTools = document.querySelector("#landscapeRoot .ml-hand-tools");
+  if (mlHandTools && mlHandTools.dataset.bound !== "1") {
+    mlHandTools.dataset.bound = "1";
+    mlHandTools.style.pointerEvents = "auto";
+    const invokeMlTool = (btn) => {
+      if (!btn?.id || !mlHandTools.contains(btn)) return;
+      const handler = mlToolHandlers[btn.id];
+      if (!handler) return;
+      if (btn.disabled) return;
+      void Promise.resolve(handler()).catch((error) => console.error(error));
+    };
+    mlHandTools.addEventListener("click", (event) => {
+      const btn = event.target.closest("button[id]");
+      if (!btn) return;
+      event.preventDefault();
+      event.stopPropagation();
+      invokeMlTool(btn);
+    });
+  }
+  if (elements.mobileRulesHud && elements.mobileRulesHud.dataset.bound !== "1") {
+    elements.mobileRulesHud.dataset.bound = "1";
+    elements.mobileRulesHud.addEventListener("click", (event) => {
+      event.preventDefault();
+      toggleRulesDrawer();
+    });
+  }
+  if (elements.mlNewGame && elements.mlNewGame.dataset.bound !== "1") {
+    elements.mlNewGame.dataset.bound = "1";
+    elements.mlNewGame.addEventListener("click", (event) => {
+      event.preventDefault();
+      void triggerNewGame();
+    });
+  }
+  if (elements.mlBanners && elements.mlBanners.dataset.bound !== "1") {
+    elements.mlBanners.dataset.bound = "1";
+    elements.mlBanners.addEventListener("click", (event) => {
+      const actionBtn = event.target.closest("[data-key-pause-action]");
+      if (!actionBtn) return;
+      elements.keyPauseBanner?.querySelector(`[data-key-pause-action="${actionBtn.dataset.keyPauseAction}"]`)?.click();
+    });
+  }
+}
+
+function bindPlayDockActions() {
+  const dock = elements.playDockActions;
+  if (!dock || dock.dataset.bound === "1") return;
+  dock.dataset.bound = "1";
+  const handlers = {
+    playSelected,
+    playRecommended,
+    passTurn,
+    adoptHint,
+  };
+  dock.addEventListener("click", (event) => {
+    const btn = event.target.closest("button[id]");
+    if (!btn || !dock.contains(btn)) return;
+    const handler = handlers[btn.id];
+    if (!handler) return;
+    event.preventDefault();
+    if (btn.disabled) {
+      showPlayDockDisabledHint(btn.id);
+      return;
+    }
+    void Promise.resolve(handler()).catch((error) => console.error(error));
+  });
+}
+
 function bindPrimaryActions() {
+  bindMobileLandscapeDocumentTap();
+  bindPlayDockActions();
+  bindMobileLandscapeActions();
   const actions = [
-    ["newGame", newGame],
+    ["newGame", triggerNewGame],
     ["newMatch", newCompetitiveMatch],
     ["nextMatchGame", nextCompetitiveGame],
     ["autoGame", autoGame],
-    ["playSelected", playSelected],
-    ["playRecommended", playRecommended],
-    ["adoptHint", adoptHint],
-    ["passTurn", passTurn],
     ["sortHand", sortHumanHand],
     ["exportLog", exportLog],
     ["saveTrainingSample", saveTrainingSample],
@@ -5346,6 +7942,7 @@ function bindPrimaryActions() {
     ["copyLog", copyExportLog],
     ["askAiCoach", askAiCoach],
     ["submitGameReview", submitGameReview],
+    ["dismissGameReview", dismissGameReviewOverlay],
     ["clearAiChat", clearAiChat],
     ["coachFab", toggleCoachFab],
     ["coachFabClose", () => setCoachFabOpen(false)],
@@ -5353,7 +7950,10 @@ function bindPrimaryActions() {
     ["coachFabObjection", askFabCoachObjection],
     ["rulesBtn", toggleRulesDrawer],
     ["rulesClose", () => setRulesDrawerOpen(false)],
-    ["openDrillPanel", openDrillPracticePanel],
+    ["openDrillPanel", startFeaturedDrillPractice],
+    ["mobileOpenDrill", startFeaturedDrillPractice],
+    ["startMustBeatSfDrill", startFeaturedDrillPractice],
+    ["mobileStartMustBeatSfDrill", startFeaturedDrillPractice],
   ];
   for (const [id, handler] of actions) {
     const node = elements[id];
@@ -5386,8 +7986,16 @@ function bindPrimaryActions() {
       const btn = event.target.closest("[data-key-pause-action]");
       if (!btn || elements.keyPauseBanner.hidden) return;
       event.preventDefault();
-      if (btn.dataset.keyPauseAction === "think") dismissKeyPause();
-      else if (btn.dataset.keyPauseAction === "hint") keyPauseShowHint();
+      handleKeyPauseAction(btn.dataset.keyPauseAction);
+    });
+  }
+  if (elements.mlHudAdvice && elements.mlHudAdvice.dataset.bound !== "1") {
+    elements.mlHudAdvice.dataset.bound = "1";
+    elements.mlHudAdvice.addEventListener("click", (event) => {
+      const btn = event.target.closest("[data-key-pause-action]");
+      if (!btn || elements.mlHudAdvice.hidden) return;
+      event.preventDefault();
+      handleKeyPauseAction(btn.dataset.keyPauseAction);
     });
   }
   if (elements.rulesBackdrop && elements.rulesBackdrop.dataset.bound !== "1") {
@@ -5487,10 +8095,36 @@ async function bootApp() {
   }
 
   initOnboarding();
+  renderDrillPracticePanel();
   const activeRestored = restored && state && !isGameOver(state);
   render({ immediate: true, lite: activeRestored });
+  if (COACH_STRATEGY_REVISION !== REQUIRED_STRATEGY_REVISION) {
+    message = `策略模块可能未更新（rev ${COACH_STRATEGY_REVISION ?? "?"}），请关掉标签重跑启动脚本。${message}`;
+  }
   if (elements.message) elements.message.textContent = formatBootMessage(message);
   bootComplete = true;
+  const urlDrillTag = (() => {
+    try {
+      const raw = new URLSearchParams(globalThis.location?.search ?? "").get("drill");
+      if (!raw) return null;
+      if (raw === "must-beat-sf" || raw === "must-beat-twp-sf") return "须压保同花顺";
+      return raw;
+    } catch {
+      return null;
+    }
+  })();
+  if (urlDrillTag && !activeRestored) {
+    startDrillPractice(urlDrillTag);
+    return;
+  }
+  window.setInterval(() => {
+    if (!bootComplete || !state || isGameOver(state)) return;
+    maybeRecoverStalledRobotQueue();
+  }, 1000);
+  if (!activeRestored && !state && isMobileLandscape()) {
+    void triggerNewGame();
+    return;
+  }
   if (globalThis.__GUANDAN_BUILD__ && elements.message) {
     const buildNote = `构建 ${globalThis.__GUANDAN_BUILD__}`;
     if (!elements.message.textContent.includes(buildNote)) {

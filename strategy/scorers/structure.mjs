@@ -1,7 +1,10 @@
-import { cardId, cardLabel, isJoker } from "../../engine/card.mjs";
+import { cardId, cardLabel, isJoker, isWildCard } from "../../engine/card.mjs";
+import { classifyPlay } from "../../engine/classify-play.mjs";
 import { compareRanks, isControlRank, rankOrder } from "../../engine/rank-order.mjs";
 import { PLAY_TYPES } from "../../engine/play-types.mjs";
 import { buildStrategicGroups } from "../strategic-groups.mjs";
+import { enumerateStraightFlushCandidates } from "../straight-flush-arrange.mjs";
+import { lastCatchWindWinningPlay } from "../lead-mode.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
@@ -32,16 +35,31 @@ function ranksInStrategicChainGroups(hand, levelRank) {
   return locked;
 }
 
-/** 三带二带对是否会拆掉理牌后的连对/钢板/顺子 */
-export function tripleWithPairKickerBreaksStrategicGroup(candidate, hand, levelRank) {
+/** 三带二带对是否会拆掉理牌后的连对/钢板/顺子/同花顺 */
+export function tripleWithPairKickerBreaksStrategicGroup(candidate, hand, levelRank, tableContext = null) {
   if (candidate?.type !== PLAY_TYPES.tripleWithPair || !hand?.length) return null;
   const kickerRank = inferTripleWithPairKickerRank(candidate);
   if (!kickerRank) return null;
-  const groups = buildStrategicGroups(hand, levelRank);
-  for (const group of groups) {
+  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const group of cache.strategicGroups) {
+    if (group.play?.type === PLAY_TYPES.straightFlush) {
+      const sfCards = (group.cards ?? []).filter((card) => card.rank === kickerRank);
+      if (sfCards.some((card) => candidateKeys.has(cardId(card)))) {
+        return group.label ?? "同花顺";
+      }
+    }
     if (!CHAIN_GROUP_TYPES.has(group.play?.type)) continue;
     const rankCards = (group.cards ?? []).filter((card) => card.rank === kickerRank);
     if (rankCards.length >= 2) return group.label ?? "成组结构";
+  }
+  for (const straightFlush of cache.straightFlushes) {
+    const wildIds = new Set(straightFlush.wildIds ?? []);
+    const sfKickerCards = (straightFlush.cards ?? []).filter((card) => card.rank === kickerRank);
+    if (sfKickerCards.some((card) => candidateKeys.has(cardId(card)) && !wildIds.has(cardId(card)))) {
+      const suitLabel = RUNWAY_SUIT_LABELS[straightFlush.suit] ?? straightFlush.suit;
+      return `同花顺 ${suitLabel}`;
+    }
   }
   return null;
 }
@@ -63,7 +81,7 @@ export function findSafeKickerPairRanksForTriple(hand, levelRank, tripleRank) {
 }
 
 /** 三带二/三张是否会拆掉理牌后的顺子 */
-function playBreaksStrategicStraight(candidate, hand, levelRank) {
+export function playBreaksStrategicStraight(candidate, hand, levelRank) {
   if (candidate?.type !== PLAY_TYPES.tripleWithPair && candidate?.type !== PLAY_TYPES.triple) return null;
   return tripleWithPairBreaksStrategicStraight(
     candidate.type === PLAY_TYPES.triple
@@ -99,6 +117,391 @@ function tripleWithPairBreaksStrategicStraight(candidate, hand, levelRank) {
 /** 手牌中是否留有大王作送单回收 */
 function hasBigJokerRecovery(hand) {
   return hand.some((card) => card.rank === "BJ");
+}
+
+/** 须压时三张是否拆顺子/同花顺/四炸等高价值结构 */
+export function breaksStrategicPremiumForTriple(candidate, hand, levelRank, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.triple || !hand?.length) return null;
+  const straightLabel = playBreaksStrategicStraight(candidate, hand, levelRank);
+  if (straightLabel) return straightLabel;
+  const overlap = candidateOverlapsPremiumStructure(candidate, hand, levelRank, tableContext);
+  if (overlap) return overlap;
+  const rank = candidate.mainRank;
+  const held = physicalRankCount(hand, rank);
+  const usedFromRank = (candidate.cards ?? []).filter((card) => card.rank === rank).length;
+  if (held >= 4 && usedFromRank >= 3) {
+    return `四张${rank}`;
+  }
+  return null;
+}
+
+/** 跟牌三张是否拆顺子/同花顺/四炸 */
+export function isStructureBreakingTripleBeat(candidate, hand, levelRank) {
+  return breaksStrategicPremiumForTriple(candidate, hand, levelRank) != null;
+}
+
+const RUNWAY_CHAIN_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const RUNWAY_SUIT_LABELS = { S: "黑桃", H: "红桃", C: "梅花", D: "方片" };
+
+function handCacheSignature(hand) {
+  if (!hand?.length) return "";
+  return hand.map((card) => cardId(card)).sort().join("|");
+}
+
+function isLiteStructureContext(tableContext) {
+  return tableContext?.lite === true
+    || tableContext?.scoringAudience === "human-lite"
+    || tableContext?.scoringAudience === "robot";
+}
+
+/** 同手牌只枚举一次同花顺；lite 路径不拉 buildStrategicGroups */
+export function resolveHandStructureCache(hand, levelRank, tableContext = null) {
+  const sig = handCacheSignature(hand);
+  if (!sig) return { sig: "", straightFlushes: [], strategicGroups: [] };
+  if (tableContext?._handStructureCache?.sig === sig) {
+    return tableContext._handStructureCache;
+  }
+  const straightFlushes = enumerateStraightFlushCandidates(hand, levelRank);
+  let strategicGroups = [];
+  if ((tableContext?.preferredGroups?.length ?? 0) > 0) {
+    strategicGroups = tableContext.preferredGroups;
+  } else if (!isLiteStructureContext(tableContext)) {
+    strategicGroups = buildStrategicGroups(hand, levelRank);
+  }
+  const cache = { sig, straightFlushes, strategicGroups };
+  if (tableContext) tableContext._handStructureCache = cache;
+  return cache;
+}
+
+function straightFlushBreakLabel(straightFlush) {
+  const suitLabel = RUNWAY_SUIT_LABELS[straightFlush.suit] ?? straightFlush.suit;
+  return `同花顺 ${suitLabel}`;
+}
+
+function candidateBreaksCachedStraightFlush(candidate, straightFlushes) {
+  if (!candidate?.cards?.length || !straightFlushes?.length) return null;
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const straightFlush of straightFlushes) {
+    const groupKeys = (straightFlush.cards ?? []).map((card) => cardId(card));
+    const usedKeys = groupKeys.filter((key) => candidateKeys.has(key));
+    if (usedKeys.length === 0) continue;
+    const playsWholeSf = candidate.type === PLAY_TYPES.straightFlush
+      && usedKeys.length === groupKeys.length
+      && candidate.cards.length === groupKeys.length;
+    if (playsWholeSf) continue;
+    if (usedKeys.length < groupKeys.length || candidate.cards.length !== groupKeys.length) {
+      return straightFlushBreakLabel(straightFlush);
+    }
+  }
+  return null;
+}
+
+function candidateBreaksCachedStraightFlushGroups(candidate, strategicGroups, levelRank) {
+  if (!candidate?.cards?.length || !strategicGroups?.length) return null;
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const group of strategicGroups) {
+    if (group.play?.type !== PLAY_TYPES.straightFlush) continue;
+    const groupCards = group.cards ?? [];
+    const groupKeys = groupCards.map((card) => cardId(card));
+    if (!candidatePartiallyUsesStructureKeys(candidate, groupKeys)) continue;
+    return group.label ?? "同花顺";
+  }
+  return null;
+}
+
+/** 候选是否部分占用某组同花顺/四炸（按具体牌 id 重叠） */
+function candidatePartiallyUsesStructureKeys(candidate, groupKeys) {
+  if (!candidate?.cards?.length || groupKeys.length === 0) return false;
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  const used = groupKeys.filter((key) => candidateKeys.has(key)).length;
+  if (used <= 0) return false;
+  if (used < groupKeys.length) return true;
+  return candidate.cards.length !== groupKeys.length;
+}
+
+/** 同花色 4 张及以上连续自然牌跑道（UI 理牌列常见，如黑桃 7-10） */
+function candidateOverlapsSameSuitRunway(candidate, hand, levelRank, minRun = 4) {
+  if (!candidate?.cards?.length || !hand?.length) return null;
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  const naturals = hand.filter((card) => !isJoker(card) && !isWildCard(card, levelRank));
+  const bySuit = new Map();
+  for (const card of naturals) {
+    if (!bySuit.has(card.suit)) bySuit.set(card.suit, []);
+    bySuit.get(card.suit).push(card);
+  }
+
+  for (const [suit, suitedCards] of bySuit.entries()) {
+    const rankToCard = new Map();
+    for (const card of suitedCards) {
+      if (!rankToCard.has(card.rank)) rankToCard.set(card.rank, card);
+    }
+    for (let start = 0; start + minRun <= RUNWAY_CHAIN_RANKS.length; start += 1) {
+      for (let len = minRun; len <= 5; len += 1) {
+        if (start + len > RUNWAY_CHAIN_RANKS.length) continue;
+        const window = RUNWAY_CHAIN_RANKS.slice(start, start + len);
+        const windowCards = [];
+        let complete = true;
+        for (const rank of window) {
+          const card = rankToCard.get(rank);
+          if (!card) {
+            complete = false;
+            break;
+          }
+          windowCards.push(card);
+        }
+        if (!complete) continue;
+        if (window[0] === "A" && window.length < 5) continue;
+        const windowKeys = windowCards.map((card) => cardId(card));
+        const used = windowKeys.filter((key) => candidateKeys.has(key)).length;
+        if (used <= 0) continue;
+        if (used < windowKeys.length || candidate.cards.length !== windowKeys.length) {
+          return `顺子 ${RUNWAY_SUIT_LABELS[suit] ?? suit}`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** 同花顺枚举重叠（含逢人配补出的同花顺；动用跑道内任意牌含逢人配均算拆） */
+function candidateOverlapsNaturalStraightFlush(candidate, hand, levelRank, straightFlushes = null) {
+  if (!candidate?.cards?.length || !hand?.length) return null;
+  const flushes = straightFlushes ?? enumerateStraightFlushCandidates(hand, levelRank);
+  return candidateBreaksCachedStraightFlush(candidate, flushes);
+}
+
+/** 候选是否动用理牌后混色顺子内的具体牌 */
+function candidateOverlapsStrategicStraight(candidate, hand, levelRank) {
+  if (!candidate?.cards?.length || !hand?.length) return null;
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const group of buildStrategicGroups(hand, levelRank)) {
+    if (group.play?.type !== PLAY_TYPES.straight) continue;
+    const groupKeys = (group.cards ?? []).map((card) => cardId(card));
+    const used = groupKeys.filter((key) => candidateKeys.has(key)).length;
+    if (used <= 0) continue;
+    if (used < groupKeys.length || candidate.cards.length !== groupKeys.length) {
+      return group.label ?? "顺子";
+    }
+  }
+  return null;
+}
+
+/** 候选是否动用理牌后同花顺/四炸内的具体牌（不含混色顺子） */
+function candidateOverlapsStraightFlushOrBomb(candidate, hand, levelRank) {
+  if (!candidate?.cards?.length || !hand?.length) return null;
+  const runway = candidateOverlapsSameSuitRunway(candidate, hand, levelRank);
+  if (runway) return runway;
+  const naturalFlush = candidateOverlapsNaturalStraightFlush(candidate, hand, levelRank);
+  if (naturalFlush) return naturalFlush;
+
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const group of buildStrategicGroups(hand, levelRank)) {
+    const playType = group.play?.type;
+    if (playType !== PLAY_TYPES.bomb && playType !== PLAY_TYPES.straightFlush) continue;
+    const groupKeys = (group.cards ?? []).map((card) => cardId(card));
+    if (!candidatePartiallyUsesStructureKeys(candidate, groupKeys)) continue;
+    if (playType === PLAY_TYPES.straightFlush) {
+      return group.label ?? "同花顺";
+    }
+    return group.label ?? `四张${group.play?.mainRank ?? candidate.mainRank}`;
+  }
+  return null;
+}
+
+/** 候选是否动用理牌后顺子/同花顺/四炸内的具体牌 */
+function candidateOverlapsPremiumStructure(candidate, hand, levelRank, tableContext = null) {
+  if (!candidate?.cards?.length || !hand?.length) return null;
+  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
+  const candidateKeys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  for (const group of cache.strategicGroups) {
+    const playType = group.play?.type;
+    if (playType !== PLAY_TYPES.straight
+      && playType !== PLAY_TYPES.straightFlush
+      && playType !== PLAY_TYPES.bomb) {
+      continue;
+    }
+    const groupKeys = (group.cards ?? []).map((card) => cardId(card));
+    const used = groupKeys.filter((key) => candidateKeys.has(key)).length;
+    if (used <= 0) continue;
+    if (playType === PLAY_TYPES.bomb) {
+      return group.label ?? `四张${group.play?.mainRank ?? candidate.mainRank}`;
+    }
+    return group.label ?? (playType === PLAY_TYPES.straightFlush ? "同花顺" : "顺子");
+  }
+  // 仅有 lite 无分组时才用同花顺枚举兜底；全量理牌分组已表达结构意图，勿重复枚举误伤
+  if (cache.strategicGroups.length > 0) return null;
+  return candidateBreaksCachedStraightFlush(candidate, cache.straightFlushes);
+}
+
+/** 须压时对子是否拆顺子/同花顺/四炸等高价值结构（按具体牌重叠判定） */
+export function breaksStrategicPremiumForPair(candidate, hand, levelRank, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.pair || !hand?.length) return null;
+  const overlap = candidateOverlapsPremiumStructure(candidate, hand, levelRank, tableContext);
+  if (overlap) return overlap;
+  const rank = candidate.mainRank;
+  const held = physicalRankCount(hand, rank);
+  if (held >= 3) {
+    const groups = resolveHandStructureCache(hand, levelRank, tableContext).strategicGroups;
+    const tripleGroup = groups.find(
+      (group) => (group.play?.type === PLAY_TYPES.triple || group.label?.startsWith("三张"))
+        && group.play?.mainRank === rank,
+    );
+    const plateGroup = groups.find(
+      (group) => (group.play?.type === PLAY_TYPES.plane || group.label?.startsWith("钢板"))
+        && (group.cards ?? []).some((card) => card.rank === rank),
+    );
+    if (tripleGroup || plateGroup) {
+      return plateGroup?.label ?? tripleGroup?.label ?? `三张${rank}`;
+    }
+  }
+  return null;
+}
+
+/** 跟牌对子是否拆顺子/同花顺/四炸/钢板三张 */
+export function isStructureBreakingPairBeat(candidate, hand, levelRank) {
+  return breaksStrategicPremiumForPair(candidate, hand, levelRank) != null;
+}
+
+function cardKeyForPremium(card) {
+  return `${card.rank}:${card.suit}:${card.deckIndex}`;
+}
+
+/** UI 理牌列同花顺/王炸：候选部分占用即视为拆结构 */
+function breaksPreferredStraightFlushPartialUse(candidate, preferredGroups, levelRank) {
+  if (!candidate || !preferredGroups?.length) return false;
+  const keys = new Set((candidate.cards ?? []).map(cardKeyForPremium));
+  for (const group of preferredGroups) {
+    const cards = group.cards ?? group;
+    const play = group.play ?? classifyPlay(cards, levelRank);
+    if (![PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb].includes(play.type)) continue;
+    const groupKeys = cards.map(cardKeyForPremium);
+    const used = groupKeys.filter((key) => keys.has(key)).length;
+    if (used > 0 && used < groupKeys.length) return true;
+    if (used === groupKeys.length && candidate.cards.length !== groupKeys.length) return true;
+  }
+  return false;
+}
+
+/** 须压三带二是否拆顺子/同花顺/四炸等高价值结构（按具体牌重叠；带对拆连对另判） */
+export function breaksStrategicPremiumForTripleWithPair(candidate, hand, levelRank, preferredGroups = null, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.tripleWithPair || !hand?.length) return null;
+  const cache = resolveHandStructureCache(hand, levelRank, {
+    ...tableContext,
+    preferredGroups: preferredGroups ?? tableContext?.preferredGroups,
+  });
+  if (cache.strategicGroups.length) {
+    const partialSf = breaksPreferredStraightFlushPartialUse(candidate, cache.strategicGroups, levelRank);
+    if (partialSf) {
+      for (const group of cache.strategicGroups) {
+        const cards = group.cards ?? group;
+        const play = group.play ?? classifyPlay(cards, levelRank);
+        if (play?.type !== PLAY_TYPES.straightFlush) continue;
+        const groupKeys = cards.map(cardKeyForPremium);
+        const keys = new Set((candidate.cards ?? []).map(cardKeyForPremium));
+        const used = groupKeys.filter((key) => keys.has(key)).length;
+        if (used > 0 && used < groupKeys.length) {
+          return group.label ?? "同花顺";
+        }
+      }
+      return candidateOverlapsSameSuitRunway(candidate, hand, levelRank) ?? "同花顺";
+    }
+  }
+  const runwayBreak = candidateOverlapsSameSuitRunway(candidate, hand, levelRank);
+  if (runwayBreak) return runwayBreak;
+  const naturalFlush = candidateOverlapsNaturalStraightFlush(candidate, hand, levelRank, cache.straightFlushes);
+  if (naturalFlush) return naturalFlush;
+  const straightBreak = playBreaksStrategicStraight(candidate, hand, levelRank);
+  if (straightBreak) return straightBreak;
+  const kickerBreak = tripleWithPairKickerBreaksStrategicGroup(candidate, hand, levelRank, tableContext);
+  if (kickerBreak) return kickerBreak;
+  return null;
+}
+
+/** 须压钢板是否拆顺子/同花顺/四炸等高价值结构 */
+export function breaksStrategicPremiumForPlane(candidate, hand, levelRank) {
+  if (candidate?.type !== PLAY_TYPES.plane || !hand?.length) return null;
+  return candidateOverlapsStraightFlushOrBomb(candidate, hand, levelRank)
+    ?? candidateOverlapsStrategicStraight(candidate, hand, levelRank);
+}
+
+/** 领出/接风/须压连对是否拆同花顺/四炸/顺子跑道等高价值结构 */
+export function breaksStrategicPremiumForConsecutivePairs(candidate, hand, levelRank, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.consecutivePairs || !hand?.length) return null;
+  const runway = candidateOverlapsSameSuitRunway(candidate, hand, levelRank);
+  if (runway) return runway;
+
+  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
+  const sfBreak = candidateBreaksCachedStraightFlush(candidate, cache.straightFlushes);
+  if (sfBreak) return sfBreak;
+
+  const groupBreak = candidateBreaksCachedStraightFlushGroups(candidate, cache.strategicGroups, levelRank);
+  if (groupBreak) return groupBreak;
+
+  return candidateOverlapsStrategicStraight(candidate, hand, levelRank);
+}
+
+/** 领出/接风杂顺是否拆同花顺/四炸/同花色跑道等高价值结构 */
+export function breaksStrategicPremiumForStraight(candidate, hand, levelRank, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.straight || !hand?.length) return null;
+  const runway = candidateOverlapsSameSuitRunway(candidate, hand, levelRank);
+  if (runway) return runway;
+
+  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
+
+  const skipWildRunwayGuard = (() => {
+    const state = tableContext?.state;
+    if (!state) return false;
+    const playerIndex = tableContext.playerIndex ?? state.currentPlayerIndex ?? 0;
+    const lastWin = lastCatchWindWinningPlay(state, playerIndex);
+    return lastWin?.type === PLAY_TYPES.straightFlush;
+  })();
+
+  // 杂顺动用逢人配，而手牌仍有需逢人配补口的同花顺跑道（≥4 张自然牌）→ 视同拆同花顺
+  if (!skipWildRunwayGuard) {
+    const wildUsedInStraight = (candidate.cards ?? []).filter((card) => isWildCard(card, levelRank));
+    if (wildUsedInStraight.length > 0) {
+      const wildUsedIds = new Set(wildUsedInStraight.map((card) => cardId(card)));
+      for (const straightFlush of cache.straightFlushes) {
+        if ((straightFlush.wildCount ?? 0) <= 0) continue;
+        const wildIds = new Set(straightFlush.wildIds ?? []);
+        if (![...wildUsedIds].some((id) => wildIds.has(id))) continue;
+        const naturalsInSf = (straightFlush.cards ?? []).filter((card) => !wildIds.has(cardId(card))).length;
+        if (naturalsInSf >= 4) {
+          return straightFlushBreakLabel(straightFlush);
+        }
+      }
+    }
+  }
+
+  const sfBreak = candidateBreaksCachedStraightFlush(candidate, cache.straightFlushes);
+  if (sfBreak) return sfBreak;
+
+  const groupBreak = candidateBreaksCachedStraightFlushGroups(candidate, cache.strategicGroups, levelRank);
+  if (groupBreak) return groupBreak;
+
+  return null;
+}
+
+/** 须压同型常规牌（对子/三张/三带二/钢板）是否拆高价值结构 */
+export function breaksStrategicPremiumForRoutineBeat(candidate, hand, levelRank, preferredGroups = null) {
+  if (candidate?.type === PLAY_TYPES.tripleWithPair) {
+    return breaksStrategicPremiumForTripleWithPair(candidate, hand, levelRank, preferredGroups);
+  }
+  if (candidate?.type === PLAY_TYPES.plane) {
+    return breaksStrategicPremiumForPlane(candidate, hand, levelRank);
+  }
+  if (candidate?.type === PLAY_TYPES.triple) {
+    return breaksStrategicPremiumForTriple(candidate, hand, levelRank);
+  }
+  if (candidate?.type === PLAY_TYPES.pair) {
+    return breaksStrategicPremiumForPair(candidate, hand, levelRank);
+  }
+  return null;
+}
+
+/** 跟牌同型常规牌是否拆顺子/同花顺/四炸 */
+export function isStructureBreakingRoutineBeat(candidate, hand, levelRank, preferredGroups = null) {
+  return breaksStrategicPremiumForRoutineBeat(candidate, hand, levelRank, preferredGroups) != null;
 }
 
 /** 某 rank 在理牌结构里被占用的牌（同花顺、钢板等，打出会拆结构） */
@@ -354,6 +757,16 @@ export function structureBreakPenalty(candidate, hand, levelRank, tableContext) 
     // 压小单 P1–P4 由 principles.mjs 统一评分
 
     if (effectiveBombCount >= 4 && usedCount > 0 && usedCount <= bombInfo.availableCount) {
+      if (
+        (openingLead || catchWindLead)
+        && candidate.type === PLAY_TYPES.single
+        && usedCount === 1
+        && physicalHeld >= 5
+      ) {
+        penalty += physicalHeld >= 6 ? 14_000 : 12_000;
+        reasons.push(`领出/接风拆${physicalHeld}张${rank}炸弹出单，宜散单或成组减手`);
+        continue;
+      }
       if (physicalRemaining >= 4) {
         let reservePenalty = effectiveBombCount >= 6 ? 960 : 640;
         if (isHighValueBombRank(rank, levelRank)) reservePenalty += 280;
@@ -421,6 +834,15 @@ export function structureBreakPenalty(candidate, hand, levelRank, tableContext) 
 
     if (
       heldCount === 3
+      && usedCount === 3
+      && candidate.type === PLAY_TYPES.triple
+      && lockedInPlate
+      && (openingLead || catchWindLead)
+    ) {
+      penalty += hand.length >= 15 ? 14_000 : 12_000;
+      reasons.push(`领出/接风不宜拆钢板三张${rank}，应一次走钢板减六张`);
+    } else if (
+      heldCount === 3
       && usedCount === 2
       && lockedInPlate
       && candidate.type === PLAY_TYPES.consecutivePairs
@@ -454,6 +876,14 @@ export function structureBreakPenalty(candidate, hand, levelRank, tableContext) 
       if (!opponentMustBeat && !reasons.some((reason) => reason.includes("三带二带唯一对子"))) {
         reasons.push(lockedInPlate ? `拆钢板${rank}出对子代价过高` : `拆三张${rank}出对子代价较高`);
       }
+    } else if (
+      heldCount === 3
+      && usedCount === 1
+      && candidate.type === PLAY_TYPES.single
+      && (openingLead || catchWindLead)
+    ) {
+      penalty += hand.length >= 15 ? 12_000 : 9800;
+      reasons.push(`拆三张${rank}出单张，宜三带二或对子减手`);
     } else if (
       heldCount === 3
       && usedCount === 3
@@ -493,6 +923,33 @@ export function structureBreakPenalty(candidate, hand, levelRank, tableContext) 
     if (straightBreakLabel) {
       penalty += hand.length >= 15 ? 12_000 : 10_000;
       reasons.push(`领出/接风三带二拆${straightBreakLabel}代价过高`);
+    }
+  }
+
+  const previousPlay = tableContext.previousPlay ?? null;
+  if (
+    opponentMustBeat
+    && hand.length > 10
+    && tableContext.danger < 2
+    && candidate.type === previousPlay?.type
+    && (
+      previousPlay?.type === PLAY_TYPES.triple
+      || previousPlay?.type === PLAY_TYPES.pair
+      || previousPlay?.type === PLAY_TYPES.tripleWithPair
+      || previousPlay?.type === PLAY_TYPES.plane
+    )
+  ) {
+    const premiumBreak = breaksStrategicPremiumForRoutineBeat(candidate, hand, levelRank);
+    if (premiumBreak) {
+      const shapeLabel = candidate.type === PLAY_TYPES.pair
+        ? "对"
+        : candidate.type === PLAY_TYPES.tripleWithPair
+          ? "三带二"
+          : candidate.type === PLAY_TYPES.plane
+            ? "钢板"
+            : "三张";
+      penalty += hand.length >= 15 ? 16_000 : 14_000;
+      reasons.push(`不宜拆${premiumBreak}组${shapeLabel}压牌，宜过牌或换结构外牌`);
     }
   }
 

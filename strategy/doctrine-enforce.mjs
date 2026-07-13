@@ -2,7 +2,9 @@
  * 教纲执法层（Doctrine Enforcement）— 违反 P1/P4/P5/P7/P9 的候选硬否决或巨罚，ML 无法抬回 Top1。
  */
 import { isWildCard } from "../engine/card.mjs";
+import { classifyPlay } from "../engine/classify-play.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
+import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { rankPower } from "../engine/rank-order.mjs";
 import {
@@ -10,37 +12,92 @@ import {
   analyzeMustBeatSingleContext,
   diagnoseBeatPairViolation,
   diagnoseBeatSingleViolation,
+  diagnoseBeatRoutineStructureViolation,
   diagnoseCatchWindStraightTripleViolation,
+  effectiveBeatSingleTier,
   diagnoseInferiorWrapStraightViolation,
   diagnoseLeadConsecutivePairsTripleViolation,
+  diagnosePrematureTripleWithPairLead,
   diagnoseLeadTripleBreaksStraightViolation,
   getRankStructureTier,
+  looseLeadSingleRanks,
+  isThickBombSingleLead,
   isFollowingOpponentSingle,
   resolveStraightBreakForSingle,
   prefersFullBombForControl,
+  isSplitBombPlay,
+  isThickRankBombPlay,
+  hasStandalonePureBombBeater,
   shouldYieldPassAfterPartnerLeadOnOpponentBomb,
   shouldReserveStraightFlushForSmallCards,
+  isStraightFlushWasteOnSmallRoutine,
+  shouldReserveWildForSmallRoutineBeat,
+  hasNaturalRegularBeater,
+  isForbiddenBombRescueItem,
   shouldVetoBombOnlyPass,
   shouldVetoPassWithRegularBeater,
   isPressingRoutineNonBomb,
   breaksPremiumStraightOrJokerGroup,
+  breaksPreferredStrategicGroup,
+  shouldReserveBombForHighProbeSingle,
+  solePairForTripleRank,
 } from "./principles.mjs";
 import {
   analyzeRankAvailability,
   breaksBombIntegrity,
+  breaksStrategicPremiumForRoutineBeat,
+  breaksStrategicPremiumForConsecutivePairs,
+  breaksStrategicPremiumForPair,
+  breaksStrategicPremiumForStraight,
+  breaksStrategicPremiumForTriple,
   breaksStrategicStraightFlush,
   structureAwareBombs,
 } from "./scorers/structure.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
-import { inferLeadMode, playerJustWonTrickWithBomb } from "./lead-mode.mjs";
+import { leadSfRunwayDoctrineViolation, mustBeatCpSfRunwayDoctrineViolation, mustBeatTwpSfRunwayDoctrineViolation } from "./sf-runway-guard.mjs";
+import {
+  CATCH_WIND_RUNWAY_HAND_MAX,
+  inferLeadMode,
+  isCatchWindGroupReductionAfterBomb,
+  isCatchWindPremiumReduction,
+  playerJustWonTrickWithBomb,
+  playerJustWonTrickWithGroupPlay,
+} from "./lead-mode.mjs";
+import { looseSmallSingleRanks } from "./scorers/tempo-lead.mjs";
+import { partnerHandCount, shouldYieldPassToPartner } from "./table-context.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
+
+/** 逢人配低价值配牌型（与 audit wild-low-value 一致） */
+const LOW_WILD_SHAPE_TYPES = new Set([
+  PLAY_TYPES.tripleWithPair,
+  PLAY_TYPES.pair,
+  PLAY_TYPES.triple,
+  PLAY_TYPES.plane,
+]);
 
 /** 执法巨罚：确保 ML 融合（~8500 权重）无法把违规候选抬到 Top1 */
 export const DOCTRINE_HARD_PENALTY = 50_000;
 
 function physicalRankCount(hand, rank) {
   return hand.filter((card) => card.rank === rank && card.rank !== "SJ" && card.rank !== "BJ").length;
+}
+
+function cardKey(card) {
+  return `${card.rank}:${card.suit}:${card.deckIndex}`;
+}
+
+function matchesPreferredGroup(candidate, tableContext) {
+  if (!candidate?.cards?.length) return false;
+  const candidateKeys = new Set(candidate.cards.map(cardKey));
+  for (const group of tableContext.preferredGroups ?? []) {
+    const play = group.play;
+    const cards = group.cards ?? [];
+    if (!play || play.type !== candidate.type || cards.length !== candidate.cards.length) continue;
+    const groupKeys = cards.map(cardKey);
+    if (groupKeys.every((key) => candidateKeys.has(key))) return true;
+  }
+  return false;
 }
 
 function usesWildInCandidate(candidate, levelRank) {
@@ -69,8 +126,49 @@ function bombSizeOf(item) {
   return item.bombSize ?? item.cards?.length ?? 4;
 }
 
+/** 接风跑道：>=5 张无逢人配的顺子/同花顺（候选池或理牌列） */
+function hasCatchWindRunwayCandidate(levelRank, tableContext) {
+  const isRunway = (item, cards) => {
+    if (![PLAY_TYPES.straight, PLAY_TYPES.straightFlush].includes(item.type)) return false;
+    const len = item.length ?? cards?.length ?? 0;
+    if (len < 5) return false;
+    return !(cards ?? item.cards ?? []).some((card) => isWildCard(card, levelRank));
+  };
+
+  if ((tableContext._candidates ?? []).some((item) => isRunway(item, item.cards))) {
+    return true;
+  }
+
+  for (const group of tableContext.preferredGroups ?? []) {
+    const cards = group.cards ?? group;
+    if (!Array.isArray(cards) || cards.length < 5) continue;
+    const play = group.play ?? classifyPlay(cards, levelRank);
+    if (isRunway(play, play.cards ?? cards)) return true;
+  }
+  return false;
+}
+
 function isLeadTurn(tableContext) {
   return tableContext.isOpening && tableContext.leadMode !== "must-beat";
+}
+
+function strategicGroupsCached(hand, levelRank, tableContext = null) {
+  if (!hand?.length) return [];
+  if (tableContext?._strategicGroupsCache?.hand === hand
+    && tableContext._strategicGroupsCache.levelRank === levelRank) {
+    return tableContext._strategicGroupsCache.groups ?? [];
+  }
+  const groups = buildStrategicGroups(hand, levelRank);
+  if (tableContext) {
+    tableContext._strategicGroupsCache = { hand, levelRank, groups };
+  }
+  return groups;
+}
+
+function doctrinePastDeadline(context) {
+  if (context?.deadline != null && performance.now() > context.deadline) return true;
+  if (typeof context?.abortCheck === "function" && context.abortCheck()) return true;
+  return false;
 }
 
 /**
@@ -84,6 +182,17 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
   const previousPlay = tableContext.previousPlay ?? null;
 
   if (candidate.type === PLAY_TYPES.pass) {
+    if (
+      isLeadTurn(tableContext)
+      && tableContext.hasAnyWinner !== false
+    ) {
+      return [{
+        code: "P0",
+        summary: "拥有牌权须主动出牌，不可过牌",
+        blockTop1: true,
+        blockTop3: true,
+      }];
+    }
     if (shouldVetoBombOnlyPass(tableContext, resolvedHand, previousPlay)) {
       return [{
         code: "P7",
@@ -138,27 +247,170 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     });
   }
 
+  const beatRoutineStructDiag = diagnoseBeatRoutineStructureViolation(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (beatRoutineStructDiag?.violated) {
+    violations.push({
+      code: beatRoutineStructDiag.violated,
+      summary: beatRoutineStructDiag.summary,
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
+  const mustBeatCpSfDiag = mustBeatCpSfRunwayDoctrineViolation(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (mustBeatCpSfDiag) {
+    violations.push(mustBeatCpSfDiag);
+  }
+
+  const mustBeatTwpSfDiag = mustBeatTwpSfRunwayDoctrineViolation(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (mustBeatTwpSfDiag) {
+    violations.push(mustBeatTwpSfDiag);
+  }
+
+  // —— P4：须压钢板拆同花顺，有同花顺可压（含逢人配凑钢板） ——
+  if (
+    tableContext.opponentActive
+    && previousPlay?.type === PLAY_TYPES.plane
+    && candidate.type === PLAY_TYPES.plane
+    && canBeat(candidate, previousPlay)
+  ) {
+    const premiumBreak = breaksStrategicPremiumForRoutineBeat(candidate, resolvedHand, levelRank);
+    if (premiumBreak?.includes("同花顺")) {
+      const sfBeater = (tableContext._candidates ?? []).some(
+        (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+      );
+      if (sfBeater) {
+        violations.push({
+          code: "P4",
+          summary: `有同花顺可压，不宜拆${premiumBreak}组钢板`,
+          blockTop1: true,
+          blockTop3: true,
+        });
+      }
+    }
+  }
+
+  // —— P7 延伸：须压钢板有普通炸弹可压，不宜亮同花顺 ——
+  if (
+    tableContext.opponentActive
+    && previousPlay?.type === PLAY_TYPES.plane
+    && candidate.type === PLAY_TYPES.straightFlush
+    && canBeat(candidate, previousPlay)
+  ) {
+    const plainBombs = (tableContext._candidates ?? []).filter(
+      (item) => item.type === PLAY_TYPES.bomb
+        && canBeat(item, previousPlay)
+        && !breaksStrategicStraightFlush(item, resolvedHand, levelRank),
+    );
+    if (plainBombs.length > 0) {
+      violations.push({
+        code: "P7",
+        summary: "有普通炸弹可压钢板，不宜亮同花顺",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+  }
+
   // —— P1：领出/接风小单拆顺子（有顺子或更小不拆顺散单可走） ——
   if (isLeadTurn(tableContext) && candidate.type === PLAY_TYPES.single && candidate.mainRank) {
-    const straightBreak = resolveStraightBreakForSingle(candidate.mainRank, resolvedHand, levelRank);
-    if (straightBreak.breaksStraight) {
+    const looseSmalls = looseSmallSingleRanks(resolvedHand, levelRank);
+    const l1LooseSingle = tableContext.handProfile?.role === "main-attack"
+      && (tableContext.handProfile?.looseSingles ?? 0) >= 2
+      && looseSmalls.length >= 2
+      && looseSmalls.includes(candidate.mainRank);
+    if (!l1LooseSingle) {
+      const straightBreak = resolveStraightBreakForSingle(candidate.mainRank, resolvedHand, levelRank);
+      if (straightBreak.breaksStraight) {
+        const altCandidates = tableContext._candidates ?? [];
+        const hasStraightAlt = altCandidates.some((item) => item.type === PLAY_TYPES.straight);
+        const hasNonBreakingSingle = altCandidates.some(
+          (item) => item.type === PLAY_TYPES.single
+            && item.mainRank
+            && item.mainRank !== candidate.mainRank
+            && !resolveStraightBreakForSingle(item.mainRank, resolvedHand, levelRank).breaksStraight,
+        );
+        const hasGroupAlt = strategicGroupsCached(resolvedHand, levelRank, tableContext).some(
+          (group) => group.play?.type === PLAY_TYPES.straight
+            || group.play?.type === PLAY_TYPES.plane
+            || group.play?.type === PLAY_TYPES.consecutivePairs,
+        );
+        if (hasStraightAlt || hasNonBreakingSingle || hasGroupAlt) {
+          violations.push({
+            code: "P1",
+            summary: `领出/接风有${straightBreak.straightLabel ?? "顺子"}，不宜拆顺出单${candidate.mainRank}`,
+            blockTop1: true,
+            blockTop3: true,
+          });
+        }
+      }
+    }
+    const preferredGroups = tableContext.preferredGroups ?? [];
+    if (
+      breaksPreferredStrategicGroup(candidate, preferredGroups, levelRank, resolvedHand)
+      && !resolveStraightBreakForSingle(candidate.mainRank, resolvedHand, levelRank).breaksStraight
+    ) {
       const altCandidates = tableContext._candidates ?? [];
-      const hasStraightAlt = altCandidates.some((item) => item.type === PLAY_TYPES.straight);
-      const hasNonBreakingSingle = altCandidates.some(
+      const hasGroupLead = altCandidates.some(
+        (item) => item.type !== PLAY_TYPES.pass
+          && item.type !== PLAY_TYPES.single
+          && !breaksPreferredStrategicGroup(item, preferredGroups, levelRank, resolvedHand),
+      );
+      const hasSafeSingle = altCandidates.some(
         (item) => item.type === PLAY_TYPES.single
           && item.mainRank
-          && item.mainRank !== candidate.mainRank
+          && !breaksPreferredStrategicGroup(item, preferredGroups, levelRank, resolvedHand)
           && !resolveStraightBreakForSingle(item.mainRank, resolvedHand, levelRank).breaksStraight,
       );
-      const hasGroupAlt = buildStrategicGroups(resolvedHand, levelRank).some(
-        (group) => group.play?.type === PLAY_TYPES.straight
-          || group.play?.type === PLAY_TYPES.plane
-          || group.play?.type === PLAY_TYPES.consecutivePairs,
-      );
-      if (hasStraightAlt || hasNonBreakingSingle || hasGroupAlt) {
+      if (hasGroupLead || hasSafeSingle) {
         violations.push({
           code: "P1",
-          summary: `领出/接风有${straightBreak.straightLabel ?? "顺子"}，不宜拆顺出单${candidate.mainRank}`,
+          summary: `领出/接风有成组结构，不宜拆连对/钢板/炸弹出单${candidate.mainRank}`,
+          blockTop1: true,
+          blockTop3: true,
+        });
+      }
+    }
+    // 厚炸（五张及以上）不宜拆出单张领出
+    if (isThickBombSingleLead(candidate, resolvedHand)) {
+      const altCandidates = tableContext._candidates ?? [];
+      const looseRanks = looseLeadSingleRanks(resolvedHand, levelRank);
+      const hasSafeSingle = altCandidates.some(
+        (item) => item.type === PLAY_TYPES.single
+          && item.mainRank
+          && (looseRanks.includes(item.mainRank)
+            || !isThickBombSingleLead(item, resolvedHand)),
+      );
+      const hasGroupLead = altCandidates.some(
+        (item) => item.type === PLAY_TYPES.pair
+          || item.type === PLAY_TYPES.tripleWithPair
+          || item.type === PLAY_TYPES.triple
+          || item.type === PLAY_TYPES.consecutivePairs
+          || item.type === PLAY_TYPES.plane
+          || item.type === PLAY_TYPES.straight,
+      );
+      if (hasSafeSingle || hasGroupLead) {
+        const held = resolvedHand.filter(
+          (card) => card.rank === candidate.mainRank && card.rank !== "SJ" && card.rank !== "BJ",
+        ).length;
+        violations.push({
+          code: "P1",
+          summary: `领出/接风有散单或成组结构，不宜拆${held}张${candidate.mainRank}炸弹出单`,
           blockTop1: true,
           blockTop3: true,
         });
@@ -226,6 +478,33 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     });
   }
 
+  // —— P4：领出/接风拆同花顺跑道（杂顺/连对/裸三张/对子/三带二/钢板 统一） ——
+  const catchWindBombReduction = isCatchWindGroupReductionAfterBomb(candidate, tableContext);
+  const sfRunwayViolation = leadSfRunwayDoctrineViolation(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (sfRunwayViolation && !catchWindBombReduction) {
+    violations.push(sfRunwayViolation);
+  }
+
+  const prematureTwpDiag = diagnosePrematureTripleWithPairLead(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (prematureTwpDiag?.violated && !catchWindBombReduction) {
+    violations.push({
+      code: prematureTwpDiag.violated,
+      summary: prematureTwpDiag.summary,
+      blockTop1: true,
+      blockTop3: prematureTwpDiag.blockTop3 ?? false,
+    });
+  }
+
   // —— P4：跟牌压单却用三带二拆钢板 ——
   if (
     isFollowingOpponentSingle(previousPlay, levelRank, tableContext)
@@ -244,19 +523,21 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     }
   }
 
-  // —— P5：接风/领出有钢板，三带二拆钢板 ——
+  // —— P5：接风/领出有钢板，不宜裸三张/三带二拆钢板 ——
   if (isLeadTurn(tableContext) && resolvedHand.length >= 10) {
     const steelPlate = handHasSteelPlate(resolvedHand, levelRank);
     if (
       steelPlate
-      && candidate.type === PLAY_TYPES.tripleWithPair
+      && (candidate.type === PLAY_TYPES.tripleWithPair || candidate.type === PLAY_TYPES.triple)
     ) {
       const tripleAnalysis = analyzeRankAvailability(resolvedHand, candidate.mainRank, levelRank);
       const lockedInPlate = (tripleAnalysis.lockedEntries ?? []).some((e) => e.structure === "钢板");
       if (lockedInPlate) {
         violations.push({
           code: "P5",
-          summary: "接风/领出有钢板，不宜三带二拆钢板",
+          summary: candidate.type === PLAY_TYPES.triple
+            ? "领出/接风有钢板，不宜裸三张拆钢板"
+            : "接风/领出有钢板，不宜三带二拆钢板",
           blockTop1: true,
           blockTop3: true,
         });
@@ -278,11 +559,29 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       code: "P4",
       summary: "有普通牌能压住，不宜动炸",
       blockTop1: true,
-      blockTop3: false,
+      blockTop3: true,
     });
   }
 
   // —— P7：有纯四炸够压，仍用逢人配凑更大炸 ——
+  if (
+    candidate.type === PLAY_TYPES.straightFlush
+    && previousPlay?.type === PLAY_TYPES.single
+    && ["SJ", "BJ"].includes(previousPlay.mainRank)
+  ) {
+    const bombBeaters = (tableContext._candidates ?? []).filter(
+      (item) => item.type === PLAY_TYPES.bomb && canBeat(item, previousPlay),
+    );
+    if (bombBeaters.length > 0) {
+      violations.push({
+        code: "P7",
+        summary: "压王有普通炸弹可压，不宜亮同花顺",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+  }
+
   if (candidate.type === PLAY_TYPES.bomb && previousPlay && !tableContext.hasActionableRegularWinner) {
     const bombBeaters = (tableContext._candidates ?? []).filter(
       (item) => item.type === PLAY_TYPES.bomb && canBeat(item, previousPlay),
@@ -299,11 +598,39 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       }
     }
 
+    if (
+      isThickRankBombPlay(candidate, resolvedHand)
+      && bombSizeOf(candidate) < physicalRankCount(resolvedHand, candidate.mainRank)
+      && hasStandalonePureBombBeater(resolvedHand, bombBeaters)
+    ) {
+      violations.push({
+        code: "P7",
+        summary: "有纯四炸够压，不宜拆厚炸出四炸",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+
+    // P7：拆厚炸出四炸永远劣于满张同点炸，不得进 Top1/Top3
+    if (isSplitBombPlay(candidate, resolvedHand)) {
+      violations.push({
+        code: "P7",
+        summary: "不宜拆厚炸出四炸，应满张出炸或过牌",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+
     const held = physicalRankCount(resolvedHand, candidate.mainRank);
     const bombSize = bombSizeOf(candidate);
+    const standalonePureBeater = hasStandalonePureBombBeater(resolvedHand, bombBeaters);
     if (
-      prefersFullBombForControl(resolvedHand, candidate.mainRank, previousPlay, tableContext)
-      && bombSize < held
+      bombSize < held
+      && held > 4
+      && (
+        prefersFullBombForControl(resolvedHand, candidate.mainRank, previousPlay, tableContext)
+        || (BOMB_TYPES.has(previousPlay.type) && !standalonePureBeater)
+      )
     ) {
       violations.push({
         code: "P7",
@@ -325,7 +652,7 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       const isMinBeatingBomb = minBeatPower != null
         && candidate.type === PLAY_TYPES.bomb
         && rankPower(candidate.mainRank, levelRank) === minBeatPower;
-      if ((altBombs.length > 0 || wholeBombs.length > 0) && !isMinBeatingBomb) {
+      if ((altBombs.length > 0 || wholeBombs.length > 0) && !(isMinBeatingBomb && altBombs.length === 0)) {
         violations.push({
           code: "P4",
           summary: `有整炸够压，不宜拆${sfBreak}凑炸`,
@@ -359,13 +686,160 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
   if (
     tableContext.partnerOwnsTrick
     && !finishingThisTurn
+    && BOMB_TYPES.has(candidate.type)
+  ) {
+    const wildBomb = usesWildInCandidate(candidate, levelRank);
+    violations.push({
+      code: "P10",
+      summary: wildBomb
+        ? "队友占牌，不宜逢人配凑炸压队友"
+        : "队友占牌，不宜炸队友",
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+  if (
+    shouldYieldPassToPartner({ ...tableContext, hand: resolvedHand })
+    && !finishingThisTurn
     && candidate.type !== PLAY_TYPES.pass
+    && !BOMB_TYPES.has(candidate.type)
   ) {
     violations.push({
       code: "P10",
       summary: "队友占牌，不宜压队友",
       blockTop1: true,
-      blockTop3: BOMB_TYPES.has(candidate.type),
+      blockTop3: true,
+    });
+  }
+
+  // —— P10：队友剩1张冲刺，接风/领出不宜三带二/成组抢权 ——
+  if (
+    isLeadTurn(tableContext)
+    && tableContext.leadMode !== "must-beat"
+    && partnerHandCount(tableContext) === 1
+    && resolvedHand.length > 1
+    && (
+      candidate.type === PLAY_TYPES.tripleWithPair
+      || (
+        candidate.type === PLAY_TYPES.consecutivePairs
+        && (candidate.length ?? candidate.cards?.length ?? 0) < 6
+        && !matchesPreferredGroup(candidate, tableContext)
+      )
+      || (
+        candidate.type === PLAY_TYPES.plane
+        && !matchesPreferredGroup(candidate, tableContext)
+      )
+    )
+  ) {
+    const altSingle = (tableContext._candidates ?? []).some(
+      (item) => item.type === PLAY_TYPES.single && item.mainRank,
+    );
+    if (altSingle) {
+      violations.push({
+        code: "P10",
+        summary: "队友剩1张冲刺，不宜三带二/成组抢权，宜小单送队友",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+  }
+
+  // —— L1：主攻两小单，开局 Top1 须在散单候选（第12篇弱路原理） ——
+  if (
+    tableContext.leadMode === "fresh-open"
+    && isLeadTurn(tableContext)
+    && tableContext.handProfile?.role === "main-attack"
+    && (tableContext.handProfile?.looseSingles ?? 0) >= 2
+    && resolvedHand.length <= 15
+  ) {
+    const looseSmalls = looseSmallSingleRanks(resolvedHand, levelRank);
+    if (looseSmalls.length >= 2) {
+      const altCandidates = tableContext._candidates ?? [];
+      const hasLooseSingleAlt = altCandidates.some(
+        (item) => item.type === PLAY_TYPES.single
+          && item.mainRank
+          && looseSmalls.includes(item.mainRank),
+      );
+      if (hasLooseSingleAlt) {
+        const isLooseSingle = candidate.type === PLAY_TYPES.single
+          && looseSmalls.includes(candidate.mainRank);
+        if (!isLooseSingle) {
+          violations.push({
+            code: "L1",
+            summary: "【L1】主攻两小单须先出散单，不宜首出组牌/对子",
+            blockTop1: true,
+            blockTop3: candidate.type !== PLAY_TYPES.single,
+          });
+        }
+      }
+    }
+  }
+
+  // —— P1：领出/接风不宜拆三同张/对子出单 ——
+  if (
+    isLeadTurn(tableContext)
+    && candidate.type === PLAY_TYPES.single
+    && candidate.mainRank
+    && (tableContext.leadMode === "fresh-open" || tableContext.leadMode === "catch-wind")
+  ) {
+    const tier = getRankStructureTier(resolvedHand, candidate.mainRank, levelRank);
+    const beatTier = effectiveBeatSingleTier(resolvedHand, candidate.mainRank, levelRank);
+    const looseRanks = looseLeadSingleRanks(resolvedHand, levelRank);
+    const altCandidates = tableContext._candidates ?? [];
+    const hasLooseSingleLead = altCandidates.some(
+      (item) => item.type === PLAY_TYPES.single
+        && item.mainRank
+        && (getRankStructureTier(resolvedHand, item.mainRank, levelRank) === "loose"
+          || effectiveBeatSingleTier(resolvedHand, item.mainRank, levelRank) === "loose"),
+    );
+    const hasGroupLead = altCandidates.some(
+      (item) => item.type !== PLAY_TYPES.pass
+        && item.type !== PLAY_TYPES.single
+        && !BOMB_TYPES.has(item.type),
+    );
+    if (tier === "triple" && (hasGroupLead || hasLooseSingleLead)) {
+      violations.push({
+        code: "P1",
+        summary: "不宜拆三同张出单，优先三带二或对子",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    } else if (beatTier === "pair" && looseRanks.length > 0 && (hasLooseSingleLead || hasGroupLead)) {
+      violations.push({
+        code: "P1",
+        summary: "有散单时不拆对出单",
+        blockTop1: true,
+        blockTop3: true,
+      });
+    }
+  }
+
+  // —— P8：逢人配不宜低价值配牌（领出/接风 + 须压小牌型，与 audit wild-low-value 对齐） ——
+  const reserveWildSmallRoutine = previousPlay
+    && shouldReserveWildForSmallRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank);
+  const wildFillCountP8 = wildcardFillCount(candidate, levelRank);
+  const altCandidatesP8 = tableContext._candidates ?? [];
+  const naturalBeaterExists = previousPlay
+    && hasNaturalRegularBeater(altCandidatesP8, previousPlay, levelRank, resolvedHand, levelRank);
+  const candidateFinishesHand = (candidate.cards?.length ?? 0) === resolvedHand.length;
+  if (
+    !candidateFinishesHand
+    && LOW_WILD_SHAPE_TYPES.has(candidate.type)
+    && usesWildInCandidate(candidate, levelRank)
+    && (
+      isLeadTurn(tableContext)
+      || (reserveWildSmallRoutine && (wildFillCountP8 >= 2 || naturalBeaterExists || !hasNaturalRegularBeater(altCandidatesP8, previousPlay, levelRank, resolvedHand, levelRank)))
+    )
+  ) {
+    violations.push({
+      code: "P8",
+      summary: reserveWildSmallRoutine && !isLeadTurn(tableContext)
+        ? (wildFillCountP8 >= 2
+          ? "不宜双逢人配压对手小牌型"
+          : "不宜逢人配压对手小牌型，宜过牌")
+        : "逢人配不宜配三带二/对子/三张",
+      blockTop1: true,
+      blockTop3: true,
     });
   }
 
@@ -388,6 +862,28 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     });
   }
 
+  // —— P5：接风空桌不宜空炸（四炸/同花顺等，非一手走完，与 fresh-open 同门禁） ——
+  if (
+    BOMB_TYPES.has(candidate.type)
+    && tableContext.leadMode === "catch-wind"
+    && !tableContext.opponentActive
+    && resolvedHand.length > 7
+    && (candidate.cards?.length ?? 0) < resolvedHand.length
+    && !isCatchWindPremiumReduction(candidate, tableContext)
+    && !isCatchWindGroupReductionAfterBomb(candidate, tableContext)
+  ) {
+    violations.push({
+      code: "P5",
+      summary: candidate.type === PLAY_TYPES.straightFlush
+        ? (wildcardFillCount(candidate, levelRank) >= 2
+          ? "接风不宜双逢人配空炸同花顺"
+          : "接风有普通路线时不空炸同花顺")
+        : "接风有普通路线时不空炸",
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
   // —— P5/P12：刚炸/同花顺夺权接风，不宜空扔厚炸（非一手走完） ——
   if (
     BOMB_TYPES.has(candidate.type)
@@ -400,9 +896,13 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0,
     )
   ) {
-    const thickBomb = candidate.type === PLAY_TYPES.straightFlush
-      || candidate.type === PLAY_TYPES.jokerBomb
-      || bombSizeOf(candidate) >= 5;
+    const isCatchWindSfReduction = candidate.type === PLAY_TYPES.straightFlush
+      && isCatchWindGroupReductionAfterBomb(candidate, tableContext);
+    const thickBomb = !isCatchWindSfReduction && (
+      candidate.type === PLAY_TYPES.jokerBomb
+      || bombSizeOf(candidate) >= 5
+      || candidate.type === PLAY_TYPES.straightFlush
+    );
     if (thickBomb) {
       violations.push({
         code: "P12",
@@ -415,13 +915,35 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     }
   }
 
+  // —— P5：刚夺权接风有顺子跑道，不宜拆牌走连对 ——
+  if (
+    candidate.type === PLAY_TYPES.consecutivePairs
+    && tableContext.leadMode === "catch-wind"
+    && !tableContext.opponentActive
+    && resolvedHand.length <= CATCH_WIND_RUNWAY_HAND_MAX
+    && (
+      playerJustWonTrickWithGroupPlay(
+        tableContext.state,
+        tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0,
+      )
+      || playerJustWonTrickWithBomb(
+        tableContext.state,
+        tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0,
+      )
+    )
+    && hasCatchWindRunwayCandidate(levelRank, tableContext)
+  ) {
+    violations.push({
+      code: "P5",
+      summary: "刚夺权接风有顺子跑道，不宜拆牌走连对",
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
   // —— P7：非紧急局面同花顺不压小单/对子 ——
   if (
-    candidate.type === PLAY_TYPES.straightFlush
-    && previousPlay
-    && [PLAY_TYPES.single, PLAY_TYPES.pair].includes(previousPlay.type)
-    && (tableContext.danger ?? 0) < 3
-    && resolvedHand.length > 8
+    isStraightFlushWasteOnSmallRoutine(candidate, resolvedHand, previousPlay, tableContext)
   ) {
     const preferredGroups = tableContext.preferredGroups ?? [];
     const plainBombs = (tableContext._candidates ?? []).filter(
@@ -429,21 +951,30 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
         && canBeat(item, previousPlay)
         && !breaksPremiumStraightOrJokerGroup(item, preferredGroups, levelRank),
     );
-    if (plainBombs.length > 0) {
-      violations.push({
-        code: "P7",
-        summary: "有普通炸弹可压，不宜亮同花顺",
-        blockTop1: true,
-        blockTop3: true,
-      });
-    } else if (shouldReserveStraightFlushForSmallCards(tableContext, resolvedHand, previousPlay)) {
-      violations.push({
-        code: "P7",
-        summary: "局面尚早，同花顺不压小单/对子",
-        blockTop1: true,
-        blockTop3: true,
-      });
-    }
+    violations.push({
+      code: "P7",
+      summary: plainBombs.length > 0
+        ? "有普通炸弹可压，不宜亮同花顺"
+        : "局面尚早，同花顺不压小单/对子",
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
+  // —— P12：对手级牌/大单试探，局面尚早不宜动炸（含同花顺/四炸） ——
+  if (
+    BOMB_TYPES.has(candidate.type)
+    && previousPlay
+    && shouldReserveBombForHighProbeSingle(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    violations.push({
+      code: "P12",
+      summary: candidate.type === PLAY_TYPES.straightFlush
+        ? "对手级牌/大单试探，不宜亮同花顺"
+        : "对手级牌/大单试探，不宜动炸",
+      blockTop1: true,
+      blockTop3: true,
+    });
   }
 
   // —— P5/P9：出牌导致炸弹物理作废 ——
@@ -453,7 +984,7 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     && breaksBombIntegrity(candidate, resolvedHand, levelRank, tableContext)
   ) {
     const isCatchWind = tableContext.leadMode === "catch-wind" && !tableContext.opponentActive;
-    const hasPlate = buildStrategicGroups(resolvedHand, levelRank).some(
+    const hasPlate = strategicGroupsCached(resolvedHand, levelRank, tableContext).some(
       (group) => group.play?.type === PLAY_TYPES.plane || group.label?.startsWith("钢板"),
     );
     violations.push({
@@ -466,19 +997,44 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     });
   }
 
-  // —— P9：有四炸及以上，拆整炸组三带二 ——
-  if (candidate.type === PLAY_TYPES.tripleWithPair && resolvedHand.length > 0) {
+  // —— P9：有四炸及以上，拆整炸组三带二/裸三张 ——
+  if (
+    (candidate.type === PLAY_TYPES.tripleWithPair || candidate.type === PLAY_TYPES.triple)
+    && resolvedHand.length > 0
+  ) {
     const tripleRank = candidate.mainRank;
     const physicalHeld = physicalRankCount(resolvedHand, tripleRank);
     const usedFromRank = (candidate.cards ?? []).filter((card) => card.rank === tripleRank).length;
     const tripleAnalysis = analyzeRankAvailability(resolvedHand, tripleRank, levelRank);
-    const breaksWholeBomb = (tripleAnalysis.effectiveBombCount >= 4 || physicalHeld >= 4)
+    const breaksWholeBomb = tripleAnalysis.wouldBreakBombForTriple
+      && usedFromRank >= 3;
+    const remainingPhysical = physicalHeld - usedFromRank;
+    // 四张同点但有一张锁在同花顺/钢板内（如 777+88 不碰同花顺里的第 4 张 7）不算拆整炸
+    const soleLockedInPremium = physicalHeld >= 4
       && usedFromRank >= 3
-      && physicalHeld - usedFromRank < 4;
+      && remainingPhysical === 1
+      && tripleAnalysis.effectiveBombCount < 4
+      && (tripleAnalysis.lockedEntries?.length ?? 0) > 0;
+    const breaksPhysicalFourBomb = physicalHeld >= 4
+      && usedFromRank >= 3
+      && !soleLockedInPremium
+      && remainingPhysical < 4;
+    const solePair = candidate.type === PLAY_TYPES.tripleWithPair
+      ? solePairForTripleRank(resolvedHand, levelRank, tripleRank)
+      : null;
+    const usesSoleCompanionPair = solePair != null
+      && (candidate.cards ?? []).filter((card) => card.rank === solePair).length >= 2
+      && (physicalHeld < 4 || resolvedHand.length <= 12);
     const catchWindTempo = tableContext.leadMode === "catch-wind"
       && isLeadTurn(tableContext)
-      && resolvedHand.length <= 15;
-    if (breaksWholeBomb && !catchWindTempo) {
+      && resolvedHand.length <= 15
+      && (physicalHeld < 4 || usesSoleCompanionPair);
+    const openingFourBombTripleProbe = isLeadTurn(tableContext)
+      && tableContext.leadMode === "fresh-open"
+      && candidate.type === PLAY_TYPES.triple
+      && physicalHeld >= 4
+      && usedFromRank === 3;
+    if ((breaksWholeBomb || breaksPhysicalFourBomb) && !catchWindTempo && !openingFourBombTripleProbe) {
       violations.push({
         code: "P9",
         summary: "有四炸及以上，不宜拆整炸组三带二",
@@ -545,7 +1101,9 @@ function pickMandatoryBombFallback(processed, tableContext, hand, levelRank) {
   );
   if (beaters.length === 0) return null;
 
-  const compliant = beaters.filter((item) => !candidateBlocksTop1(item));
+  const compliant = beaters.filter(
+    (item) => !isForbiddenBombRescueItem(item, hand, previousPlay, tableContext, levelRank),
+  );
   if (compliant.length === 0) return null;
   return [...compliant].sort((left, right) => {
     const sizeGap = bombSizeOf(left.candidate) - bombSizeOf(right.candidate);
@@ -584,6 +1142,9 @@ export function enforceDoctrineOnCandidates(scoredCandidates, context) {
   const doctrineViolations = [];
 
   const processed = scoredCandidates.map((item) => {
+    if (doctrinePastDeadline(context)) {
+      return { ...item, doctrineViolations: [] };
+    }
     const violations = detectDoctrineViolations(item.candidate, hand, levelRank, tableContext);
     if (violations.length === 0) {
       return { ...item, doctrineViolations: [] };
@@ -628,9 +1189,12 @@ export function enforceDoctrineOnCandidates(scoredCandidates, context) {
     }
   }
 
+  const fallbackCandidates = candidates.length > 0 ? candidates : reranked.slice(0, 1);
+  const fallbackBlocked = candidates.length > 0 ? blocked : reranked.slice(1);
+
   return {
-    candidates: candidates.length > 0 ? candidates : reranked,
-    blockedCandidates: blocked,
+    candidates: fallbackCandidates,
+    blockedCandidates: fallbackBlocked,
     doctrineViolations,
   };
 }
@@ -662,13 +1226,24 @@ export function detectAdviceTop1Violations(context) {
   let leadMode = isOpening ? "fresh-open" : "must-beat";
   if (isOpening && context.state && context.playerIndex != null) {
     leadMode = inferLeadMode(context.state, context.playerIndex);
-  } else if (isOpening && !previousPlay) {
-    leadMode = "catch-wind";
   }
 
-  const candidates = (context.currentAdvice?.choices ?? [])
+  const choiceCandidates = (context.currentAdvice?.choices ?? [])
     .map((c) => c.play ?? c.candidate)
     .filter(Boolean);
+
+  let candidates = choiceCandidates;
+  if (hand.length && previousPlay && previousPlay.type !== PLAY_TYPES.pass) {
+    const generated = generateBasicCandidates(hand, levelRank, previousPlay);
+    const seen = new Set();
+    candidates = [];
+    for (const item of [...choiceCandidates, ...generated]) {
+      const key = item.label ?? `${item.type}:${item.mainRank ?? ""}:${item.cards?.length ?? 0}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      candidates.push(item);
+    }
+  }
 
   const enrichedContext = {
     previousPlay,

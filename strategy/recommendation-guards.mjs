@@ -5,13 +5,35 @@ import { canBeat } from "../engine/compare-play.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import {
   analyzeMustBeatSingleContext,
+  analyzeMustBeatPairContext,
+  analyzeMustBeatTripleWithPairContext,
+  isForbiddenBombRescueItem,
+  isPressingRoutineNonBomb,
   shouldVetoBombOnlyPass,
   shouldVetoPassWithRegularBeater,
 } from "./principles.mjs";
-import { assertTop1DoctrineCompliance } from "./doctrine-enforce.mjs";
-import { analyzeRankAvailability } from "./scorers/structure.mjs";
+import { assertTop1DoctrineCompliance, candidateBlocksTop3 } from "./doctrine-enforce.mjs";
+import { isTeammate } from "./seat-utils.mjs";
+import { resolveLastActivePlayerIndex } from "./table-context.mjs";
+import { alignReasonsForPlay } from "./reason-align.mjs";
+import { hasOnlyAntiSinglePenaltyReasons, playContradictsReasons } from "./reason-consistency.mjs";
+import { analyzeRankAvailability, breaksBombIntegrity } from "./scorers/structure.mjs";
+import { breaksStraightFlushRunwayOnMustBeatCp, breaksStraightFlushRunwayOnMustBeatTwp } from "./sf-runway-guard.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
+
+function isMustBeatRoutineSfRunwayBreak(candidate, hand, levelRank, tableContext) {
+  return breaksStraightFlushRunwayOnMustBeatTwp(candidate, hand, levelRank, tableContext) != null
+    || breaksStraightFlushRunwayOnMustBeatCp(candidate, hand, levelRank, tableContext) != null;
+}
+
+/** 须压时该推荐是否合法（过牌始终合法） */
+export function isMustBeatLegalItem(item, previousPlay) {
+  if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) return true;
+  const candidate = item?.candidate;
+  if (!candidate || candidate.type === PLAY_TYPES.pass) return true;
+  return canBeat(candidate, previousPlay);
+}
 
 /** 开局三带二拆钢板：沉底，与 getTurnAdvice / recommendPlay 共用 */
 function breaksSteelPlateTripleOnOpening(item, hand, levelRank, ctx) {
@@ -42,14 +64,29 @@ export function allowMustBeatPremiumLooseSingle(candidate, hand, levelRank, prev
   return ctx.mustBeatPremiumLooseSingle?.(candidate) ?? false;
 }
 
+function partnerOwnsActivePlay(tableContext) {
+  if (tableContext.partnerOwnsTrick) return true;
+  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex;
+  const lastActive = resolveLastActivePlayerIndex(tableContext);
+  if (playerIndex == null || lastActive == null) return false;
+  const previousPlay = tableContext.previousPlay
+    ?? tableContext.state?.lastActivePlay
+    ?? null;
+  if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) return false;
+  return isTeammate(playerIndex, lastActive);
+}
+
 export function rescueBombOnlyTop1Recommendation(recommendation, pool, hand, tableContext) {
   const previousPlay = tableContext.previousPlay ?? null;
   const ctx = { ...tableContext, hand };
   if (recommendation?.candidate?.type !== PLAY_TYPES.pass) return recommendation;
-  if (!shouldVetoBombOnlyPass(ctx, hand, previousPlay) || !previousPlay) return recommendation;
+  if (partnerOwnsActivePlay(ctx) || !previousPlay) return recommendation;
+  if (!shouldVetoBombOnlyPass(ctx, hand, previousPlay)) return recommendation;
 
   const beaters = pool.filter(
-    (item) => BOMB_TYPES.has(item.candidate?.type) && canBeat(item.candidate, previousPlay),
+    (item) => BOMB_TYPES.has(item.candidate?.type)
+      && canBeat(item.candidate, previousPlay)
+      && !isForbiddenBombRescueItem(item, hand, previousPlay, ctx),
   );
   if (beaters.length === 0) return recommendation;
 
@@ -76,6 +113,58 @@ export function rescueRegularBeatTop1Recommendation(recommendation, pool, hand, 
     return [...beaters].sort((left, right) => left.score - right.score)[0];
   }
 
+  if (previousPlay?.type === PLAY_TYPES.pair) {
+    const pairCtx = analyzeMustBeatPairContext(hand, levelRank, previousPlay, tableContext);
+    const minPool = pairCtx.structureSafeDedicated?.length > 0
+      ? pairCtx.structureSafeDedicated
+      : pairCtx.structureSafeWholePairBeaters?.length > 0
+        ? pairCtx.structureSafeWholePairBeaters
+        : pairCtx.dedicatedPairBeaters.length > 0
+          ? pairCtx.dedicatedPairBeaters
+          : pairCtx.wholePairBeaters;
+    const minPair = minPool.reduce(
+      (best, item) => (!best || item.power < best.power ? item : best),
+      null,
+    );
+    if (minPair) {
+      const scored = pool.find(
+        (item) => item.candidate?.type === PLAY_TYPES.pair
+          && item.candidate?.mainRank === minPair.mainRank
+          && item.candidate?.power === minPair.power,
+      );
+      if (scored) return scored;
+      return {
+        candidate: minPair,
+        score: recommendation.score - 2000,
+        reasons: ["须压对子，有整对够压宜先出整对"],
+      };
+    }
+  }
+
+  if (previousPlay?.type === PLAY_TYPES.tripleWithPair) {
+    const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext);
+    const actionableSafe = twpCtx.structureSafeBeaters.filter(
+      (item) => !breaksBombIntegrity(item, hand, levelRank, tableContext),
+    );
+    const minTwp = actionableSafe.reduce(
+      (best, item) => (!best || item.power < best.power ? item : best),
+      null,
+    );
+    if (minTwp) {
+      const scored = pool.find(
+        (item) => item.candidate?.type === PLAY_TYPES.tripleWithPair
+          && item.candidate?.mainRank === minTwp.mainRank
+          && item.candidate?.power === minTwp.power,
+      );
+      if (scored) return scored;
+      return {
+        candidate: minTwp,
+        score: recommendation.score - 2000,
+        reasons: ["须压三带二，有不拆同花顺跑道三带二宜先出"],
+      };
+    }
+  }
+
   const ctx = analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tableContext);
   const looseRank = ctx.minLooseRank;
   if (!looseRank) return recommendation;
@@ -92,19 +181,33 @@ export function rescueRegularBeatTop1Recommendation(recommendation, pool, hand, 
   };
 }
 
-function recommendationContradictsReasons(item) {
+function recommendationContradictsReasons(item, tableContext = {}) {
   const play = item?.candidate;
-  const reasons = item?.reasons ?? [];
   if (!play) return true;
-  if (play.type === PLAY_TYPES.pass) {
-    return reasons.some((r) => /不应.*过牌|不能轻易放行|不宜过牌/.test(r));
+  if (play.type === PLAY_TYPES.single && hasOnlyAntiSinglePenaltyReasons(item?.reasons)) {
+    return true;
   }
-  if (BOMB_TYPES.has(play.type)) {
-    const bombDuty = reasons.some((r) => /满张炸弹控牌权|压顺子需炸弹|只有炸弹能压，应抢牌权|应满张出炸控权/.test(r));
-    if (bombDuty) return false;
-    return reasons.some((r) => /不必动炸|不宜动炸|已有普通牌能压住/.test(r));
-  }
-  return false;
+  const previousPlay = tableContext.previousPlay ?? null;
+  if (!isMustBeatLegalItem(item, previousPlay)) return true;
+  const aligned = alignReasonsForPlay(item?.reasons, play, { previousPlay });
+  return playContradictsReasons(play, aligned, { previousPlay });
+}
+
+/** 备选池/推荐2～3 展示：与 Top1 同等理由一致性过滤 */
+export function isDisplayablePoolItem(item, tableContext = {}) {
+  const previousPlay = tableContext.previousPlay ?? null;
+  if (!isMustBeatLegalItem(item, previousPlay)) return false;
+  if (candidateBlocksTop3(item)) return false;
+  return !recommendationContradictsReasons(item, tableContext);
+}
+
+function finalizeAlignedRecommendation(item, pool, hand, tableContext, levelRank) {
+  const finalized = finalizeTopRecommendation(item, pool, hand, tableContext, levelRank);
+  if (!finalized) return finalized;
+  finalized.reasons = alignReasonsForPlay(finalized.reasons, finalized.candidate, {
+    previousPlay: tableContext.previousPlay ?? null,
+  });
+  return finalized;
 }
 
 /** 须压时 Top1 必须能压过上家（过牌除外） */
@@ -131,11 +234,26 @@ export function finalizeTopRecommendation(top, pool, hand, tableContext, levelRa
 
 /** 从评分池选取教纲合规且须压合法的 Top1 */
 export function pickCompliantTopRecommendation(pool, hand, tableContext, levelRank) {
+  const previousPlay = tableContext.previousPlay ?? null;
   const sorted = [...pool].sort((left, right) => left.score - right.score);
   for (const item of sorted) {
-    if (item.doctrineBlockedTop1 || recommendationContradictsReasons(item)) continue;
+    if (item.doctrineBlockedTop1 || recommendationContradictsReasons(item, tableContext)) continue;
+    if (isMustBeatRoutineSfRunwayBreak(item.candidate, hand, levelRank, tableContext)) continue;
+    if (
+      tableContext.hasActionableRegularWinner
+      && BOMB_TYPES.has(item.candidate?.type)
+      && previousPlay
+      && !tableContext.isFinishingPlay
+      && (
+        previousPlay.type === PLAY_TYPES.single
+        || isPressingRoutineNonBomb(previousPlay, tableContext)
+      )
+    ) {
+      continue;
+    }
     try {
-      const finalized = finalizeTopRecommendation(item, pool, hand, tableContext, levelRank);
+      const finalized = finalizeAlignedRecommendation(item, pool, hand, tableContext, levelRank);
+      if (recommendationContradictsReasons(finalized, tableContext)) continue;
       assertTop1DoctrineCompliance(finalized, hand, levelRank, tableContext);
       return finalized;
     } catch {
@@ -143,37 +261,47 @@ export function pickCompliantTopRecommendation(pool, hand, tableContext, levelRa
     }
   }
   const passItem = sorted.find((item) => item.candidate?.type === PLAY_TYPES.pass);
-  if (passItem) {
-    const rescuedPass = finalizeTopRecommendation(passItem, pool, hand, tableContext, levelRank);
+  const mustLead = tableContext.isOpening && tableContext.leadMode !== "must-beat";
+  if (passItem && !mustLead) {
+    const rescuedPass = finalizeAlignedRecommendation(passItem, pool, hand, tableContext, levelRank);
     if (rescuedPass?.candidate?.type !== PLAY_TYPES.pass) return rescuedPass;
     if (!shouldVetoPassWithRegularBeater(tableContext, hand, tableContext.previousPlay ?? null, levelRank)
-      && !shouldVetoBombOnlyPass({ ...tableContext, hand }, hand, tableContext.previousPlay ?? null)) {
+      && !shouldVetoBombOnlyPass({ ...tableContext, hand }, hand, tableContext.previousPlay ?? null)
+      && !recommendationContradictsReasons(rescuedPass, tableContext)) {
       return rescuedPass;
     }
   }
 
   const fallback = sorted.find(
-    (item) => !item.doctrineBlockedTop1 && !recommendationContradictsReasons(item),
+    (item) => !item.doctrineBlockedTop1
+      && isMustBeatLegalItem(item, previousPlay)
+      && !isMustBeatRoutineSfRunwayBreak(item.candidate, hand, levelRank, tableContext)
+      && !recommendationContradictsReasons(item, tableContext),
   );
 
-  const previousPlay = tableContext.previousPlay ?? null;
   const mustBeat = previousPlay && previousPlay.type !== PLAY_TYPES.pass;
   if (!fallback && mustBeat) {
     const emergencyBeater = sorted.find(
       (item) => item.candidate?.type !== PLAY_TYPES.pass
         && canBeat(item.candidate, previousPlay)
-        && !recommendationContradictsReasons(item),
+        && !item.doctrineBlockedTop1
+        && !isMustBeatRoutineSfRunwayBreak(item.candidate, hand, levelRank, tableContext)
+        && !isForbiddenBombRescueItem(item, hand, previousPlay, tableContext, levelRank)
+        && !recommendationContradictsReasons(item, tableContext),
     );
     if (emergencyBeater) {
-      return finalizeTopRecommendation(emergencyBeater, pool, hand, tableContext, levelRank);
+      return finalizeAlignedRecommendation(emergencyBeater, pool, hand, tableContext, levelRank);
     }
   }
 
-  if (!fallback && passItem) {
-    const reservedPass = finalizeTopRecommendation(passItem, pool, hand, tableContext, levelRank);
-    if (reservedPass?.candidate?.type === PLAY_TYPES.pass) return reservedPass;
+  if (!fallback && passItem && !mustLead) {
+    const reservedPass = finalizeAlignedRecommendation(passItem, pool, hand, tableContext, levelRank);
+    if (reservedPass?.candidate?.type === PLAY_TYPES.pass
+      && !recommendationContradictsReasons(reservedPass, tableContext)) {
+      return reservedPass;
+    }
   }
 
   if (!fallback) return null;
-  return finalizeTopRecommendation(fallback, pool, hand, tableContext, levelRank);
+  return finalizeAlignedRecommendation(fallback, pool, hand, tableContext, levelRank);
 }

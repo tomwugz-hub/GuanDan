@@ -5,6 +5,8 @@ import { PLAY_TYPES } from "../engine/play-types.mjs";
 export const STRAIGHT_FLUSH_CHAIN_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
 
 const PLANE_CHAIN_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+const MAX_SF_ENUM_CANDIDATES = 48;
+const MAX_WILD_PICK_COMBOS = 12;
 
 function groupByRank(cards) {
   const groups = new Map();
@@ -15,17 +17,26 @@ function groupByRank(cards) {
   return groups;
 }
 
-function pickWildCombinations(wildCards, count) {
+function pickWildCombinations(wildCards, count, limit = MAX_WILD_PICK_COMBOS) {
   if (count <= 0) return [[]];
   if (count > wildCards.length) return [];
-  if (count === 1) return wildCards.map((card) => [card]);
-  const combos = [];
-  for (let index = 0; index < wildCards.length; index += 1) {
-    for (const tail of pickWildCombinations(wildCards.slice(index + 1), count - 1)) {
-      combos.push([wildCards[index], ...tail]);
+  const result = [];
+  const n = wildCards.length;
+  const idx = new Array(count);
+  const walk = (start, depth) => {
+    if (result.length >= limit) return;
+    if (depth === count) {
+      result.push(idx.map((i) => wildCards[i]));
+      return;
     }
-  }
-  return combos;
+    for (let i = start; i <= n - (count - depth); i += 1) {
+      idx[depth] = i;
+      walk(i + 1, depth + 1);
+      if (result.length >= limit) return;
+    }
+  };
+  walk(0, 0);
+  return result;
 }
 
 function planeWindows(length = 2) {
@@ -82,6 +93,7 @@ export function enumerateStraightFlushCandidates(hand, levelRank) {
   const wildCards = hand.filter((card) => isWildCard(card, levelRank));
   const naturals = hand.filter((card) => !isJoker(card) && !isWildCard(card, levelRank));
   const candidates = [];
+  let classifyBudget = 400;
 
   const bySuit = new Map();
   for (const card of naturals) {
@@ -89,6 +101,7 @@ export function enumerateStraightFlushCandidates(hand, levelRank) {
     bySuit.get(card.suit).push(card);
   }
 
+  outer:
   for (const [suit, suitedCards] of bySuit.entries()) {
     const byRank = new Map();
     for (const card of suitedCards) {
@@ -97,6 +110,7 @@ export function enumerateStraightFlushCandidates(hand, levelRank) {
     }
 
     for (let start = 0; start + 5 <= STRAIGHT_FLUSH_CHAIN_RANKS.length; start += 1) {
+      if (candidates.length >= MAX_SF_ENUM_CANDIDATES) break outer;
       const ranks = STRAIGHT_FLUSH_CHAIN_RANKS.slice(start, start + 5);
       const picked = [];
       let missingCount = 0;
@@ -109,6 +123,9 @@ export function enumerateStraightFlushCandidates(hand, levelRank) {
       if (picked.length + missingCount !== 5) continue;
 
       for (const wildPick of pickWildCombinations(wildCards, missingCount)) {
+        if (candidates.length >= MAX_SF_ENUM_CANDIDATES) break outer;
+        classifyBudget -= 1;
+        if (classifyBudget <= 0) break outer;
         const combo = [...picked, ...wildPick];
         const play = classifyPlay(combo, levelRank);
         if (play.type !== PLAY_TYPES.straightFlush) continue;

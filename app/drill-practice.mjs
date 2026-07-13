@@ -20,10 +20,25 @@ export const DRILL_TAGS = Object.freeze({
   WILD_USAGE: "逢人配用法",
   BOMB_TIMING: "炸弹时机",
   PASS_RELEASE: "过牌放行",
+  MUST_BEAT_KEEP_SF: "须压保同花顺",
 });
+
+/** 始终置顶展示的专项（含教学预设局面） */
+export const FEATURED_DRILL_PRESETS = Object.freeze([
+  {
+    tag: DRILL_TAGS.MUST_BEAT_KEEP_SF,
+    count: 0,
+    lastSeen: null,
+    sampleTurn: null,
+    summary: "须压对手三带二时，不宜拆同花顺跑道去凑压牌，宜过牌保留结构。",
+    preset: true,
+    featured: true,
+  },
+]);
 
 /** 无历史时的默认推荐专项 */
 export const DEFAULT_DRILL_PRESETS = Object.freeze([
+  ...FEATURED_DRILL_PRESETS,
   {
     tag: DRILL_TAGS.BOMB_TIMING,
     count: 0,
@@ -87,6 +102,12 @@ const DRILL_DETAILS = Object.freeze({
     bannerHint: "有普通过牌能压时别轻易放行，该抢权就抢。",
     adviceTip: "这手与过牌放行相关，确认过牌是否真比压牌更划算。",
     patterns: [/过牌|不压|放行|不应.*过|轻易放行|抢回牌权|不能轻易/],
+  },
+  [DRILL_TAGS.MUST_BEAT_KEEP_SF]: {
+    summary: "须压对手三带二时，若压牌会拆同花顺/跑道，宜过牌保留结构。",
+    bannerHint: "有同花顺跑道时，别为压三带二拆跑道组牌。",
+    adviceTip: "这手练须压保同花顺：看教练是否推过牌而非拆跑道三带二。",
+    patterns: [/同花顺|跑道|不宜拆|保留同花顺|过牌保留/],
   },
 });
 
@@ -174,14 +195,33 @@ export function analyzeWeaknesses({ currentTimeline = null, limit = 5 } = {}) {
   const sorted = [...tagMap.values()]
     .sort((left, right) => right.count - left.count || String(right.lastSeen).localeCompare(String(left.lastSeen)));
 
+  const featured = FEATURED_DRILL_PRESETS.map((item) => ({
+    ...item,
+    summary: item.summary ?? getDrillSummary(item.tag),
+  }));
+  const merged = [...featured];
+  const seen = new Set(featured.map((item) => item.tag));
+  const appendFrom = (items) => {
+    for (const item of items) {
+      if (seen.has(item.tag)) continue;
+      seen.add(item.tag);
+      merged.push({
+        ...item,
+        summary: item.summary ?? getDrillSummary(item.tag),
+      });
+    }
+  };
+
   if (sorted.length === 0) {
-    return DEFAULT_DRILL_PRESETS.slice(0, 3).map((item) => ({ ...item }));
+    appendFrom(DEFAULT_DRILL_PRESETS);
+  } else {
+    appendFrom(sorted.map((item) => ({
+      ...item,
+      summary: getDrillSummary(item.tag),
+    })));
   }
 
-  return sorted.slice(0, limit).map((item) => ({
-    ...item,
-    summary: getDrillSummary(item.tag),
-  }));
+  return merged.slice(0, limit);
 }
 
 /** 推荐理由是否命中当前专项标签 */
@@ -234,8 +274,6 @@ export function buildDrillPracticeGameMeta(baseMeta, tag, scenario = null) {
     drillScenarioId: resolved?.id ?? null,
     drillScenarioTitle: resolved?.title ?? null,
     coachAdviceTimeline: [],
-    reportTenReminded: false,
-    reportOneReminded: false,
     keyPauseFired: [],
     aiChatTimeline: baseMeta.aiChatTimeline ?? [],
     gameReviewSubmitted: false,
@@ -272,12 +310,12 @@ export function isFreshDrillGameState(gameState, humanPlayerIndex = 0) {
 /** 专项练习列表 HTML（供进度面板渲染） */
 export function renderDrillPracticeListHtml(weaknesses = []) {
   if (!weaknesses.length) {
-    return "<p class=\"muted\">保存复盘后，系统会从「教练更对」差异中提取弱项。</p>";
+    return "<p class=\"muted\">暂无专项；保存复盘后会从差异中提取更多弱项。</p>";
   }
 
   let html = "<ul class=\"drill-practice-list\">";
   for (const item of weaknesses) {
-    const countLabel = item.preset ? "推荐" : `${item.count} 次`;
+    const countLabel = item.featured ? "教学" : item.preset ? "推荐" : `${item.count} 次`;
     const scenario = getDrillScenarioForTag(item.tag);
     const scenarioNote = scenario
       ? `<p class="drill-practice-scenario muted">预设：${escapeDrillHtml(scenario.title)}</p>`
@@ -289,7 +327,7 @@ export function renderDrillPracticeListHtml(weaknesses = []) {
       </div>
       <p class="drill-practice-summary">${escapeDrillHtml(item.summary)}</p>
       ${scenarioNote}
-      <button class="btn drill-practice-btn" type="button" data-drill-tag="${escapeDrillHtml(item.tag)}">练这个</button>
+      <button class="btn drill-practice-btn" type="button" data-drill-tag="${escapeDrillHtml(item.tag)}">${item.featured ? "立即练这局" : "练这个"}</button>
     </li>`;
   }
   html += "</ul>";

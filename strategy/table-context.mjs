@@ -1,5 +1,38 @@
 import { PLAY_TYPES } from "../engine/play-types.mjs";
+import { opponentsPendingAfterPlayer, effectivePreviousPlay, resolveTrickLeaderIndex, partnerLeadWasSuperseded } from "../engine/game-state.mjs";
+import { compareRanks } from "../engine/rank-order.mjs";
 import { inferLeadMode } from "./lead-mode.mjs";
+import { buildCardMemory, estimateCardMemory } from "./card-memory.mjs";
+import { getPartnerInference } from "./partner-inference.mjs";
+import { getRouteContext } from "./route-memory.mjs";
+import {
+  gamePhase,
+  partnerHandCount,
+  partnerOpeningRoute,
+  minOpponentHandCount,
+} from "./context-helpers.mjs";
+import {
+  isTeammate,
+  teammateIndex,
+  upperPlayerIndex,
+  lowerPlayerIndex,
+  isUpperPlayer,
+  isLowerPlayer,
+} from "./seat-utils.mjs";
+
+export {
+  gamePhase,
+  partnerHandCount,
+  partnerOpeningRoute,
+  minOpponentHandCount,
+  estimateCardMemory,
+  isTeammate,
+  teammateIndex,
+  upperPlayerIndex,
+  lowerPlayerIndex,
+  isUpperPlayer,
+  isLowerPlayer,
+};
 
 /** 当前墩内、最近一次「三家过」之后的出牌序列 */
 function currentRoundActions(state) {
@@ -42,24 +75,55 @@ export function canFinishOnThisTurn(tableContext) {
   return tableContext.hasAnyWinner === true;
 }
 
-/** P10 让牌：队友为当前墩最后占牌者且仍有效（残局能走完时例外） */
+const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
+
+/**
+ * 队友占牌是否可能被下家对手用低价同型抢走（须最小散单/小对防抢权）。
+ * 王对/炸弹/同花顺及 Q 以上对子、J 以上单张：对手无法用低价抢权，不必防守。
+ */
+export function partnerLeadNeedsGuard(tableContext) {
+  const play = tableContext.previousPlay ?? tableContext.state?.lastActivePlay;
+  const levelRank = tableContext.state?.levelRank ?? tableContext.levelRank ?? "2";
+  if (!play || play.type === PLAY_TYPES.pass) return false;
+  if (BOMB_TYPES.has(play.type)) return false;
+  if (play.type === PLAY_TYPES.pair && (play.mainRank === "BJ" || play.mainRank === "SJ")) return false;
+  if (play.type === PLAY_TYPES.single) {
+    return compareRanks(play.mainRank, "J", levelRank) < 0;
+  }
+  if (play.type === PLAY_TYPES.pair) {
+    return compareRanks(play.mainRank, "Q", levelRank) < 0;
+  }
+  return false;
+}
+
+/** P10 让牌：队友占牌且本墩对手均已表态（或接风在即）时再让；下家对手未表态时须防抢权 */
 export function shouldYieldPassToPartner(tableContext) {
   if (canFinishOnThisTurn(tableContext)) return false;
-  return !!tableContext.partnerOwnsTrick && !tableContext.isFinishingPlay;
+  if (!tableContext.partnerOwnsTrick || tableContext.isFinishingPlay) return false;
+  const state = tableContext.state;
+  const selfIndex = tableContext.playerIndex ?? state?.currentPlayerIndex ?? 0;
+  const pending = state ? opponentsPendingAfterPlayer(state, selfIndex) : [];
+  if (pending.length > 0 && partnerLeadNeedsGuard(tableContext)) return false;
+  return true;
 }
 
-export function teammateIndex(playerIndex) {
-  return (playerIndex + 2) % 4;
-}
-
-export function isTeammate(leftIndex, rightIndex) {
-  if (leftIndex == null || rightIndex == null) return false;
-  return teammateIndex(leftIndex) === rightIndex;
+/** 占牌者座位：优先 playHistory，避免 lastActivePlayerIndex 滞后误判 P10 队友占牌 */
+export function resolveLastActivePlayerIndex(tableContext) {
+  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? null;
+  if (tableContext.state) {
+    const fromHistory = resolveTrickLeaderIndex(tableContext.state, playerIndex);
+    if (fromHistory != null) return fromHistory;
+  }
+  return tableContext.lastActivePlayerIndex ?? tableContext.state?.lastActivePlayerIndex ?? null;
 }
 
 export function isOpponentActive(tableContext) {
-  const { playerIndex, lastActivePlayerIndex, previousPlay } = tableContext;
+  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex;
+  const lastActivePlayerIndex = resolveLastActivePlayerIndex(tableContext);
+  const previousPlay = tableContext.previousPlay
+    ?? (tableContext.state ? effectivePreviousPlay(tableContext.state) : null);
   if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) return false;
+  if (playerIndex == null || lastActivePlayerIndex == null) return false;
   return !isTeammate(playerIndex, lastActivePlayerIndex);
 }
 
@@ -85,43 +149,39 @@ export function opponentDangerLevel(tableContext) {
   return danger;
 }
 
-/** 队友剩余张数（未出完） */
-export function partnerHandCount(tableContext) {
+/** 尚未出完的对手中是否有人只剩 1 张（报单） */
+export function opponentsWithOneCard(tableContext) {
   const state = tableContext.state;
-  if (!state) return 27;
+  if (!state) return [];
   const selfIndex = tableContext.playerIndex ?? state.currentPlayerIndex ?? 0;
-  const partner = teammateIndex(selfIndex);
-  const player = state.players.find((item) => item.seatIndex === partner);
-  if (player?.finishedOrder) return 0;
-  return player?.hand?.length ?? 27;
-}
-
-/** 尚未出完的对手中最少余牌数 */
-export function minOpponentHandCount(tableContext) {
-  const state = tableContext.state;
-  if (!state) return 99;
-  const selfIndex = tableContext.playerIndex ?? state.currentPlayerIndex ?? 0;
-  let min = Infinity;
-  for (const player of state.players) {
-    if (player.finishedOrder || player.seatIndex === selfIndex) continue;
-    if (isTeammate(selfIndex, player.seatIndex)) continue;
-    min = Math.min(min, player.hand.length);
-  }
-  return min === Infinity ? 99 : min;
+  return state.players.filter(
+    (player) => !player.finishedOrder
+      && !isTeammate(selfIndex, player.seatIndex)
+      && player.hand.length === 1,
+  );
 }
 
 export function enrichScoringContext(tableContext, candidates, hand, levelRank) {
-  const previousPlay = tableContext.previousPlay ?? null;
+  const state = tableContext.state;
+  const playerIndex = tableContext.playerIndex ?? state?.currentPlayerIndex;
+  const resolvedLastActive = resolveLastActivePlayerIndex(tableContext);
+  const previousPlay = state
+    ? (effectivePreviousPlay(state) ?? (tableContext.previousPlay ?? null))
+    : (tableContext.previousPlay ?? null);
   const isOpening = !previousPlay || previousPlay.type === PLAY_TYPES.pass;
-  const partnerOwnsTrick = !isOpening && isTeammate(
-    tableContext.playerIndex,
-    tableContext.lastActivePlayerIndex,
+  const supersededPartner = Boolean(
+    state && playerIndex != null && previousPlay
+    && partnerLeadWasSuperseded(state, playerIndex, previousPlay),
   );
+  const partnerOwnsTrick = !isOpening
+    && !supersededPartner
+    && playerIndex != null
+    && resolvedLastActive != null
+    && isTeammate(playerIndex, resolvedLastActive);
   const beaters = candidates.filter((candidate) => candidate.type !== PLAY_TYPES.pass);
   const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
   const regularBeaters = beaters.filter((candidate) => !BOMB_TYPES.has(candidate.type));
 
-  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex;
   const leadMode = isOpening && tableContext.leadMode != null
     ? tableContext.leadMode
     : isOpening && tableContext.state && playerIndex != null
@@ -132,19 +192,35 @@ export function enrichScoringContext(tableContext, candidates, hand, levelRank) 
     && playerIndex != null
     && partnerPlayedInCurrentRound(tableContext.state, playerIndex);
 
+  const selfIndex = playerIndex ?? state?.currentPlayerIndex ?? 0;
+  const cardMemory = tableContext.cardMemory
+    ?? (state ? buildCardMemory(state, selfIndex, hand) : estimateCardMemory(tableContext));
+  const routeMemory = tableContext.routeMemory
+    ?? (state ? getRouteContext(state, selfIndex) : null);
+  const partnerInference = tableContext.partnerInference
+    ?? (state ? getPartnerInference(state, selfIndex) : null);
+  const phase = tableContext.gamePhase ?? gamePhase({ ...tableContext, hand });
+
   return {
     ...tableContext,
     hand,
+    playerIndex,
+    lastActivePlayerIndex: resolvedLastActive,
     levelRank: tableContext.levelRank ?? levelRank,
     isOpening,
     leadMode,
     partnerOwnsTrick,
     partnerAttemptedCurrentRound,
-    opponentActive: isOpponentActive({ ...tableContext, previousPlay }),
+    opponentActive: supersededPartner
+      || isOpponentActive({ ...tableContext, playerIndex, lastActivePlayerIndex: resolvedLastActive, previousPlay }),
     hasAnyWinner: beaters.length > 0,
     hasRegularWinner: regularBeaters.length > 0,
     danger: opponentDangerLevel(tableContext),
     bombInventory: tableContext.bombInventory ?? evaluateBombInventory(hand, levelRank),
+    cardMemory,
+    routeMemory,
+    partnerInference,
+    gamePhase: phase,
   };
 }
 

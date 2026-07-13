@@ -6,25 +6,71 @@
  * 对手施压/控场见 P4/P7 与 opponent-pressure；接风节奏见 tempo-lead.mjs。
  */
 import { cardId, isJoker, isWildCard } from "../engine/card.mjs";
-import { robotMustFollowAdjustment, scoreRobotDoctrine } from "./robot-doctrine.mjs";
+import { robotMustFollowAdjustment, opponentPersonaAdjustment, scoreRobotDoctrine } from "./robot-doctrine.mjs";
 import { classifyPlay } from "../engine/classify-play.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
+import { opponentsPendingAfterPlayer } from "../engine/game-state.mjs";
+import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { compareRanks, isControlRank, rankPower } from "../engine/rank-order.mjs";
-import { analyzeRankAvailability, breaksStrategicStraightFlush, structureAwareBombs } from "./scorers/structure.mjs";
+import { analyzeRankAvailability, breaksStrategicStraightFlush, breaksStrategicPremiumForRoutineBeat, breaksStrategicPremiumForTripleWithPair, breaksStrategicPremiumForConsecutivePairs, breaksStrategicPremiumForStraight, breaksStrategicPremiumForTriple, breaksStrategicPremiumForPair, isStructureBreakingPairBeat, structureAwareBombs, findSafeKickerPairRanksForTriple } from "./scorers/structure.mjs";
 import {
   buildStrategicGroups,
   handHasOverlappingLowStraightChoice,
   isHighLowStraightLabel,
   isWrapStraightLabel,
+  resolveStrategicGroupPlay,
   STRAIGHT_HIGH_OVER_WRAP_REASON,
 } from "./strategic-groups.mjs";
 import {
+  isCatchWindPremiumReduction,
+  playerJustWonTrickWithBomb,
+  playerJustWonTrickWithGroupPlay,
+  CATCH_WIND_RUNWAY_HAND_MAX,
+} from "./lead-mode.mjs";
+import { isLeadTurnSfRunwayBreak, leadSfRunwayPrinciplesPenalty, mustBeatCpSfRunwayPrinciplesPenalty, mustBeatTwpSfRunwayPrinciplesPenalty } from "./sf-runway-guard.mjs";
+import {
+  enrichScoringContext,
   isTeammate,
   minOpponentHandCount,
+  opponentDangerLevel,
+  opponentsWithOneCard,
   partnerHandCount,
   shouldYieldPassToPartner,
 } from "./table-context.mjs";
+
+/** 同一手牌评分周期内复用理牌分组，避免 buildStrategicGroups 在热路径被反复调用 */
+function strategicGroupsFor(hand, levelRank, tableContext = null) {
+  if (!hand?.length) return [];
+  const preferred = tableContext?.preferredGroups;
+  if (preferred?.length) {
+    return preferred;
+  }
+  if (tableContext) {
+    const cache = tableContext._strategicGroupsCache;
+    if (cache?.hand === hand && cache.levelRank === levelRank) {
+      return cache.groups;
+    }
+    const groups = buildStrategicGroups(hand, levelRank);
+    tableContext._strategicGroupsCache = { hand, levelRank, groups };
+    return groups;
+  }
+  return buildStrategicGroups(hand, levelRank);
+}
+
+function rankCountInGroupsStraights(rank, groups) {
+  if (!rank || !groups?.length) return 0;
+  let count = 0;
+  for (const group of groups) {
+    const type = group.play?.type;
+    if (type !== PLAY_TYPES.straight && type !== PLAY_TYPES.straightFlush) continue;
+    for (const card of group.cards ?? []) {
+      if (card.rank === rank) count += 1;
+    }
+  }
+  return count;
+}
+
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
 function cardKeyForPremium(card) {
@@ -39,12 +85,117 @@ export function breaksPremiumStraightOrJokerGroup(candidate, preferredGroups, le
     const cards = group.cards ?? group;
     const play = group.play ?? classifyPlay(cards, levelRank);
     if (![PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb].includes(play.type)) continue;
+    if (
+      play.type === PLAY_TYPES.straightFlush
+      && cards.some((card) => isWildCard(card, levelRank))
+    ) continue;
     const groupKeys = cards.map(cardKeyForPremium);
     const used = groupKeys.filter((key) => keys.has(key)).length;
     if (used > 0 && used < groupKeys.length) return true;
     if (used === groupKeys.length && candidate.cards.length !== groupKeys.length) return true;
   }
   return false;
+}
+
+const PROTECTED_STRATEGIC_GROUP_TYPES = new Set([
+  PLAY_TYPES.straightFlush,
+  PLAY_TYPES.jokerBomb,
+  PLAY_TYPES.bomb,
+  PLAY_TYPES.consecutivePairs,
+  PLAY_TYPES.plane,
+  PLAY_TYPES.straight,
+  PLAY_TYPES.triple,
+]);
+
+function resolveGroupsForStructureGuard(hand, levelRank, preferredGroups) {
+  if (preferredGroups?.length) return preferredGroups;
+  return hand?.length ? buildStrategicGroups(hand, levelRank) : [];
+}
+
+/** 出牌是否部分占用 UI/战略分组（连对、钢板、顺子、炸弹、三张、对子等） */
+export function breaksPreferredStrategicGroup(candidate, preferredGroups, levelRank, hand = null) {
+  if (!candidate || candidate.type === PLAY_TYPES.pass) return false;
+  if (!preferredGroups?.length) {
+    return breaksPremiumStraightOrJokerGroup(candidate, preferredGroups, levelRank);
+  }
+  const groups = preferredGroups;
+  if (breaksPremiumStraightOrJokerGroup(candidate, groups, levelRank)) return true;
+  const keys = new Set((candidate.cards ?? []).map(cardKeyForPremium));
+  for (const group of groups) {
+    const cards = group.cards ?? group;
+    const play = resolveStrategicGroupPlay(group, levelRank);
+    const groupKeys = cards.map(cardKeyForPremium);
+    const used = groupKeys.filter((key) => keys.has(key)).length;
+    if (used === 0) continue;
+    if (PROTECTED_STRATEGIC_GROUP_TYPES.has(play.type)) {
+      if (used < groupKeys.length) return true;
+      if (candidate.cards.length !== groupKeys.length) return true;
+      continue;
+    }
+    if (
+      play.type === PLAY_TYPES.pair
+      && candidate.type === PLAY_TYPES.single
+      && candidate.mainRank === play.mainRank
+      && used > 0
+      && used < groupKeys.length
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+const EMERGENCY_LEAD_TYPE_PRIORITY = [
+  PLAY_TYPES.consecutivePairs,
+  PLAY_TYPES.tripleWithPair,
+  PLAY_TYPES.plane,
+  PLAY_TYPES.straight,
+  PLAY_TYPES.pair,
+  PLAY_TYPES.single,
+];
+
+/** 应急/超时领出：优先成组减手，不散单拆连对/钢板/顺子/炸弹 */
+export function pickStructureSafeEmergencyCandidate(hand, levelRank, candidates, preferredGroups, tableContext = {}) {
+  const groups = resolveGroupsForStructureGuard(hand, levelRank, preferredGroups);
+  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0;
+  const justWonWithBomb = playerJustWonTrickWithBomb(tableContext.state, playerIndex);
+  const endgameAfterBombLead = justWonWithBomb && hand.length <= CATCH_WIND_RUNWAY_HAND_MAX;
+  const active = (candidates ?? []).filter(
+    (item) => {
+      if (item.type === PLAY_TYPES.pass) return false;
+      if (isLeadTurnSfRunwayBreak(item, hand, levelRank, tableContext)) return false;
+      if (endgameAfterBombLead && item.type === PLAY_TYPES.straight) return true;
+      return !breaksPreferredStrategicGroup(item, groups, levelRank, hand);
+    },
+  );
+  const typePriority = endgameAfterBombLead
+    ? [
+      PLAY_TYPES.straight,
+      PLAY_TYPES.tripleWithPair,
+      PLAY_TYPES.consecutivePairs,
+      PLAY_TYPES.plane,
+      PLAY_TYPES.pair,
+      PLAY_TYPES.single,
+    ]
+    : EMERGENCY_LEAD_TYPE_PRIORITY;
+  for (const type of typePriority) {
+    const pool = active.filter((item) => item.type === type);
+    if (!pool.length) continue;
+    if (type === PLAY_TYPES.single) {
+      const loose = pool.filter((item) => {
+        const rank = item.mainRank;
+        if (!rank) return false;
+        const held = physicalRankCount(hand, rank);
+        if (held === 1) return true;
+        if (rankCountLockedInStrategicGroups(rank, hand, levelRank) === 0) return true;
+        return hasSpareSingleOutsideStraights(rank, hand, levelRank);
+      });
+      const pickFrom = loose.length > 0 ? loose : pool;
+      return pickFrom.reduce((left, right) => (left.power <= right.power ? left : right));
+    }
+    return pool[0];
+  }
+  return active[0] ?? null;
 }
 /** 纯炸保留：须压单/对/三带二（不含仅炸可压的顺子等） */
 const PURE_BOMB_PASS_ROUTINE_TYPES = new Set([
@@ -106,7 +257,7 @@ export const PRINCIPLE_DEFS = {
   P7: {
     code: "P7",
     title: "最小够压炸",
-    summary: "仅四张炸弹时取最小够压；超过四张且需夺权时满张出炸控牌权；纯四炸优先于逢人配凑炸",
+    summary: "跨点数取最小够压炸；同点超四张压炸/夺权时满张出炸，不宜拆四炸剩散牌；纯四炸优先于逢人配凑炸",
   },
   P8: {
     code: "P8",
@@ -122,7 +273,7 @@ export const PRINCIPLE_DEFS = {
   P10: {
     code: "P10",
     title: "队友让牌",
-    summary: "队友占牌/本墩已出小牌 → 过牌让权，不压队友、不叠炸；剩1张能走完时例外",
+    summary: "队友占牌且对手均已表态 → 过牌让接风；下家对手未表态 → 最小散单防抢权，不盲过",
   },
   P11: {
     code: "P11",
@@ -156,6 +307,72 @@ function physicalRankCount(hand, rank) {
   return hand.filter((card) => card.rank === rank && !isJoker(card)).length;
 }
 
+/** 手牌除王外最大点数（级牌+王控场序） */
+function handMaxNonJokerRank(hand, levelRank) {
+  let bestRank = null;
+  let bestPower = -1;
+  for (const card of hand) {
+    if (isJoker(card)) continue;
+    const power = rankPower(card.rank, levelRank);
+    if (power > bestPower) {
+      bestPower = power;
+      bestRank = card.rank;
+    }
+  }
+  return bestRank;
+}
+
+/** 场外王已出尽、手中仅余一张王（级牌为最大单张时留王收尾） */
+function externalJokersExhaustedExceptMine(hand, tableContext) {
+  const jokersInHand = hand.filter((card) => isJoker(card)).length;
+  if (jokersInHand !== 1) return false;
+  let played = 0;
+  for (const entry of tableContext.state?.playHistory ?? []) {
+    for (const card of entry.play?.cards ?? []) {
+      if (isJoker(card)) played += 1;
+    }
+  }
+  return played + jokersInHand >= 2;
+}
+
+/** 残局（≤10 张）：级牌为最大单张且够压 → 出级牌留王收尾 */
+export function shouldReserveJokerForLevelEndgame(hand, levelRank, tableContext, ctx) {
+  const levelCanBeat = ctx.beaters.some((item) => item.mainRank === levelRank);
+  const handHasJoker = hand.some((card) => isJoker(card));
+  const handTopRank = handMaxNonJokerRank(hand, levelRank);
+  return levelCanBeat
+    && handHasJoker
+    && handTopRank === levelRank
+    && hand.length <= 10
+    && externalJokersExhaustedExceptMine(hand, tableContext)
+    && ctx.beaters.some((item) => item.mainRank === "SJ" || item.mainRank === "BJ");
+}
+
+/** 中局（≥12 张）：须压 A/K/Q/J 等常规大单 → 宜王夺权再走小单，不宜先耗级牌/逢人配 */
+export function shouldPreferMidGameJokerOverLevelSingle(hand, levelRank, previousPlay, ctx, tableContext) {
+  if (shouldReserveJokerForLevelEndgame(hand, levelRank, tableContext, ctx)) return false;
+  if (
+    (ctx?.hasPlayableLooseBeater || ctx?.hasNaturalLooseBeater)
+    && previousPlay?.type === PLAY_TYPES.single
+    && previousPlay.mainRank !== "SJ"
+    && previousPlay.mainRank !== "BJ"
+    && compareRanks(previousPlay.mainRank, "K", levelRank) <= 0
+  ) {
+    return false;
+  }
+  const levelCanBeat = ctx.beaters.some((item) => item.mainRank === levelRank);
+  const handHasJoker = hand.some((card) => isJoker(card));
+  return hand.length >= 12
+    && handHasJoker
+    && levelCanBeat
+    && previousPlay?.type === PLAY_TYPES.single
+    && previousPlay.mainRank !== "SJ"
+    && previousPlay.mainRank !== "BJ"
+    && previousPlay.mainRank !== levelRank
+    && compareRanks(previousPlay.mainRank, "10", levelRank) >= 0
+    && ctx.beaters.some((item) => item.mainRank === "SJ" || item.mainRank === "BJ");
+}
+
 function structureRankCounts(hand, levelRank) {
   const counts = new Map();
   for (const card of hand) {
@@ -170,10 +387,28 @@ function rankLabel(rank) {
   return rank === "SJ" ? "小王" : rank === "BJ" ? "大王" : rank;
 }
 
-/** 小牌面：≤7（按级牌序） */
-export function isSmallFaceRank(rank, levelRank) {
-  return compareRanks(rank, "7", levelRank) <= 0;
-}
+import {
+  isSmallFaceRank,
+  isWildLowValueBeat,
+  shouldReserveWildForSmallRoutineBeat,
+  shouldReserveStructureForRoutineBeat,
+  shouldReserveStructureForSmallTripleBeat,
+  hasNaturalRegularBeater,
+  hasStructureSafeRoutineBeater,
+  hasStructureSafeTripleBeater,
+} from "./wild-doctrine.mjs";
+export {
+  isWildLowValueBeat,
+  shouldReserveWildForSmallRoutineBeat,
+  shouldReserveStructureForRoutineBeat,
+  shouldReserveStructureForSmallTripleBeat,
+  hasNaturalRegularBeater,
+  hasStructureSafeRoutineBeater,
+  hasStructureSafeTripleBeater,
+} from "./wild-doctrine.mjs";
+
+/** 小牌面：≤7（按级牌序） — 见 wild-doctrine.mjs */
+export { isSmallFaceRank } from "./wild-doctrine.mjs";
 
 /** 对手普通非炸弹牌型占牌（三带二、对子、顺子等） */
 export function isPressingRoutineNonBomb(previousPlay, tableContext) {
@@ -184,6 +419,7 @@ export function isPressingRoutineNonBomb(previousPlay, tableContext) {
 
 /** 只有炸弹能压住桌面（无普通牌可跟） */
 export function isBombOnlyBeatContext(tableContext) {
+  if (tableContext.partnerOwnsTrick) return false;
   if (!tableContext.opponentActive) return false;
   return tableContext.hasActionableRegularWinner === false;
 }
@@ -217,6 +453,29 @@ export function shouldVetoPassWithRegularBeater(tableContext, hand, previousPlay
   ) {
     return false;
   }
+  if (shouldReserveWildForSmallRoutineBeat(tableContext, resolvedHand, previousPlay, resolvedLevel)) {
+    const pool = tableContext._candidates ?? [];
+    if (!hasNaturalRegularBeater(pool, previousPlay, resolvedLevel, resolvedHand, resolvedLevel)) return false;
+  }
+  if (shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, resolvedLevel)) {
+    const pool = tableContext._candidates ?? [];
+    const preferredGroups = tableContext.preferredGroups ?? null;
+    if (hasStructureSafeRoutineBeater(pool, previousPlay, resolvedHand, resolvedLevel, preferredGroups)) {
+      // 池内有不拆结构的同型压牌，继续否决过牌
+    } else if (
+      previousPlay.type === PLAY_TYPES.pair
+      && analyzeMustBeatPairContext(resolvedHand, resolvedLevel, previousPlay, tableContext).hasWholePairBeater
+    ) {
+      // 有整对够压（含散对 A♠A♥），须跟牌
+    } else if (
+      previousPlay.type === PLAY_TYPES.tripleWithPair
+      && analyzeMustBeatTripleWithPairContext(resolvedHand, resolvedLevel, previousPlay, tableContext).hasStructureSafeBeater
+    ) {
+      // 有不拆 UI 同花顺跑道的三带二够压，须跟牌
+    } else {
+      return false;
+    }
+  }
   return true;
 }
 
@@ -244,6 +503,21 @@ function shouldAllowHeavyHandPassDespiteBombOnly(tableContext, hand, previousPla
   ) {
     return false;
   }
+  // 须压钢板且同花顺可压：不宜过牌等循环
+  if (
+    isBombOnlyBeatContext(tableContext)
+    && !tableContext.hasActionableRegularWinner
+    && previousPlay.type === PLAY_TYPES.plane
+  ) {
+    const pool = tableContext._candidates ?? [];
+    if (pool.some((item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay))) {
+      return false;
+    }
+  }
+  // 须压对子且无对子可压（如级牌对）→ 不宜过牌等循环
+  if (requiresBombForPairBeat(hand, levelRankFrom(tableContext), previousPlay, tableContext)) {
+    return false;
+  }
   return true;
 }
 
@@ -256,6 +530,7 @@ export function shouldVetoBombOnlyPass(tableContext, hand, previousPlay) {
   if (shouldBombForPartnerFinish(tableContext, resolvedHand, previousPlay)) return false;
   if (shouldReserveStraightFlushForConsecutivePairs(tableContext, resolvedHand, previousPlay)) return false;
   if (shouldReserveStraightFlushForSmallCards(tableContext, resolvedHand, previousPlay)) return false;
+  if (shouldReserveBombForHighProbeSingle(tableContext, resolvedHand, previousPlay)) return false;
   if (shouldYieldPassAfterPartnerLeadOnOpponentBomb(tableContext, resolvedHand, previousPlay)) return false;
   const candidates = tableContext._candidates ?? [];
   const hasBombBeater = candidates.some(
@@ -265,22 +540,105 @@ export function shouldVetoBombOnlyPass(tableContext, hand, previousPlay) {
   return true;
 }
 
-/** 超过四张同点炸弹且需炸弹夺权时，应满张出炸（五炸/六炸等），不宜拆成四炸 */
+function bombSizeOf(item) {
+  return item.bombSize ?? item.cards?.length ?? 4;
+}
+
+/** 候选是否动用厚炸点数（手中该点物理超过四张） */
+export function isThickRankBombPlay(candidate, hand) {
+  if (candidate?.type !== PLAY_TYPES.bomb) return false;
+  return physicalRankCount(hand, candidate.mainRank) > 4;
+}
+
+/** 候选是否为拆厚炸（手中同点超过四张，却未满张出炸） */
+export function isSplitBombPlay(candidate, hand) {
+  if (candidate?.type !== PLAY_TYPES.bomb) return false;
+  const held = physicalRankCount(hand, candidate.mainRank);
+  return held > 4 && bombSizeOf(candidate) < held;
+}
+
+/** 炸弹压制池里是否存在独立纯四炸（物理四张、打出四张） */
+export function hasStandalonePureBombBeater(hand, bombBeaters) {
+  return bombBeaters.some((item) => {
+    if (item.type !== PLAY_TYPES.bomb) return false;
+    return bombSizeOf(item) === 4 && physicalRankCount(hand, item.mainRank) === 4;
+  });
+}
+
+/** 超过四张同点炸弹且须炸弹夺权/压炸时，应满张出炸（五炸/六炸等），不宜拆成四炸剩散牌 */
 export function prefersFullBombForControl(hand, rank, previousPlay, tableContext) {
   if (!isBombOnlyBeatContext(tableContext) || !previousPlay) return false;
   if (previousPlay.type === PLAY_TYPES.single
     && (previousPlay.mainRank === "BJ" || previousPlay.mainRank === "SJ")) {
     return false;
   }
-  if (BOMB_TYPES.has(previousPlay.type)) return false;
   const held = physicalRankCount(hand, rank);
-  return held > 4;
+  if (held <= 4) return false;
+  const resolvedLevel = tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  // 理牌整炸仅四张（余张锁在顺子等）→ 出整炸即可，不必为裸数五张满张
+  const entry = structureAwareBombs(hand, resolvedLevel).find((item) => item.rank === rank);
+  if (entry && entry.count < held) return false;
+  return true;
+}
+
+/** 须压对子且无任何对子可压（如对手级牌对）时，取最小理牌整炸 */
+export function pickMinStructureBombBeater(hand, levelRank, previousPlay, tableContext = {}) {
+  if (!previousPlay || !hand?.length) return null;
+  const wholeBombs = [...structureAwareBombs(hand, levelRank)].sort(
+    (left, right) => rankPower(left.rank, levelRank) - rankPower(right.rank, levelRank),
+  );
+  if (wholeBombs.length === 0) return null;
+  const groups = buildStrategicGroups(hand, levelRank);
+  let best = null;
+  for (const entry of wholeBombs) {
+    const group = groups.find(
+      (item) => item.play?.type === PLAY_TYPES.bomb && item.play?.mainRank === entry.rank,
+    );
+    if (!group?.cards?.length) continue;
+    let play = classifyPlay(group.cards, levelRank);
+    if (
+      prefersFullBombForControl(hand, entry.rank, previousPlay, tableContext)
+      || (previousPlay.type === PLAY_TYPES.pair && physicalRankCount(hand, entry.rank) > 4)
+    ) {
+      const fullRankPlay = classifyPlay(
+        hand.filter((card) => !isJoker(card) && card.rank === entry.rank),
+        levelRank,
+      );
+      if (fullRankPlay?.type === PLAY_TYPES.bomb && canBeat(fullRankPlay, previousPlay)) {
+        play = fullRankPlay;
+      }
+    }
+    if (!play || play.type !== PLAY_TYPES.bomb || !canBeat(play, previousPlay)) continue;
+    if (!best || play.power < best.power) best = play;
+  }
+  return best;
+}
+
+/** 须压对手对子且无任何对子可压（只能靠炸弹，如级牌对9） */
+export function requiresBombForPairBeat(hand, levelRank, previousPlay, tableContext = {}) {
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.pair) return false;
+  if (!tableContext.opponentActive || tableContext.partnerOwnsTrick) return false;
+  const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
+  if (!resolvedHand.length) return false;
+  const ranks = new Set(resolvedHand.filter((card) => !isJoker(card)).map((card) => card.rank));
+  for (const rank of ranks) {
+    const cardsOfRank = resolvedHand.filter((card) => card.rank === rank);
+    if (cardsOfRank.length < 2) continue;
+    for (let i = 0; i < cardsOfRank.length; i += 1) {
+      for (let j = i + 1; j < cardsOfRank.length; j += 1) {
+        const play = classifyPlay([cardsOfRank[i], cardsOfRank[j]], levelRank);
+        if (play.type === PLAY_TYPES.pair && canBeat(play, previousPlay)) return false;
+      }
+    }
+  }
+  return true;
 }
 
 /** 手牌仍多且威胁不高时，炸弹战略保留 */
 export function shouldReserveBombForHeavyHand(tableContext, handCount) {
   if (tableContext.isFinishingPlay) return false;
-  if ((tableContext.danger ?? 0) >= 2) return false;
+  const danger = tableContext.danger ?? opponentDangerLevel(tableContext);
+  if (danger >= 2) return false;
   return handCount >= 15;
 }
 
@@ -299,17 +657,22 @@ export function shouldReserveStraightFlushForConsecutivePairs(tableContext, hand
   return true;
 }
 
-/** 仅同花顺能压对手小单/对子且局面尚早：保留同花顺，允许过牌 */
+/** 仅同花顺能压对手小单/对子且局面尚早：保留同花顺，允许过牌（与 audit sf-waste-small 阈值一致） */
 export function shouldReserveStraightFlushForSmallCards(tableContext, hand, previousPlay) {
   if (tableContext.isOpening || tableContext.partnerOwnsTrick) return false;
   if (!isBombOnlyBeatContext(tableContext) || !previousPlay) return false;
   if (![PLAY_TYPES.single, PLAY_TYPES.pair].includes(previousPlay.type)) return false;
+  const levelRank = tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  if (
+    previousPlay.type === PLAY_TYPES.single
+    && (previousPlay.mainRank === "SJ" || previousPlay.mainRank === "BJ")
+  ) {
+    return false;
+  }
+  if (!isSmallFaceRank(previousPlay.mainRank, levelRank)) return false;
   if ((tableContext.danger ?? 0) >= 3) return false;
   const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
   if (resolvedHand.length <= 8) return false;
-  // 中后局手牌不多：须用同花顺抢权，不宜过牌空让
-  if (resolvedHand.length <= 14) return false;
-  if (maxOpponentHandCount(tableContext) <= 10) return false;
 
   const candidates = tableContext._candidates ?? [];
   const plainBombs = candidates.filter(
@@ -320,6 +683,55 @@ export function shouldReserveStraightFlushForSmallCards(tableContext, hand, prev
   return candidates.some(
     (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
   );
+}
+
+/** 非残局同花顺压小单/对子（与 tools/audit-strategy sf-waste-small 一致） */
+export function isStraightFlushWasteOnSmallRoutine(candidate, hand, previousPlay, tableContext) {
+  if (candidate?.type !== PLAY_TYPES.straightFlush || !previousPlay) return false;
+  if (![PLAY_TYPES.single, PLAY_TYPES.pair].includes(previousPlay.type)) return false;
+  const levelRank = tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  if (
+    previousPlay.type === PLAY_TYPES.single
+    && (previousPlay.mainRank === "SJ" || previousPlay.mainRank === "BJ")
+  ) {
+    return false;
+  }
+  const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
+  if (candidate.cards?.length === resolvedHand.length) return false;
+  // 须压对子且无对子可压、有整炸可压：不宜亮同花顺（如级牌对9 → 四炸6）
+  if (
+    previousPlay.type === PLAY_TYPES.pair
+    && tableContext.opponentActive
+    && requiresBombForPairBeat(resolvedHand, levelRank, previousPlay, { ...tableContext, hand: resolvedHand })
+  ) {
+    return true;
+  }
+  if (!isSmallFaceRank(previousPlay.mainRank, levelRank)) return false;
+  if (resolvedHand.length <= 8) return false;
+  if ((tableContext.danger ?? 0) >= 3) return false;
+  return true;
+}
+
+/** 炸弹 rescue / mandatory 路径：该评分项不得被救回 Top1 */
+export function isForbiddenBombRescueItem(item, hand, previousPlay, tableContext, levelRank = null) {
+  const candidate = item?.candidate ?? item;
+  if (!candidate || !BOMB_TYPES.has(candidate.type) || !previousPlay) return true;
+  if (item?.doctrineBlockedTop1) return true;
+  const resolvedLevel = levelRank ?? tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  const ctx = { ...tableContext, hand };
+  if (isStraightFlushWasteOnSmallRoutine(candidate, hand, previousPlay, ctx)) return true;
+  if (
+    tableContext.hasActionableRegularWinner
+    && !tableContext.isFinishingPlay
+    && (
+      previousPlay.type === PLAY_TYPES.single
+      || isPressingRoutineNonBomb(previousPlay, tableContext)
+    )
+  ) {
+    return true;
+  }
+  if (shouldReserveBombForHighProbeSingle(ctx, hand, previousPlay, resolvedLevel)) return true;
+  return false;
 }
 
 /** P10：队友本墩已出小牌、对手小炸占牌 → 不宜叠更大炸，允许过牌 */
@@ -333,6 +745,14 @@ export function shouldYieldPassAfterPartnerLeadOnOpponentBomb(tableContext, hand
     (item) => BOMB_TYPES.has(item.type) && canBeat(item, previousPlay),
   );
   if (beaters.length === 0) return false;
+  const plainBombBeaters = beaters.filter((item) => item.type === PLAY_TYPES.bomb);
+  // 仅同花顺可压、无纯炸：队友本墩已出过牌，不宜再叠同花顺
+  if (
+    plainBombBeaters.length === 0
+    && beaters.some((item) => item.type === PLAY_TYPES.straightFlush)
+  ) {
+    return true;
+  }
   const oppPower = rankPower(previousPlay.mainRank, levelRank);
   const minBeatPower = Math.min(...beaters.map((item) => rankPower(item.mainRank, levelRank)));
   return minBeatPower - oppPower >= 2;
@@ -394,11 +814,23 @@ export function shouldBombForPartnerFinish(tableContext, hand, previousPlay) {
   return isPureFullBombHand(resolvedHand, levelRank) || partnerHandCount(tableContext) <= 1;
 }
 
-/** 对手冲刺占牌：对手余牌≤6且成组牌占权，有炸应夺权防其快速走完 */
+/** 对手冲刺占牌：对手余牌≤6且成组牌占权，有炸应夺权防其快速走完；报单/对2收尾须拦 */
 export function shouldBombForOpponentSprint(tableContext, previousPlay) {
   if (!tableContext.opponentActive || !previousPlay) return false;
   if (tableContext.partnerOwnsTrick) return false;
-  if (minOpponentHandCount(tableContext) > 6) return false;
+  const minOpp = minOpponentHandCount(tableContext);
+  const danger = tableContext.danger ?? 0;
+  if (minOpp <= 1 || danger >= 3) {
+    return [
+      PLAY_TYPES.pair,
+      PLAY_TYPES.tripleWithPair,
+      PLAY_TYPES.consecutivePairs,
+      PLAY_TYPES.plane,
+      PLAY_TYPES.straight,
+      PLAY_TYPES.triple,
+    ].includes(previousPlay.type);
+  }
+  if (minOpp > 6) return false;
   return [
     PLAY_TYPES.tripleWithPair,
     PLAY_TYPES.consecutivePairs,
@@ -433,10 +865,43 @@ export function isPressingSmallSingle(previousPlay, levelRank, tableContext) {
     && compareRanks(previousPlay.mainRank, "6", levelRank) <= 0;
 }
 
-/** 跟牌压对手单张（P1/P2/P3 适用，不限于 ≤6） */
+/** 对手级牌/大单试探（如单2、单A），非残局不宜动炸 */
+export function isPressingHighProbeSingle(previousPlay, levelRank, tableContext) {
+  if (!tableContext.opponentActive) return false;
+  if (previousPlay?.type !== PLAY_TYPES.single) return false;
+  const rank = previousPlay.mainRank;
+  if (rank === "SJ" || rank === "BJ") return false;
+  if (rank === levelRank) return true;
+  if (!tableContext.hasRegularWinner) return false;
+  return compareRanks(rank, "Q", levelRank) >= 0;
+}
+
+/**
+ * 对手级牌/大单试探且局面尚早：保留炸弹/同花顺，允许过牌（含仅有四炸可压的情形）。
+ */
+export function shouldReserveBombForHighProbeSingle(tableContext, hand, previousPlay, levelRank = null) {
+  if (tableContext.isOpening || tableContext.partnerOwnsTrick) return false;
+  if (!previousPlay) return false;
+  const resolvedLevel = levelRank ?? tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  if (!isPressingHighProbeSingle(previousPlay, resolvedLevel, tableContext)) return false;
+  if ((tableContext.danger ?? 0) >= 2) return false;
+  const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
+  if (resolvedHand.length <= 8) return false;
+  if (maxOpponentHandCount(tableContext) <= 6) return false;
+  const candidates = tableContext._candidates ?? [];
+  return candidates.some(
+    (item) => BOMB_TYPES.has(item.type) && canBeat(item, previousPlay),
+  );
+}
+
+/** 跟牌压单张（P1/P2/P3）：对手占牌，或队友占牌但下家对手未表态须防抢权 */
 export function isFollowingOpponentSingle(previousPlay, levelRank, tableContext) {
-  if (!tableContext.opponentActive || !tableContext.hasRegularWinner) return false;
-  return previousPlay?.type === PLAY_TYPES.single;
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.single || !tableContext.hasRegularWinner) {
+    return false;
+  }
+  if (tableContext.opponentActive) return true;
+  if (tableContext.partnerOwnsTrick && !shouldYieldPassToPartner(tableContext)) return true;
+  return false;
 }
 
 /** 跟牌压对手对子/连对（P2 延伸：整对优先于拆三同张组对） */
@@ -444,6 +909,12 @@ export function isFollowingOpponentPair(previousPlay, levelRank, tableContext) {
   if (!tableContext.opponentActive || !tableContext.hasRegularWinner) return false;
   return previousPlay?.type === PLAY_TYPES.pair
     || previousPlay?.type === PLAY_TYPES.consecutivePairs;
+}
+
+/** 跟牌压对手三带二（P1 延伸：不宜拆同花顺跑道组三带二） */
+export function isFollowingOpponentTripleWithPair(previousPlay, levelRank, tableContext) {
+  if (!tableContext.opponentActive || !tableContext.hasRegularWinner) return false;
+  return previousPlay?.type === PLAY_TYPES.tripleWithPair;
 }
 
 /** 压对子/连对类局面（QA 与原则作答共用） */
@@ -553,16 +1024,37 @@ export function analyzeReserveTripleForTripleWithPair(hand, levelRank, tableCont
 
   const candidates = tableContext._candidates ?? [];
   const reserves = [];
-  const groups = buildStrategicGroups(hand, levelRank);
-  const tripleRanks = groups
+  const groups = strategicGroupsFor(hand, levelRank, tableContext);
+  const tripleFromGroups = groups
     .filter((group) => group.play?.type === PLAY_TYPES.triple)
-    .map((group) => group.play.mainRank)
+    .map((group) => group.play.mainRank);
+  // 理牌可能把三张并进连对路线（如 8899），须按物理张数补上待组三带二
+  const tripleFromPhysical = [];
+  const rankCounts = new Map();
+  for (const card of hand) {
+    if (card.rank === "SJ" || card.rank === "BJ") continue;
+    rankCounts.set(card.rank, (rankCounts.get(card.rank) ?? 0) + 1);
+  }
+  for (const [rank, count] of rankCounts.entries()) {
+    if (count < 3 || count >= 4) continue;
+    const cpBreaksTriple = candidates.some(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && resolveTripleBreakForConsecutivePairs(item, hand, levelRank).tripleRank === rank,
+    );
+    if (cpBreaksTriple) tripleFromPhysical.push(rank);
+  }
+  const tripleRanks = [...new Set([...tripleFromGroups, ...tripleFromPhysical])]
     .filter((rank) => physicalRankCount(hand, rank) >= 3);
 
   for (const tripleRank of tripleRanks) {
     const bombInfo = analyzeRankAvailability(hand, tripleRank, levelRank);
     const physicalHeld = physicalRankCount(hand, tripleRank);
     if (bombInfo.effectiveBombCount >= 4 || physicalHeld >= 4) continue;
+    const cpBreaksTriple = candidates.some(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && resolveTripleBreakForConsecutivePairs(item, hand, levelRank).tripleRank === tripleRank,
+    );
+    if (!cpBreaksTriple) continue;
     const hasTripleWithPair = candidates.some(
       (item) => item.type === PLAY_TYPES.tripleWithPair
         && item.mainRank === tripleRank
@@ -577,7 +1069,104 @@ export function analyzeReserveTripleForTripleWithPair(hand, levelRank, tableCont
   return reserves;
 }
 
-/** 领出/接风：连对拆三同张且有三带二/其它连对替代 */
+/**
+ * 领出/接风：有不拆三同张的连对时，不宜过早三带二消耗三同张（孤立对留作带牌）。
+ * 与 analyzeReserveTripleForTripleWithPair 互补：后者处理「连对会拆三同张」应走三带二。
+ */
+export function analyzePrematureTripleWithPairLead(hand, levelRank, tableContext) {
+  const isLeadTurn = tableContext.isOpening
+    && tableContext.leadMode !== "must-beat"
+    && !tableContext.opponentActive;
+  if (!isLeadTurn || !hand?.length) return [];
+
+  const candidates = tableContext._candidates ?? [];
+  const entries = [];
+  const rankCounts = new Map();
+  for (const card of hand) {
+    if (card.rank === "SJ" || card.rank === "BJ") continue;
+    rankCounts.set(card.rank, (rankCounts.get(card.rank) ?? 0) + 1);
+  }
+
+  for (const [tripleRank, count] of rankCounts.entries()) {
+    if (count !== 3) continue;
+    const bombInfo = analyzeRankAvailability(hand, tripleRank, levelRank);
+    if (bombInfo.effectiveBombCount >= 4) continue;
+
+    const cpBreaksTriple = candidates.some(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && resolveTripleBreakForConsecutivePairs(item, hand, levelRank).tripleRank === tripleRank,
+    );
+    if (cpBreaksTriple) continue;
+
+    const altCp = candidates.some(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && (item.length ?? item.cards?.length ?? 0) >= 4
+        && !resolveTripleBreakForConsecutivePairs(item, hand, levelRank).splitsTriple,
+    );
+    if (!altCp) continue;
+
+    const hasTripleWithPair = candidates.some(
+      (item) => item.type === PLAY_TYPES.tripleWithPair
+        && item.mainRank === tripleRank
+        && (item.cards ?? []).filter((c) => c.rank === tripleRank).length >= 3,
+    );
+    if (!hasTripleWithPair) continue;
+
+    const safePairs = findSafeKickerPairRanksForTriple(hand, levelRank, tripleRank);
+    if (safePairs.length === 0) continue;
+
+    entries.push({
+      tripleRank,
+      kickerRank: safePairs[0],
+      reason: `三个${rankLabel(tripleRank)}可留带对${safePairs[0]}，有不拆三同张的连对应先走连对减手`,
+    });
+  }
+  return entries;
+}
+
+/** 领出/接风：过早三带二消耗三同张（教纲 blockTop1） */
+export function diagnosePrematureTripleWithPairLead(candidate, hand, levelRank, tableContext) {
+  if (!candidate || candidate.type !== PLAY_TYPES.tripleWithPair) return null;
+  const entry = analyzePrematureTripleWithPairLead(hand, levelRank, tableContext)
+    .find((item) => item.tripleRank === candidate.mainRank);
+  if (!entry) return null;
+  return {
+    violated: "P5",
+    summary: entry.reason,
+    gentlerLabel: "连对减手",
+    blockTop1: true,
+    blockTop3: false,
+  };
+}
+
+/** 领出/接风：连对会拆三同张时，三带二减手可越级突破同花顺分组门禁（如 888+对4） */
+export function isExactTripleWithPairLead(candidate, hand, levelRank, tableContext) {
+  if (!candidate || candidate.type !== PLAY_TYPES.tripleWithPair) return false;
+  if (!tableContext?.isOpening || tableContext.leadMode === "must-beat") return false;
+  const rank = candidate.mainRank;
+  if (!rank || rank === "SJ" || rank === "BJ") return false;
+  const physicalHeld = hand.filter((card) => card.rank === rank && !isJoker(card)).length;
+  if (physicalHeld !== 3) return false;
+  if ((candidate.cards ?? []).filter((card) => card.rank === rank).length < 3) return false;
+  const candidates = tableContext._candidates
+    ?? generateBasicCandidates(hand, levelRank, tableContext.previousPlay ?? null);
+  const cpBreaksTriple = candidates.some(
+    (item) => item.type === PLAY_TYPES.consecutivePairs
+      && (item.length ?? item.cards?.length ?? 0) >= 4
+      && resolveTripleBreakForConsecutivePairs(item, hand, levelRank).tripleRank === rank,
+  );
+  return cpBreaksTriple;
+}
+
+/** 领出/接风：有不拆三同张的连对时，连对减手应入池评分（如 7788 优于 333+55） */
+export function isPrematureConsecutivePairsLead(candidate, hand, levelRank, tableContext) {
+  if (!candidate || candidate.type !== PLAY_TYPES.consecutivePairs) return false;
+  if (!tableContext?.isOpening || tableContext.leadMode === "must-beat") return false;
+  if (resolveTripleBreakForConsecutivePairs(candidate, hand, levelRank).splitsTriple) return false;
+  return analyzePrematureTripleWithPairLead(hand, levelRank, tableContext).length > 0;
+}
+
+/** 领出/接风：连对会拆三同张且有三带二/其它连对替代 */
 export function diagnoseLeadConsecutivePairsTripleViolation(candidate, hand, levelRank, tableContext) {
   const isLeadTurn = tableContext.isOpening
     && tableContext.leadMode !== "must-beat"
@@ -783,20 +1372,91 @@ export function resolveStraightBreakForTripleWithPair(candidate, hand, levelRank
   return { breaksStraight: true, straightLabel: straightGroup.label ?? null };
 }
 
+/** 该 rank 在理牌组（顺子/同花顺/对子/钢板/炸弹等）中占用的张数 */
+function rankCountLockedInStrategicGroups(rank, hand, levelRank) {
+  if (!rank || !hand?.length) return 0;
+  const groups = buildStrategicGroups(hand, levelRank);
+  let count = 0;
+  for (const group of groups) {
+    for (const card of group.cards ?? []) {
+      if (card.rank === rank) count += 1;
+    }
+  }
+  return count;
+}
+
+/** 该 rank 在理牌顺子/同花顺中占用的张数 */
+function rankCountInStrategicStraights(rank, hand, levelRank, tableContext = null) {
+  if (!rank || !hand?.length) return 0;
+  const groups = strategicGroupsFor(hand, levelRank, tableContext);
+  return rankCountInGroupsStraights(rank, groups);
+}
+
+/** 是否有顺子/同花顺外的同点散张（打出时不拆顺子） */
+export function hasSpareSingleOutsideStraights(rank, hand, levelRank) {
+  const held = physicalRankCount(hand, rank);
+  if (held <= 0) return false;
+  if (held === 1) return rankCountLockedInStrategicGroups(rank, hand, levelRank) === 0;
+  const inStraights = rankCountInStrategicStraights(rank, hand, levelRank);
+  return inStraights > 0 && held > inStraights;
+}
+
+/** 跟牌压单时可当作「散单」出牌的 rank（含顺外同点散张） */
+export function isActionableLooseSingleBeater(rank, hand, levelRank, mustBeatRank = null) {
+  if (!rank || rank === "SJ" || rank === "BJ") return false;
+  if (mustBeatRank && compareRanks(rank, mustBeatRank, levelRank) <= 0) return false;
+  const held = physicalRankCount(hand, rank);
+  if (held === 1) return true;
+  return hasSpareSingleOutsideStraights(rank, hand, levelRank)
+    && effectiveBeatSingleTier(hand, rank, levelRank) === "loose";
+}
+
+/** 跟牌压单：该 rank 是否应视为散单（含顺外仅一张同点散张） */
+export function effectiveBeatSingleTier(hand, rank, levelRank) {
+  const held = physicalRankCount(hand, rank);
+  const inStraights = rankCountInStrategicStraights(rank, hand, levelRank);
+  if (inStraights > 0 && held === inStraights + 1) return "loose";
+  if (held === 1 && rankCountLockedInStrategicGroups(rank, hand, levelRank) === 0) return "loose";
+  return getRankStructureTier(hand, rank, levelRank);
+}
+
+/** 压单时可走且不拆顺/同花顺：真散单或顺外仅一张同点散张 */
+export function isSafeNonStraightBreakSingleRank(rank, hand, levelRank, tableContext = null) {
+  if (!rank || rank === "SJ" || rank === "BJ") return false;
+  if (resolveStraightBreakForSingle(rank, hand, levelRank, tableContext).breaksStraight) return false;
+  const preferredGroups = tableContext?.preferredGroups ?? [];
+  if (preferredGroups.length) {
+    const card = hand.find((item) => item.rank === rank);
+    if (card) {
+      const play = classifyPlay([card], levelRank);
+      if (breaksPreferredStrategicGroup(play, preferredGroups, levelRank, hand)) return false;
+    }
+  }
+  return effectiveBeatSingleTier(hand, rank, levelRank) === "loose";
+}
+
 /** 推荐单张是否会拆掉理牌后的顺子（buildStrategicGroups） */
-export function resolveStraightBreakForSingle(rank, hand, levelRank) {
+export function resolveStraightBreakForSingle(rank, hand, levelRank, tableContext = null) {
   if (!rank || !hand?.length) {
     return { breaksStraight: false, straightLabel: null };
   }
-  const groups = buildStrategicGroups(hand, levelRank);
-  const straightGroup = groups.find(
-    (group) => (group.play?.type === PLAY_TYPES.straight
-        || group.play?.type === PLAY_TYPES.straightFlush)
-      && (group.cards ?? []).some((card) => card.rank === rank),
-  );
+  const groups = strategicGroupsFor(hand, levelRank, tableContext);
+  const straightGroup = groups.find((group) => {
+    const play = resolveStrategicGroupPlay(group, levelRank);
+    return (play.type === PLAY_TYPES.straight || play.type === PLAY_TYPES.straightFlush)
+      && (group.cards ?? []).some((card) => card.rank === rank);
+  });
+  if (!straightGroup) {
+    return { breaksStraight: false, straightLabel: null };
+  }
+  const held = physicalRankCount(hand, rank);
+  const inStraights = rankCountInGroupsStraights(rank, groups);
+  if (inStraights > 0 && held > inStraights) {
+    return { breaksStraight: false, straightLabel: straightGroup.label ?? null };
+  }
   return {
-    breaksStraight: Boolean(straightGroup),
-    straightLabel: straightGroup?.label ?? null,
+    breaksStraight: true,
+    straightLabel: straightGroup.label ?? null,
   };
 }
 
@@ -935,13 +1595,26 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
   );
   const sfFinish = analyzeJokerStraightFlushFinishHand(hand, levelRank);
   let looseBeaters = beaters.filter(
-    (item) => item.mainRank !== "SJ"
-      && item.mainRank !== "BJ"
-      && physicalRankCount(hand, item.mainRank) === 1,
+    (item) => isActionableLooseSingleBeater(item.mainRank, hand, levelRank),
   );
+  const minBeatingRank = beaters.length > 0
+    ? beaters.map((item) => item.mainRank).sort((left, right) => compareRanks(left, right, levelRank))[0]
+    : null;
+  if (minBeatingRank) {
+    looseBeaters = looseBeaters.filter((item) => {
+      if (compareRanks(item.mainRank, minBeatingRank, levelRank) <= 0) return true;
+      const inStraights = rankCountInStrategicStraights(item.mainRank, hand, levelRank, tableContext);
+      const held = physicalRankCount(hand, item.mainRank);
+      return !(inStraights > 0 && held > inStraights);
+    });
+  }
   const preferredGroups = tableContext.preferredGroups ?? [];
+  const singleBreaksStructure = (item) =>
+    breaksPreferredStrategicGroup(item, preferredGroups, levelRank, hand)
+    || resolveStraightBreakForSingle(item.mainRank, hand, levelRank, tableContext).breaksStraight
+    || singleRankBreaksStraightFlush(item.mainRank, hand, levelRank, tableContext);
   const playableLooseBeaters = looseBeaters.filter(
-    (item) => !breaksPremiumStraightOrJokerGroup(item, preferredGroups, levelRank),
+    (item) => !breaksPreferredStrategicGroup(item, preferredGroups, levelRank, hand),
   );
   if (sfFinish) {
     looseBeaters = looseBeaters.filter((item) => {
@@ -960,13 +1633,17 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
   const naturalLooseBeaters = looseBeaters.filter(
     (item) => !(item.cards ?? []).some((card) => isWildCard(card, levelRank)),
   );
-  const hasLooseBeater = looseBeaters.length > 0;
+  const pureLooseBeaters = looseBeaters.filter(
+    (item) => physicalRankCount(hand, item.mainRank) === 1,
+  );
+  const preferredLoosePool = pureLooseBeaters.length > 0 ? pureLooseBeaters : looseBeaters;
+  const hasLooseBeater = preferredLoosePool.length > 0;
   const hasNaturalLooseBeater = naturalLooseBeaters.length > 0;
   const minLoosePower = hasLooseBeater
-    ? Math.min(...looseBeaters.map((item) => item.power))
+    ? Math.min(...preferredLoosePool.map((item) => item.power))
     : null;
   const minLooseRank = hasLooseBeater
-    ? looseBeaters.find((item) => item.power === minLoosePower)?.mainRank ?? null
+    ? preferredLoosePool.find((item) => item.power === minLoosePower)?.mainRank ?? null
     : null;
   const minPairPower = pairBeaters.length > 0
     ? Math.min(...pairBeaters.map((item) => item.power))
@@ -974,15 +1651,50 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
   const minPairRank = pairBeaters.length > 0
     ? pairBeaters.find((item) => item.power === minPairPower)?.mainRank ?? null
     : null;
-  const safeLooseBeaters = looseBeaters.filter(
-    (item) => !resolveStraightBreakForSingle(item.mainRank, hand, levelRank).breaksStraight,
+  const isPremiumSafeLooseBeater = (item) => {
+    if (singleBreaksStructure(item)) return false;
+    if (breaksPremiumStraightOrJokerGroup(item, preferredGroups, levelRank)) return false;
+    return true;
+  };
+  const safeLooseBeaters = looseBeaters.filter(isPremiumSafeLooseBeater);
+  const pureSafeLooseBeaters = safeLooseBeaters.filter(
+    (item) => physicalRankCount(hand, item.mainRank) === 1,
   );
-  const hasSafeLooseBeater = safeLooseBeaters.length > 0;
+  const preferredSafeLoosePool = pureSafeLooseBeaters.length > 0
+    ? pureSafeLooseBeaters
+    : safeLooseBeaters;
+  const hasSafeLooseBeater = preferredSafeLoosePool.length > 0;
   const minSafeLoosePower = hasSafeLooseBeater
-    ? Math.min(...safeLooseBeaters.map((item) => item.power))
+    ? Math.min(...preferredSafeLoosePool.map((item) => item.power))
     : null;
   const minSafeLooseRank = hasSafeLooseBeater
-    ? safeLooseBeaters.find((item) => item.power === minSafeLoosePower)?.mainRank ?? null
+    ? preferredSafeLoosePool.find((item) => item.power === minSafeLoosePower)?.mainRank ?? null
+    : null;
+  const minPlayableLoosePower = playableAfterSf.length > 0
+    ? Math.min(...playableAfterSf.map((item) => item.power))
+    : null;
+  const minPlayableLooseRank = minPlayableLoosePower != null
+    ? playableAfterSf.find((item) => item.power === minPlayableLoosePower)?.mainRank ?? null
+    : null;
+
+  /** 可压且打出时不拆顺/同花顺，且为真散单或顺外同点散张（不含拆炸/拆对） */
+  let noStraightBreakBeaters = beaters.filter(
+    (item) => isSafeNonStraightBreakSingleRank(item.mainRank, hand, levelRank, tableContext),
+  );
+  if (minBeatingRank) {
+    noStraightBreakBeaters = noStraightBreakBeaters.filter((item) => {
+      if (compareRanks(item.mainRank, minBeatingRank, levelRank) <= 0) return true;
+      const inStraights = rankCountInStrategicStraights(item.mainRank, hand, levelRank, tableContext);
+      const held = physicalRankCount(hand, item.mainRank);
+      return !(inStraights > 0 && held > inStraights);
+    });
+  }
+  const hasNoStraightBreakBeater = noStraightBreakBeaters.length > 0;
+  const minNoStraightBreakPower = hasNoStraightBreakBeater
+    ? Math.min(...noStraightBreakBeaters.map((item) => item.power))
+    : null;
+  const minNoStraightBreakRank = hasNoStraightBreakBeater
+    ? noStraightBreakBeaters.find((item) => item.power === minNoStraightBreakPower)?.mainRank ?? null
     : null;
 
   /** 须压单张时：唯一散单在同花顺组内，允许拆组用最小散单抢权 */
@@ -1003,6 +1715,7 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
     mustBeatPremiumLooseSingle,
     safeLooseBeaters,
     pairBeaters,
+    minBeatingRank,
     hasLooseBeater,
     hasNaturalLooseBeater,
     hasPlayableLooseBeater: playableAfterSf.length > 0,
@@ -1011,6 +1724,12 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
     minLoosePower,
     minSafeLooseRank,
     minSafeLoosePower,
+    minPlayableLooseRank,
+    minPlayableLoosePower,
+    noStraightBreakBeaters,
+    hasNoStraightBreakBeater,
+    minNoStraightBreakRank,
+    minNoStraightBreakPower,
     minPairPower,
     minPairRank,
     beatLabel: previousPlay?.label ?? `单${rankLabel(previousPlay?.mainRank)}`,
@@ -1021,16 +1740,27 @@ export function analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tabl
 function pairBeatersFromHand(hand, levelRank, previousPlay) {
   if (!hand?.length || !previousPlay) return [];
   const results = [];
-  const seen = new Set();
-  for (const card of hand) {
-    if (isJoker(card) || seen.has(card.rank)) continue;
-    if (physicalRankCount(hand, card.rank) < 2) continue;
-    seen.add(card.rank);
-    const cards = hand.filter((c) => c.rank === card.rank).slice(0, 2);
-    const play = classifyPlay(cards, levelRank);
-    if (play.type === PLAY_TYPES.pair && canBeat(play, previousPlay)) {
-      results.push(play);
+  const ranks = new Set(hand.filter((card) => !isJoker(card)).map((card) => card.rank));
+  for (const rank of ranks) {
+    if (physicalRankCount(hand, rank) < 2) continue;
+    const cardsOfRank = hand.filter((card) => card.rank === rank);
+    let bestSafe = null;
+    let bestAny = null;
+    for (let i = 0; i < cardsOfRank.length; i += 1) {
+      for (let j = i + 1; j < cardsOfRank.length; j += 1) {
+        const play = classifyPlay([cardsOfRank[i], cardsOfRank[j]], levelRank);
+        if (play.type !== PLAY_TYPES.pair || !canBeat(play, previousPlay)) continue;
+        if (!bestAny || play.power < bestAny.power) bestAny = play;
+        if (
+          !isStructureBreakingPairBeat(play, hand, levelRank)
+          && (!bestSafe || play.power < bestSafe.power)
+        ) {
+          bestSafe = play;
+        }
+      }
     }
+    const pick = bestSafe ?? bestAny;
+    if (pick) results.push(pick);
   }
   return results;
 }
@@ -1043,33 +1773,216 @@ export function analyzeMustBeatPairContext(hand, levelRank, previousPlay, tableC
   );
   if (previousPlay && hand?.length) {
     const fromHand = pairBeatersFromHand(hand, levelRank, previousPlay);
-    const knownRanks = new Set(beaters.map((item) => item.mainRank));
     for (const play of fromHand) {
-      if (!knownRanks.has(play.mainRank)) beaters.push(play);
+      const safe = !isStructureBreakingPairBeat(play, hand, levelRank);
+      if (safe) {
+        const hasSafeSameRank = beaters.some(
+          (item) => item.mainRank === play.mainRank
+            && !isStructureBreakingPairBeat(item, hand, levelRank),
+        );
+        if (!hasSafeSameRank) beaters.push(play);
+      } else if (!beaters.some((item) => item.mainRank === play.mainRank)) {
+        beaters.push(play);
+      }
     }
   }
-  const wholePairBeaters = beaters.filter(
-    (item) => physicalRankCount(hand, item.mainRank) === 2,
+  // 整对够压：以是否拆顺子/同花顺/炸弹为准；同点≥3张但仍有散对（如四张A里对A不碰同花顺）也算整对
+  // 仅两张同点的散对：即使动到同花顺/顺子一张，仍优于整段同花顺压对
+  const wholePairBeaters = beaters.filter((item) => {
+    if (!isStructureBreakingPairBeat(item, hand, levelRank)) return true;
+    return physicalRankCount(hand, item.mainRank) === 2;
+  });
+  const dedicatedPairBeaters = wholePairBeaters.filter(
+    (item) => physicalRankCount(hand, item.mainRank) === 2
+      && !(item.wildcardAssignments?.length > 0),
   );
   const tripleSplitBeaters = beaters.filter(
-    (item) => physicalRankCount(hand, item.mainRank) >= 3,
+    (item) => isStructureBreakingPairBeat(item, hand, levelRank),
   );
+  const nonWildWholePairBeaters = wholePairBeaters.filter(
+    (item) => !(item.wildcardAssignments?.length > 0),
+  );
+  const structureSafeWholePairBeaters = wholePairBeaters.filter(
+    (item) => !isStructureBreakingPairBeat(item, hand, levelRank),
+  );
+  const structureSafeDedicated = dedicatedPairBeaters.filter(
+    (item) => !isStructureBreakingPairBeat(item, hand, levelRank),
+  );
+  const minPairPool = structureSafeDedicated.length > 0
+    ? structureSafeDedicated
+    : structureSafeWholePairBeaters.length > 0
+      ? structureSafeWholePairBeaters
+      : dedicatedPairBeaters.length > 0
+        ? dedicatedPairBeaters
+        : nonWildWholePairBeaters.length > 0
+          ? nonWildWholePairBeaters
+          : wholePairBeaters;
   const hasWholePairBeater = wholePairBeaters.length > 0;
+  const hasStructureSafeWholePairBeater = structureSafeWholePairBeaters.length > 0;
   const minWholePairPower = hasWholePairBeater
-    ? Math.min(...wholePairBeaters.map((item) => item.power))
+    ? Math.min(...minPairPool.map((item) => item.power))
     : null;
   const minWholePairRank = hasWholePairBeater
-    ? wholePairBeaters.find((item) => item.power === minWholePairPower)?.mainRank ?? null
+    ? minPairPool.find((item) => item.power === minWholePairPower)?.mainRank ?? null
     : null;
 
   return {
     beaters,
     wholePairBeaters,
+    dedicatedPairBeaters,
+    structureSafeWholePairBeaters,
+    structureSafeDedicated,
     tripleSplitBeaters,
     hasWholePairBeater,
+    hasStructureSafeWholePairBeater,
     minWholePairRank,
     minWholePairPower,
     beatLabel: previousPlay?.label ?? `对${rankLabel(previousPlay?.mainRank)}`,
+  };
+}
+
+/** 从手牌枚举可压三带二（候选表被 lite/trim 裁掉时 P4 仍可用） */
+function tripleWithPairBeatersFromHand(hand, levelRank, previousPlay, preferredGroups, tableContext = null) {
+  if (!hand?.length || !previousPlay) return [];
+  const results = [];
+  const all = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true });
+  const byRank = new Map();
+  for (const item of all) {
+    if (item.type !== PLAY_TYPES.tripleWithPair || !canBeat(item, previousPlay)) continue;
+    const rank = item.mainRank;
+    const safe = !breaksStrategicPremiumForTripleWithPair(item, hand, levelRank, preferredGroups, tableContext);
+    const prev = byRank.get(rank);
+    if (!prev) {
+      byRank.set(rank, { play: item, safe });
+      continue;
+    }
+    if (safe && !prev.safe) {
+      byRank.set(rank, { play: item, safe });
+      continue;
+    }
+    if (safe === prev.safe && item.power < prev.play.power) {
+      byRank.set(rank, { play: item, safe });
+    }
+  }
+  return [...byRank.values()].map((entry) => entry.play);
+}
+
+/** 压三带二局面：结构安全 vs 拆同花顺跑道 */
+export function analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext) {
+  const preferredGroups = tableContext.preferredGroups ?? [];
+  const candidates = tableContext._candidates ?? [];
+  let beaters = candidates.filter(
+    (item) => item.type === PLAY_TYPES.tripleWithPair && canBeat(item, previousPlay),
+  );
+  if (previousPlay && hand?.length) {
+    const fromHand = tripleWithPairBeatersFromHand(hand, levelRank, previousPlay, preferredGroups, tableContext);
+    for (const play of fromHand) {
+      const safe = !breaksStrategicPremiumForTripleWithPair(play, hand, levelRank, preferredGroups, tableContext);
+      const sameRank = beaters.filter((item) => item.mainRank === play.mainRank);
+      if (sameRank.length === 0) {
+        beaters.push(play);
+        continue;
+      }
+      if (safe && sameRank.every(
+        (item) => breaksStrategicPremiumForTripleWithPair(item, hand, levelRank, preferredGroups, tableContext),
+      )) {
+        beaters = beaters.filter((item) => item.mainRank !== play.mainRank);
+        beaters.push(play);
+      }
+    }
+  }
+  const structureSafeBeaters = beaters.filter(
+    (item) => !breaksStrategicPremiumForTripleWithPair(item, hand, levelRank, preferredGroups, tableContext),
+  );
+  const structureBreakingBeaters = beaters.filter(
+    (item) => breaksStrategicPremiumForTripleWithPair(item, hand, levelRank, preferredGroups, tableContext),
+  );
+  const minPool = structureSafeBeaters.length > 0
+    ? structureSafeBeaters
+    : structureBreakingBeaters;
+  const hasStructureSafeBeater = structureSafeBeaters.length > 0;
+  const minPower = minPool.length > 0
+    ? Math.min(...minPool.map((item) => item.power))
+    : null;
+  const minRank = minPool.find((item) => item.power === minPower)?.mainRank ?? null;
+
+  return {
+    beaters,
+    structureSafeBeaters,
+    structureBreakingBeaters,
+    hasStructureSafeBeater,
+    minRank,
+    minPower,
+    beatLabel: previousPlay?.label ?? "三带二",
+  };
+}
+
+/**
+ * 应急/超时兜底：队友占牌时不得同花顺/炸弹压队友；防抢权宜最小散单或小对，否则过牌。
+ * @returns {{ candidate: object, reasons: string[] } | null} 非队友占牌返回 null 由调用方走默认逻辑
+ */
+export function pickPartnerAwareEmergencyCandidate(
+  hand,
+  levelRank,
+  previousPlay,
+  pool,
+  tableContext = {},
+  preferredGroups = [],
+) {
+  const passPlay = classifyPlay([], levelRank);
+  const mustLead = !previousPlay || previousPlay.type === PLAY_TYPES.pass;
+  if (mustLead) return null;
+
+  const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex;
+  const ctx = enrichScoringContext(
+    { ...tableContext, previousPlay, hand, playerIndex },
+    pool,
+    hand,
+    levelRank,
+  );
+  if (!ctx.partnerOwnsTrick) return null;
+
+  if (shouldYieldPassToPartner({ ...ctx, hand })) {
+    return {
+      candidate: passPlay,
+      reasons: ["计算超时，队友占牌兜底过牌"],
+    };
+  }
+
+  const regularBeaters = pool.filter(
+    (candidate) => candidate.type !== PLAY_TYPES.pass
+      && !BOMB_TYPES.has(candidate.type)
+      && canBeat(candidate, previousPlay)
+      && !breaksPreferredStrategicGroup(candidate, preferredGroups, levelRank, hand),
+  );
+
+  if (previousPlay.type === PLAY_TYPES.single) {
+    const beatCtx = analyzeMustBeatSingleContext(hand, levelRank, previousPlay, {
+      ...ctx,
+      _candidates: pool,
+      preferredGroups,
+    });
+    const preferRank = beatCtx.minPlayableLooseRank
+      ?? beatCtx.minSafeLooseRank
+      ?? beatCtx.minLooseRank;
+    if (preferRank) {
+      const singles = regularBeaters.filter(
+        (candidate) => candidate.type === PLAY_TYPES.single
+          && compareRanks(candidate.mainRank, preferRank, levelRank) >= 0,
+      );
+      if (singles.length > 0) {
+        const best = singles.reduce((left, right) => (left.power <= right.power ? left : right));
+        return {
+          candidate: best,
+          reasons: ["计算超时，临时建议（不拆成组结构）"],
+        };
+      }
+    }
+  }
+
+  return {
+    candidate: passPlay,
+    reasons: ["计算超时，队友占牌不宜同花顺/炸弹；下家未表态宜防抢权（也可过牌）"],
   };
 }
 
@@ -1166,8 +2079,20 @@ export function isProbeSingleRank(rank, levelRank) {
   return compareRanks(rank, "9", levelRank) <= 0;
 }
 
+/** 某点数是否为厚炸（物理五张及以上同点） */
+export function isThickBombRank(rank, hand) {
+  return physicalRankCount(hand, rank) >= 5;
+}
+
+/** 候选是否为从厚炸点数拆出的单张领出 */
+export function isThickBombSingleLead(candidate, hand) {
+  if (candidate?.type !== PLAY_TYPES.single || !candidate.mainRank) return false;
+  if (isJoker({ rank: candidate.mainRank })) return false;
+  return physicalRankCount(hand, candidate.mainRank) >= 5;
+}
+
 /** 真开局可领出的散单点数（不含级牌与王） */
-function looseLeadSingleRanks(hand, levelRank) {
+export function looseLeadSingleRanks(hand, levelRank) {
   const rankCounts = new Map();
   for (const card of hand) {
     if (isJoker(card)) continue;
@@ -1228,7 +2153,9 @@ export function reasonFromPrinciple(code, details = {}) {
     case "P7":
       return details.fullBombControl
         ? `【${def.code}】满张炸弹控牌权，四炸易被反压`
-        : details.splitBombControl
+        : details.standalonePureBomb
+          ? `【${def.code}】有纯四炸够压，不宜拆厚炸出四炸`
+          : details.splitBombControl
           ? `【${def.code}】拆炸出四炸牌力弱，应满张出炸控权`
           : details.pressingStraight
             ? `【${def.code}】四炸够压顺子，打完剩对子仍可减手`
@@ -1321,7 +2248,9 @@ const QUESTION_PRINCIPLE_PATTERNS = [
   { codes: ["P9"], test: (q) => /应打三带二|不要拆炸|拆炸打三带二/i.test(q) },
   { codes: ["P10"], test: (q) => /队友.*(炸|占牌)|叠炸/i.test(q) },
   { codes: ["P10"], test: (q) => /剩.*一张.*过牌|该不该过牌让队友|最后一张.*让/i.test(q) },
-  { codes: ["P11"], test: (q) => /报单|只剩一张|末张/i.test(q) },
+  { codes: ["P10"], test: (q) => /送.*走|送队友|送对家|队友.*(只剩|剩).*张|对家.*(只剩|剩).*张|老史.*(只剩|剩)/i.test(q) },
+  { codes: ["P11"], test: (q) => /报单|末张/i.test(q) && !/队友|对家|老史|搭档|送.*走/i.test(q) },
+  { codes: ["P11"], test: (q) => /(?:对手|对方).*(?:只剩|剩).*一张/i.test(q) },
   { codes: ["P12"], test: (q) => /对方为什么不压|老史.*不压|机器人/i.test(q) },
   { codes: ["P1", "P2", "P12"], test: (q) => /对手|对方|勇哥|毛蛋/.test(q) && /拆.*单|都是单|总.*单|净出单|怎么都.*单/i.test(q) },
 ];
@@ -1363,6 +2292,11 @@ export function explainPrincipleForQuestion(question, context = {}) {
 }
 
 /** 诊断某压单候选违反了哪条原则 */
+function singleRankBreaksStraightFlush(rank, hand, levelRank, tableContext = null) {
+  const breakInfo = resolveStraightBreakForSingle(rank, hand, levelRank, tableContext);
+  return breakInfo.breaksStraight && breakInfo.straightLabel?.includes("同花顺");
+}
+
 export function diagnoseBeatSingleViolation(candidate, hand, levelRank, tableContext) {
   const previousPlay = tableContext.previousPlay ?? null;
   if (!isFollowingOpponentSingle(previousPlay, levelRank, tableContext)) return null;
@@ -1370,7 +2304,7 @@ export function diagnoseBeatSingleViolation(candidate, hand, levelRank, tableCon
 
   const ctx = analyzeMustBeatSingleContext(hand, levelRank, previousPlay, tableContext);
   const rank = candidate.mainRank;
-  const tier = getRankStructureTier(hand, rank, levelRank);
+  const tier = effectiveBeatSingleTier(hand, rank, levelRank);
   const sfFinish = analyzeJokerStraightFlushFinishHand(hand, levelRank);
 
   if (sfFinish) {
@@ -1388,8 +2322,136 @@ export function diagnoseBeatSingleViolation(candidate, hand, levelRank, tableCon
     }
   }
 
+  const preferredGroups = tableContext.preferredGroups ?? [];
+  const strategicGroups = strategicGroupsFor(hand, levelRank, tableContext);
+  const breaksSfByCard = breaksPremiumStraightOrJokerGroup(candidate, preferredGroups, levelRank)
+    || breaksPremiumStraightOrJokerGroup(candidate, strategicGroups, levelRank);
+  const handHasJoker = hand.some((card) => card.rank === "SJ" || card.rank === "BJ");
+  const midGameJokerTakeTrick = shouldPreferMidGameJokerOverLevelSingle(
+    hand,
+    levelRank,
+    previousPlay,
+    ctx,
+    tableContext,
+  );
+  if (breaksSfByCard) {
+    if (midGameJokerTakeTrick && handHasJoker && rank !== "SJ" && rank !== "BJ") {
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: "SJ",
+        beatLabel: ctx.beatLabel,
+        tier: "straightFlush",
+      };
+    }
+    if (ctx.hasPlayableLooseBeater || ctx.playableLooseBeaters.length > 0) {
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: ctx.minPlayableLooseRank ?? ctx.minLooseRank ?? ctx.minSafeLooseRank,
+        beatLabel: ctx.beatLabel,
+        tier: "straightFlush",
+      };
+    }
+    if (ctx.pairBeaters.length > 0) {
+      return {
+        violated: "P1",
+        preferred: "P2",
+        looseRank: ctx.minPairRank,
+        beatLabel: ctx.beatLabel,
+        tier: "straightFlush",
+      };
+    }
+    if (handHasJoker && ctx.beaters.some((item) => item.mainRank === "SJ" || item.mainRank === "BJ")) {
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: "SJ",
+        beatLabel: ctx.beatLabel,
+        tier: "straightFlush",
+      };
+    }
+  }
+
+  const straightBreak = resolveStraightBreakForSingle(rank, hand, levelRank, tableContext);
+  if (straightBreak.breaksStraight && ctx.hasNoStraightBreakBeater) {
+    if (ctx.minBeatingRank && rank === ctx.minBeatingRank) {
+      return { violated: null, preferred: "P1", looseRank: rank, beatLabel: ctx.beatLabel, tier: "straight" };
+    }
+    return {
+      violated: "P1",
+      preferred: "P1",
+      looseRank: ctx.minNoStraightBreakRank,
+      beatLabel: ctx.beatLabel,
+      tier: "straight",
+    };
+  }
+
+  const tripleReserves = findTripleCompanionPairReserves(hand, levelRank);
+  const jokerReserveTarget = shouldPreferJokerOverReservedPairBreak(ctx, tripleReserves);
+  const hasSfSafeNaturalLoose = ctx.looseBeaters.some(
+    (item) => !(item.cards ?? []).some((card) => isWildCard(card, levelRank))
+      && !singleRankBreaksStraightFlush(item.mainRank, hand, levelRank, tableContext),
+  );
+  const hasSfSafePlayableLoose = ctx.playableLooseBeaters.some(
+    (item) => !singleRankBreaksStraightFlush(item.mainRank, hand, levelRank, tableContext),
+  );
+  if (jokerReserveTarget && handHasJoker) {
+    if (rank === "SJ" || rank === "BJ") {
+      if (!hasSfSafeNaturalLoose && !hasSfSafePlayableLoose) {
+        return { violated: null, preferred: "P1", looseRank: rank, beatLabel: ctx.beatLabel, tier: "joker" };
+      }
+    }
+    if (rank === jokerReserveTarget.companionPairRank) {
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: ctx.minLooseRank,
+        beatLabel: ctx.beatLabel,
+        tier: "pair",
+      };
+    }
+  }
+
+  if (shouldPreferMidGameJokerOverLevelSingle(hand, levelRank, previousPlay, ctx, tableContext)) {
+    if (rank === "SJ" || rank === "BJ") {
+      return { violated: null, preferred: "P1", looseRank: rank, beatLabel: ctx.beatLabel, tier: "joker" };
+    }
+    const usesWildSingle = (candidate.cards ?? []).some((card) => isWildCard(card, levelRank));
+    if (rank === levelRank || usesWildSingle) {
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: "SJ",
+        beatLabel: ctx.beatLabel,
+        tier: "joker",
+      };
+    }
+  }
+
+  const breaksCandidateStraightFlush = singleRankBreaksStraightFlush(rank, hand, levelRank, tableContext);
+  const looseOnlyBreaksStraightFlush = ctx.looseBeaters.length > 0
+    && ctx.looseBeaters.every((item) => singleRankBreaksStraightFlush(item.mainRank, hand, levelRank, tableContext));
+
+  if (breaksCandidateStraightFlush && tier === "loose" && ctx.pairBeaters.length > 0) {
+    return {
+      violated: "P1",
+      preferred: "P1",
+      looseRank: ctx.minPairRank,
+      beatLabel: ctx.beatLabel,
+      tier: "straightFlush",
+    };
+  }
+
+  if (
+    tier === "pair"
+    && ctx.pairBeaters.some((item) => item.mainRank === rank)
+    && looseOnlyBreaksStraightFlush
+  ) {
+    return { violated: null, preferred: "P1", looseRank: rank, beatLabel: ctx.beatLabel, tier: "pair" };
+  }
+
   if (ctx.hasLooseBeater && tier === "loose") {
-    const straightBreak = resolveStraightBreakForSingle(rank, hand, levelRank);
     if (straightBreak.breaksStraight && ctx.hasSafeLooseBeater) {
       return {
         violated: "P1",
@@ -1399,8 +2461,24 @@ export function diagnoseBeatSingleViolation(candidate, hand, levelRank, tableCon
         tier: "straight",
       };
     }
+    if (ctx.hasSafeLooseBeater && candidate.power > ctx.minSafeLoosePower) {
+      const resolvedLevel = tableContext.levelRank ?? levelRank ?? "2";
+      if (
+        candidate.mainRank === resolvedLevel
+        && opponentsWithOneCard(tableContext).length > 0
+      ) {
+        return null;
+      }
+      return {
+        violated: "P1",
+        preferred: "P1",
+        looseRank: ctx.minSafeLooseRank,
+        beatLabel: ctx.beatLabel,
+        tier: "loose",
+      };
+    }
   }
-  if ((ctx.hasPlayableLooseBeater || ctx.hasNaturalLooseBeater) && tier !== "loose") {
+  if ((hasSfSafePlayableLoose || hasSfSafeNaturalLoose) && tier !== "loose") {
     const code = tier === "plate" ? "P4" : tier === "bomb" ? "P4" : tier === "triple" ? "P3" : "P1";
     return {
       violated: code,
@@ -1422,6 +2500,56 @@ export function diagnoseBeatSingleViolation(candidate, hand, levelRank, tableCon
   return { violated: null, preferred: null, looseRank: ctx.minLooseRank, beatLabel: ctx.beatLabel, tier };
 }
 
+/** 跟牌压对手三张（P1 延伸：不宜拆顺子/同花顺/四炸组三张压小三张） */
+export function isFollowingOpponentTriple(previousPlay, levelRank, tableContext) {
+  if (!tableContext.opponentActive || !tableContext.hasRegularWinner) return false;
+  return previousPlay?.type === PLAY_TYPES.triple;
+}
+
+/** 跟牌压对手钢板（P1/P4 延伸：不宜拆同花顺/跑道组钢板压牌） */
+export function isFollowingOpponentPlane(previousPlay, levelRank, tableContext) {
+  if (!tableContext.opponentActive || !tableContext.hasRegularWinner) return false;
+  return previousPlay?.type === PLAY_TYPES.plane;
+}
+
+/** 诊断须压同型常规牌时拆顺子/同花顺/四炸、却无结构安全压牌的违规 */
+export function diagnoseBeatRoutineStructureViolation(candidate, hand, levelRank, tableContext) {
+  const previousPlay = tableContext.previousPlay ?? null;
+  if (!tableContext.opponentActive || !previousPlay || previousPlay.type === PLAY_TYPES.pass) return null;
+  if (candidate?.type !== previousPlay.type) return null;
+  if (
+    candidate.type !== PLAY_TYPES.triple
+    && candidate.type !== PLAY_TYPES.pair
+    && candidate.type !== PLAY_TYPES.tripleWithPair
+    && candidate.type !== PLAY_TYPES.plane
+  ) return null;
+  if (!shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank)) return null;
+  const premiumBreak = breaksStrategicPremiumForRoutineBeat(
+    candidate,
+    hand,
+    levelRank,
+    tableContext.preferredGroups ?? null,
+  );
+  if (!premiumBreak) return null;
+  const shapeLabel = candidate.type === PLAY_TYPES.pair
+    ? "对"
+    : candidate.type === PLAY_TYPES.tripleWithPair
+      ? "三带二"
+      : candidate.type === PLAY_TYPES.plane
+        ? "钢板"
+        : "三张";
+  return {
+    violated: "P1",
+    premiumBreak,
+    summary: `不宜拆${premiumBreak}组${shapeLabel}压牌，宜过牌保留结构`,
+  };
+}
+
+/** @deprecated 请用 diagnoseBeatRoutineStructureViolation */
+export function diagnoseBeatTripleStructureViolation(candidate, hand, levelRank, tableContext) {
+  return diagnoseBeatRoutineStructureViolation(candidate, hand, levelRank, tableContext);
+}
+
 /** 诊断跟牌压对子时拆三同张组对、却有整对够压的违规 */
 export function diagnoseBeatPairViolation(candidate, hand, levelRank, tableContext) {
   const previousPlay = tableContext.previousPlay ?? null;
@@ -1433,7 +2561,7 @@ export function diagnoseBeatPairViolation(candidate, hand, levelRank, tableConte
   const held = physicalRankCount(hand, rank);
   const tripleBreak = resolveTripleBreakForPair(rank, hand, levelRank);
 
-  if (ctx.hasWholePairBeater && held >= 3 && tripleBreak.splitsTriple) {
+  if (ctx.hasWholePairBeater && isStructureBreakingPairBeat(candidate, hand, levelRank)) {
     return {
       violated: "P2",
       preferred: "P2",
@@ -1496,11 +2624,88 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     && resolvedHand.length > 0
     && !skipP1SingleBeat
   ) {
-    const ctx = analyzeMustBeatSingleContext(resolvedHand, levelRank, previousPlay, tableContext);
+    const ctx = tableContext._mustBeatSingleCtx
+      ?? analyzeMustBeatSingleContext(resolvedHand, levelRank, previousPlay, tableContext);
     const rank = candidate.mainRank;
-    const tier = getRankStructureTier(resolvedHand, rank, levelRank);
+    const tier = effectiveBeatSingleTier(resolvedHand, rank, levelRank);
     const bombInfo = analyzeRankAvailability(resolvedHand, rank, levelRank);
     const lockedInPlate = (bombInfo.lockedEntries ?? []).some((entry) => entry.structure === "钢板");
+    const straightBreak = resolveStraightBreakForSingle(rank, resolvedHand, levelRank, tableContext);
+    const breaksStraightFlush = straightBreak.breaksStraight
+      && straightBreak.straightLabel?.includes("同花顺");
+    const looseBeaterBreaksStraightFlush = ctx.looseBeaters.some((item) =>
+      singleRankBreaksStraightFlush(item.mainRank, resolvedHand, levelRank, tableContext),
+    );
+
+    if (straightBreak.breaksStraight && ctx.hasNoStraightBreakBeater) {
+      if (candidate.power === ctx.minNoStraightBreakPower) {
+        score -= 2800;
+        reasons.push(reasonFromPrinciple("P1", { rank }));
+        principles.push("P1");
+      } else {
+        score += 4200;
+        reasons.push(reasonFromPrinciple("P1", { violation: "structure" }));
+        principles.push("P1");
+        hasStrongConflict = true;
+      }
+    }
+
+    if (breaksStraightFlush && tier === "loose" && ctx.pairBeaters.length > 0) {
+      score += 105_000;
+      reasons.push("【P1】有整对够压，不宜拆同花顺出散单");
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
+
+    const breaksPremiumSf = breaksPremiumStraightOrJokerGroup(
+      candidate,
+      tableContext.preferredGroups ?? [],
+      levelRank,
+    ) || breaksPremiumStraightOrJokerGroup(
+      candidate,
+      strategicGroupsFor(resolvedHand, levelRank, tableContext),
+      levelRank,
+    );
+    if (
+      breaksPremiumSf
+      && (ctx.playableLooseBeaters.length > 0 || ctx.pairBeaters.length > 0)
+    ) {
+      score += 120_000;
+      reasons.push("【P1】不宜拆同花顺/王炸，有散单或可拆对压牌");
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
+
+    const minBeatingRank = ctx.beaters
+      .map((item) => item.mainRank)
+      .sort((left, right) => compareRanks(left, right, levelRank))[0] ?? null;
+    const rankInStraights = rankCountInStrategicStraights(rank, resolvedHand, levelRank, tableContext);
+    if (
+      minBeatingRank
+      && rank === minBeatingRank
+      && straightBreak.breaksStraight
+      && !breaksStraightFlush
+    ) {
+      score -= 7200;
+      reasons.push("【P1】最小编号够压，宜拆顺最小出单");
+      principles.push("P1");
+    }
+    if (
+      minBeatingRank
+      && tier === "loose"
+      && rank !== minBeatingRank
+      && compareRanks(rank, minBeatingRank, levelRank) > 0
+      && !straightBreak.breaksStraight
+      && rankInStraights > 0
+      && physicalRankCount(resolvedHand, rank) > rankInStraights
+      && !(ctx.pairBeaters.some((item) => item.mainRank === rank)
+        && hasSpareSingleOutsideStraights(rank, resolvedHand, levelRank))
+    ) {
+      score += 9200;
+      reasons.push("【P1】有更小编号够压，不宜顺子高张散单");
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
 
     const preferPairOverWild = ctx.pairBeaters.length > 0
       && !ctx.hasPlayableLooseBeater
@@ -1510,9 +2715,76 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     const reservedTriple = tripleReserves.find((item) => item.companionPairRank === rank);
     const jokerReserveTarget = shouldPreferJokerOverReservedPairBreak(ctx, tripleReserves);
 
+    const levelCanBeat = ctx.beaters.some((item) => item.mainRank === levelRank)
+      || (previousPlay?.type === PLAY_TYPES.single
+        && canBeat(classifyPlay([resolvedHand.find((c) => c.rank === levelRank || isWildCard(c, levelRank)) ?? resolvedHand[0]], levelRank), previousPlay));
+    if (
+      previousPlay?.type === PLAY_TYPES.single
+      && previousPlay.mainRank !== "SJ"
+      && previousPlay.mainRank !== "BJ"
+      && compareRanks(previousPlay.mainRank, "J", levelRank) >= 0
+      && compareRanks(previousPlay.mainRank, levelRank, levelRank) < 0
+      && levelCanBeat
+    ) {
+      if (rank === levelRank || usesWildSingle) {
+        score -= 2500;
+        reasons.push("【P1】须压中大单宜用级牌，保留A/K控牌");
+        principles.push("P1");
+      } else if (compareRanks(rank, "A", levelRank) >= 0 && rank !== levelRank) {
+        score += 2500;
+        reasons.push("【P1】级牌够压时不宜先出A/K");
+        principles.push("P1");
+      }
+    }
+
+    const handHasJoker = resolvedHand.some((card) => isJoker(card));
+    const reserveJokerForLevelControl = shouldReserveJokerForLevelEndgame(
+      resolvedHand,
+      levelRank,
+      tableContext,
+      ctx,
+    );
+    const midGameJokerTakeTrick = shouldPreferMidGameJokerOverLevelSingle(
+      resolvedHand,
+      levelRank,
+      previousPlay,
+      ctx,
+      tableContext,
+    );
+
+    if (midGameJokerTakeTrick) {
+      if (rank === "SJ" || rank === "BJ") {
+        score -= 12_000;
+        reasons.push("【P1】手牌仍多，宜王压大单夺权，再小单走牌");
+        principles.push("P1");
+      } else if (rank === levelRank || usesWildSingle) {
+        score += 12_000;
+        reasons.push("【P1】手牌仍多，宜王夺权，不宜先耗级牌/逢人配");
+        principles.push("P1");
+        hasStrongConflict = true;
+      }
+    }
+
+    if (reserveJokerForLevelControl) {
+      if (rank === levelRank) {
+        score -= 14_000;
+        reasons.push("【P1】级牌已是最大单张，够压宜出级牌，留王控场收尾");
+        principles.push("P1");
+      } else if (rank === "SJ" || rank === "BJ") {
+        score += 14_000;
+        reasons.push("【P1】级牌够压时留王控场，不宜先出王");
+        principles.push("P1");
+        hasStrongConflict = true;
+      } else if (tier === "loose") {
+        score += 8000;
+        reasons.push("【P1】留王控场时，宜级牌压单而非小散单");
+        principles.push("P1");
+      }
+    }
+
     if (ctx.hasPlayableLooseBeater || ctx.hasNaturalLooseBeater) {
       if (tier === "loose") {
-        const straightBreak = resolveStraightBreakForSingle(rank, resolvedHand, levelRank);
+        const straightBreak = resolveStraightBreakForSingle(rank, resolvedHand, levelRank, tableContext);
         if (straightBreak.breaksStraight && ctx.hasSafeLooseBeater) {
           score += 4200;
           reasons.push(reasonFromPrinciple("P1", { violation: "structure" }));
@@ -1522,6 +2794,11 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
           score -= 2800;
           reasons.push(reasonFromPrinciple("P1", { rank }));
           principles.push("P1");
+        } else if (ctx.hasSafeLooseBeater && candidate.power > ctx.minSafeLoosePower) {
+          score += 4200;
+          reasons.push(reasonFromPrinciple("P1", { violation: "structure" }));
+          principles.push("P1");
+          hasStrongConflict = true;
         } else if (!ctx.hasSafeLooseBeater && candidate.power === ctx.minLoosePower) {
           score -= 2800;
           reasons.push(reasonFromPrinciple("P1", { rank }));
@@ -1533,10 +2810,20 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
         }
       } else if (rank === "SJ" || rank === "BJ") {
         if (jokerReserveTarget) {
-          score -= 4200;
+          score -= 9000;
           reasons.push(
             `【P1】对${jokerReserveTarget.companionPairRank}留给${jokerReserveTarget.tripleRank}三带二，宜用${rank === "BJ" ? "大王" : "小王"}压单`,
           );
+          principles.push("P1");
+        } else if (shouldPreferMidGameJokerOverLevelSingle(
+          resolvedHand,
+          levelRank,
+          previousPlay,
+          ctx,
+          tableContext,
+        )) {
+          score -= 4000;
+          reasons.push("【P1】手牌仍多，宜王压大单夺权，再小单走牌");
           principles.push("P1");
         } else {
           score += 3800;
@@ -1545,7 +2832,11 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
           hasStrongConflict = true;
         }
       } else if (tier === "pair") {
-        if (reservedTriple) {
+        if (looseBeaterBreaksStraightFlush && rank === ctx.minPairRank) {
+          score -= 9200;
+          reasons.push("【P1】散单会拆同花顺，宜最小整对够压");
+          principles.push("P1");
+        } else if (reservedTriple) {
           score += 6400;
           reasons.push(`【P4】对${rank}留给${reservedTriple.tripleRank}三带二，不宜拆对压单`);
           principles.push("P4");
@@ -1579,7 +2870,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     } else if (preferPairOverWild) {
       if (usesWildSingle || rank === "SJ" || rank === "BJ") {
         if ((rank === "SJ" || rank === "BJ") && jokerReserveTarget) {
-          score -= 5200;
+          score -= 9000;
           reasons.push(
             `【P1】对${jokerReserveTarget.companionPairRank}留给${jokerReserveTarget.tripleRank}三带二，宜用${rank === "BJ" ? "大王" : "小王"}压单`,
           );
@@ -1605,10 +2896,44 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
           reasons.push(reasonFromPrinciple("P2"));
           principles.push("P2");
         }
+      } else if (
+        tier === "loose"
+        && ctx.pairBeaters.some((item) => item.mainRank === rank)
+        && hasSpareSingleOutsideStraights(rank, resolvedHand, levelRank)
+      ) {
+        if (candidate.power === ctx.minPairPower) {
+          score -= 2800;
+          reasons.push(reasonFromPrinciple("P2"));
+          principles.push("P2");
+        } else {
+          score += 1800;
+          reasons.push(reasonFromPrinciple("P2"));
+          principles.push("P2");
+        }
       } else if (tier === "pair") {
         score += 1800;
         reasons.push(reasonFromPrinciple("P2"));
         principles.push("P2");
+      } else if (lockedInPlate || tier === "plate") {
+        score += 14_000;
+        reasons.push("【P4】有对子可拆压单，不宜拆钢板出单");
+        principles.push("P4");
+        hasStrongConflict = true;
+      } else if (tier === "triple" && ctx.pairBeaters.length > 0) {
+        score += 12_000;
+        reasons.push("【P4】有对子可拆压单，不宜拆三同张出单");
+        principles.push("P4");
+        hasStrongConflict = true;
+      } else if (bombInfo.effectiveBombCount >= 4) {
+        score += 15_000;
+        reasons.push("【P4】有对子可拆压单，不宜拆炸弹出单");
+        principles.push("P4");
+        hasStrongConflict = true;
+      } else if (tier === "triple" && physicalRankCount(resolvedHand, rank) >= 4) {
+        score += 15_000;
+        reasons.push("【P4】有对子可拆压单，不宜拆四张同点出单");
+        principles.push("P4");
+        hasStrongConflict = true;
       }
     } else if (tier === "pair") {
       score -= 1400;
@@ -1629,11 +2954,14 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     const tripleBreak = resolveTripleBreakForPair(rank, resolvedHand, levelRank);
 
     if (ctx.hasWholePairBeater) {
-      if (held === 2 && candidate.power === ctx.minWholePairPower) {
+      if (
+        !isStructureBreakingPairBeat(candidate, resolvedHand, levelRank)
+        && candidate.power === ctx.minWholePairPower
+      ) {
         score -= 2600;
         reasons.push(`【P2】有整对${rankLabel(ctx.minWholePairRank)}够压，优先出对${rankLabel(ctx.minWholePairRank)}`);
         principles.push("P2");
-      } else if (held >= 3 && tripleBreak.splitsTriple) {
+      } else if (isStructureBreakingPairBeat(candidate, resolvedHand, levelRank)) {
         score += 5200;
         const structureLabel = tripleBreak.plateLabel ?? tripleBreak.tripleLabel ?? `三张${rankLabel(rank)}`;
         reasons.push(`【P2】有整对${rankLabel(ctx.minWholePairRank)}够压，不宜拆${structureLabel}组对${rankLabel(rank)}`);
@@ -1675,31 +3003,210 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     }
   }
 
+  // —— P1 延伸：须压同型常规牌不宜拆顺子/同花顺/四炸 ——
+  if (
+    (isFollowingOpponentTriple(previousPlay, levelRank, tableContext)
+      || isFollowingOpponentPair(previousPlay, levelRank, tableContext)
+      || isFollowingOpponentTripleWithPair(previousPlay, levelRank, tableContext)
+      || isFollowingOpponentPlane(previousPlay, levelRank, tableContext))
+    && (candidate.type === PLAY_TYPES.triple
+      || candidate.type === PLAY_TYPES.pair
+      || candidate.type === PLAY_TYPES.tripleWithPair
+      || candidate.type === PLAY_TYPES.plane)
+    && resolvedHand.length > 0
+  ) {
+    const premiumBreak = breaksStrategicPremiumForRoutineBeat(
+      candidate,
+      resolvedHand,
+      levelRank,
+      tableContext.preferredGroups ?? null,
+    );
+    if (
+      premiumBreak
+      && shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank)
+    ) {
+      const shapeLabel = candidate.type === PLAY_TYPES.pair
+        ? "对"
+        : candidate.type === PLAY_TYPES.tripleWithPair
+          ? "三带二"
+          : candidate.type === PLAY_TYPES.plane
+            ? "钢板"
+            : "三张";
+      score += 12_000;
+      reasons.push(`【P1】不宜拆${premiumBreak}组${shapeLabel}压牌，宜过牌保留结构`);
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
+  }
+
+  // —— P1 延伸：须压连对拆同花顺跑道（sf-runway-guard 单一真相源） ——
+  if (
+    isFollowingOpponentPair(previousPlay, levelRank, tableContext)
+    && previousPlay?.type === PLAY_TYPES.consecutivePairs
+    && candidate.type === PLAY_TYPES.consecutivePairs
+    && resolvedHand.length > 0
+    && shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    const cpSfPenalty = mustBeatCpSfRunwayPrinciplesPenalty(
+      candidate,
+      resolvedHand,
+      levelRank,
+      tableContext,
+    );
+    if (cpSfPenalty) {
+      score += cpSfPenalty.score;
+      reasons.push(cpSfPenalty.reason);
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
+  }
+
+  // —— P1 延伸：须压三带二拆同花顺跑道（sf-runway-guard 单一真相源） ——
+  if (
+    isFollowingOpponentTripleWithPair(previousPlay, levelRank, tableContext)
+    && candidate.type === PLAY_TYPES.tripleWithPair
+    && resolvedHand.length > 0
+    && shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    const twpSfPenalty = mustBeatTwpSfRunwayPrinciplesPenalty(
+      candidate,
+      resolvedHand,
+      levelRank,
+      tableContext,
+    );
+    if (twpSfPenalty) {
+      score += twpSfPenalty.score;
+      reasons.push(twpSfPenalty.reason);
+      principles.push("P1");
+      hasStrongConflict = true;
+    }
+  }
+
+  // —— P4 延伸：须压钢板拆同花顺，池中有同花顺可压 ——
+  if (
+    isFollowingOpponentPlane(previousPlay, levelRank, tableContext)
+    && candidate.type === PLAY_TYPES.plane
+    && resolvedHand.length > 0
+    && shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    const premiumBreak = breaksStrategicPremiumForRoutineBeat(candidate, resolvedHand, levelRank);
+    if (premiumBreak?.includes("同花顺")) {
+      const pool = tableContext._candidates ?? [];
+      const sfBeater = pool.some(
+        (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+      );
+      if (sfBeater) {
+        score += 14_000;
+        reasons.push(`【P4】有同花顺可压，不宜拆${premiumBreak}组钢板`);
+        principles.push("P4");
+        hasStrongConflict = true;
+      }
+    }
+  }
+
+  if (
+    candidate.type === PLAY_TYPES.pass
+    && shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    const pool = tableContext._candidates ?? [];
+    if (!hasStructureSafeRoutineBeater(
+      pool,
+      previousPlay,
+      resolvedHand,
+      levelRank,
+      tableContext.preferredGroups ?? null,
+    )) {
+      const sfCanBeat = previousPlay?.type === PLAY_TYPES.plane
+        && pool.some((item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay));
+      if (!sfCanBeat) {
+        score -= 9000;
+        reasons.push("【P1】无结构安全同型可压，宜过牌保留顺子/同花顺/炸弹");
+        principles.push("P1");
+      }
+    }
+  }
+
   // —— P5–P6：接风 / 领出 ——
   const { leadMode, isOpening } = tableContext;
   const isLeadTurn = isOpening && leadMode !== "must-beat";
   if (isLeadTurn && !BOMB_TYPES.has(candidate.type)) {
     const steelPlate = hasSteelPlate(resolvedHand, levelRank);
     const recovery = hasBigJokerRecovery(resolvedHand);
+    const partnerSprintFinish = partnerHandCount(tableContext) === 1;
 
-    // 真开局：有散单或成组结构时，不宜拆对/拆三出单张
+    // 接风/领出：队友剩1张冲刺，宜小单送队友走完（优于三带二/连对减手）
     if (
-      leadMode === "fresh-open"
+      (leadMode === "fresh-open" || leadMode === "catch-wind")
+      && partnerSprintFinish
+      && resolvedHand.length > 1
+    ) {
+      if (
+        candidate.type === PLAY_TYPES.single
+        && candidate.mainRank
+        && !isJoker({ rank: candidate.mainRank })
+        && physicalRankCount(resolvedHand, candidate.mainRank) === 1
+      ) {
+        score -= leadMode === "catch-wind" ? 7400 : 6200;
+        reasons.push("【P10】队友剩1张，宜小单送队友走完");
+        principles.push("P10");
+      } else if (
+        candidate.type === PLAY_TYPES.tripleWithPair
+        || candidate.type === PLAY_TYPES.consecutivePairs
+        || candidate.type === PLAY_TYPES.plane
+      ) {
+        score += leadMode === "catch-wind" ? 8000 : 6800;
+        reasons.push("【P10】队友剩1张冲刺，不宜成组抢权，宜小单送队友");
+        principles.push("P10");
+        hasStrongConflict = true;
+      }
+    }
+
+    // 领出/接风：有散单或成组结构时，不宜拆对/拆三出单张
+    if (
+      (leadMode === "fresh-open" || leadMode === "catch-wind")
       && candidate.type === PLAY_TYPES.single
       && candidate.mainRank
     ) {
       const rank = candidate.mainRank;
       const tier = getRankStructureTier(resolvedHand, rank, levelRank);
+      const beatTier = effectiveBeatSingleTier(resolvedHand, rank, levelRank);
       const looseRanks = looseLeadSingleRanks(resolvedHand, levelRank);
       if (tier === "triple") {
-        score += 7500;
-        reasons.push("【P1】开局拆三同张出单，宜出对子或成组结构");
+        score += leadMode === "catch-wind" ? 10_500 : 7500;
+        reasons.push("【P1】不宜拆三同张出单，宜三带二或对子减手");
         principles.push("P1");
         hasStrongConflict = true;
-      } else if (tier === "pair" && looseRanks.length > 0) {
-        score += 7000;
-        reasons.push(`【P1】开局有散单，不宜拆对${rankLabel(rank)}出单张`);
+      } else if (beatTier === "pair" && looseRanks.length > 0) {
+        score += leadMode === "catch-wind" ? 9000 : 7000;
+        reasons.push(`【P1】有散单，不宜拆对${rankLabel(rank)}出单张`);
         principles.push("P1");
+        hasStrongConflict = true;
+      } else if (tier === "bomb" || isThickBombSingleLead(candidate, resolvedHand)) {
+        const held = physicalRankCount(resolvedHand, rank);
+        score += leadMode === "catch-wind" ? 12_000 : 10_500;
+        const altHint = looseRanks.length > 0
+          ? `宜先出散单${looseRanks.map(rankLabel).join("、")}或成组减手`
+          : "宜散单或成组减手";
+        reasons.push(`【P1】不宜拆${held}张${rankLabel(rank)}炸弹出单，${altHint}`);
+        principles.push("P1");
+        hasStrongConflict = true;
+      }
+    }
+
+    if (
+      (leadMode === "fresh-open" || leadMode === "catch-wind")
+    ) {
+      const sfP4 = leadSfRunwayPrinciplesPenalty(
+        candidate,
+        resolvedHand,
+        levelRank,
+        tableContext,
+        resolvedHand.length,
+      );
+      if (sfP4) {
+        score += sfP4.score;
+        reasons.push(sfP4.reason);
+        principles.push("P4");
         hasStrongConflict = true;
       }
     }
@@ -1720,6 +3227,33 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       && candidate.length >= 6
       && !steelPlate
     ) {
+      if (leadMode === "catch-wind") {
+        const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0;
+        const pool = tableContext._candidates ?? [];
+        const sfPremiumAlt = pool.some(
+          (item) => item.type === PLAY_TYPES.straightFlush
+            && isCatchWindPremiumReduction(item, { ...tableContext, hand: resolvedHand }),
+        );
+        if (
+          sfPremiumAlt
+          && playerJustWonTrickWithGroupPlay(tableContext.state, playerIndex)
+        ) {
+          const usesWildcard = (candidate.cards ?? []).some((card) => isWildCard(card, levelRank));
+          const ranksUsed = new Set(
+            (candidate.cards ?? []).filter((card) => !isJoker(card)).map((card) => card.rank),
+          );
+          let pairRankBreaks = 0;
+          for (const rank of ranksUsed) {
+            if (physicalRankCount(resolvedHand, rank) >= 2) pairRankBreaks += 1;
+          }
+          if (usesWildcard && pairRankBreaks >= 2) {
+            score += resolvedHand.length >= 15 ? 3800 : 3200;
+            reasons.push("接风有同花顺减手路线，不宜逢人配拆对凑连对");
+            principles.push("P5");
+            hasStrongConflict = true;
+          }
+        }
+      }
       const tripleBreak = resolveTripleBreakForConsecutivePairs(candidate, resolvedHand, levelRank);
       if (tripleBreak.splitsTriple) {
         const reserves = analyzeReserveTripleForTripleWithPair(
@@ -1748,9 +3282,23 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
         }
       } else {
         const heavyHand = resolvedHand.length >= 15;
-        score -= heavyHand ? 5600 : 4200;
-        reasons.push(reasonFromPrinciple("P5", { shape: "连对", heavyHand }));
-        principles.push("P5");
+        const prematureEntries = analyzePrematureTripleWithPairLead(
+          resolvedHand,
+          levelRank,
+          { ...tableContext, hand: resolvedHand },
+        );
+        if (
+          prematureEntries.length > 0
+          && !resolveTripleBreakForConsecutivePairs(candidate, resolvedHand, levelRank).splitsTriple
+        ) {
+          score -= heavyHand ? 13_200 : 11_000;
+          reasons.push(`【P5】${prematureEntries[0].reason}`);
+          principles.push("P5");
+        } else {
+          score -= heavyHand ? 5600 : 4200;
+          reasons.push(reasonFromPrinciple("P5", { shape: "连对", heavyHand }));
+          principles.push("P5");
+        }
       }
     } else if (
       candidate.type === PLAY_TYPES.consecutivePairs
@@ -1761,6 +3309,28 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       reasons.push("领出/接风有完整钢板，不宜拆点凑连对");
       principles.push("P5");
       hasStrongConflict = true;
+    } else if (
+      leadMode === "catch-wind"
+      && candidate.type === PLAY_TYPES.straightFlush
+      && (candidate.cards?.length ?? 0) < resolvedHand.length
+      && resolvedHand.length > 10
+      && !isCatchWindPremiumReduction(candidate, { ...tableContext, hand: resolvedHand })
+    ) {
+      score += resolvedHand.length >= 15 ? 10_000 : 8200;
+      reasons.push("【P5】接风手牌仍多，不宜空扔同花顺");
+      principles.push("P5");
+      hasStrongConflict = true;
+    } else if (
+      leadMode === "catch-wind"
+      && candidate.type === PLAY_TYPES.straightFlush
+      && isCatchWindPremiumReduction(candidate, { ...tableContext, hand: resolvedHand })
+    ) {
+      const heavyHand = resolvedHand.length >= 15;
+      score -= heavyHand ? 5600 : 4200;
+      reasons.push(heavyHand
+        ? "【P5】手牌仍多，接风同花顺减五张抢节奏"
+        : "【P5】接风同花顺减手，优于拆对凑连对");
+      principles.push("P5");
     } else if (candidate.type === PLAY_TYPES.tripleWithPair && steelPlate && recovery) {
       const tripleHeld = physicalRankCount(resolvedHand, candidate.mainRank);
       if (tripleHeld === 3) {
@@ -1790,18 +3360,39 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       principles.push("P6");
     }
 
-    // 真开局：大王可回收时散单试探优于三带二减手（P6 延伸）
+    // 真开局：大王可回收时散单试探优于三带二减手（P6 延伸）；待组三带二的三同张除外
     if (leadMode === "fresh-open" && recovery && resolvedHand.length >= 15) {
       const looseRanks = looseLeadSingleRanks(resolvedHand, levelRank);
+      const reservedTriples = analyzeReserveTripleForTripleWithPair(
+        resolvedHand,
+        levelRank,
+        { ...tableContext, hand: resolvedHand },
+      );
+      const prematureTriples = analyzePrematureTripleWithPairLead(
+        resolvedHand,
+        levelRank,
+        { ...tableContext, hand: resolvedHand },
+      );
+      const reservedTripleRanks = new Set(reservedTriples.map((entry) => entry.tripleRank));
       if (
         candidate.type === PLAY_TYPES.single
         && candidate.mainRank
         && looseRanks.includes(candidate.mainRank)
       ) {
-        score -= 6800;
-        reasons.push(reasonFromPrinciple("P6"));
-        principles.push("P6");
-      } else if (candidate.type === PLAY_TYPES.tripleWithPair) {
+        if (prematureTriples.length > 0) {
+          score += resolvedHand.length >= 15 ? 7600 : 6400;
+          reasons.push(`【P5】${prematureTriples[0].reason.replace("宜先走连对减手", "不宜先小单浪费带对路线")}`);
+          principles.push("P5");
+        } else {
+          score -= 6800;
+          reasons.push(reasonFromPrinciple("P6"));
+          principles.push("P6");
+        }
+      } else if (
+        candidate.type === PLAY_TYPES.tripleWithPair
+        && !reservedTripleRanks.has(candidate.mainRank)
+        && !prematureTriples.some((entry) => entry.tripleRank === candidate.mainRank)
+      ) {
         score += 6400;
         reasons.push(reasonFromPrinciple("P6"));
         principles.push("P6");
@@ -1850,7 +3441,18 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       const tripleRank = candidate.mainRank;
       const tripleUsed = (candidate.cards ?? []).filter((card) => card.rank === tripleRank).length;
       const bombInfo = analyzeRankAvailability(resolvedHand, tripleRank, levelRank);
-      if (tripleUsed >= 3 && physicalRankCount(resolvedHand, tripleRank) >= 3
+      const prematureEntries = analyzePrematureTripleWithPairLead(
+        resolvedHand,
+        levelRank,
+        { ...tableContext, hand: resolvedHand },
+      );
+      const premature = prematureEntries.find((entry) => entry.tripleRank === tripleRank);
+      if (premature) {
+        score += resolvedHand.length >= 15 ? 11_500 : 9800;
+        reasons.push(`【P5】${premature.reason}`);
+        principles.push("P5");
+        hasStrongConflict = true;
+      } else if (tripleUsed >= 3 && physicalRankCount(resolvedHand, tripleRank) >= 3
         && bombInfo.effectiveBombCount < 4 && physicalRankCount(resolvedHand, tripleRank) < 4) {
         const reserves = analyzeReserveTripleForTripleWithPair(
           resolvedHand,
@@ -1863,7 +3465,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
             && item.length >= 6
             && !resolveTripleBreakForConsecutivePairs(item, resolvedHand, levelRank).splitsTriple,
         );
-        if (reserve && (altCp || resolvedHand.length >= 15) && !(leadMode === "fresh-open" && recovery) && !heavyCatchWind) {
+        if (reserve && (altCp || resolvedHand.length >= 15) && !heavyCatchWind) {
           score -= resolvedHand.length >= 15 ? 4800 : 4200;
           reasons.push(`【P5】${rankLabel(tripleRank)}三带二一次减五张，优于拆三张凑连对`);
           principles.push("P5");
@@ -1871,19 +3473,32 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       }
     }
 
-    // 接风：有对可配时三带二优于裸三张
+    // 接风：有对可配时三带二优于裸三张（四炸及以上除外）
     if (leadMode === "catch-wind" && candidate.type === PLAY_TYPES.tripleWithPair) {
       const tripleRank = candidate.mainRank;
+      const physicalHeld = physicalRankCount(resolvedHand, tripleRank);
       const solePair = solePairForTripleRank(resolvedHand, levelRank, tripleRank);
       const pairUsed = (candidate.cards ?? []).find((card) => card.rank !== tripleRank)?.rank ?? null;
-      if (solePair && pairUsed === solePair && !heavyCatchWind) {
+      if (physicalHeld >= 4) {
+        score += resolvedHand.length >= 15 ? 7200 : 6000;
+        reasons.push(`【P9】接风不宜拆四张${rankLabel(tripleRank)}组三带二，应保留炸弹`);
+        principles.push("P9");
+        hasStrongConflict = true;
+      } else if (solePair && pairUsed === solePair && !heavyCatchWind) {
         score -= resolvedHand.length >= 15 ? 5200 : 4600;
         reasons.push(`【P5】接风${rankLabel(tripleRank)}带对${rankLabel(solePair)}一次减五张，优于裸三张`);
         principles.push("P5");
       }
-    } else if (leadMode === "catch-wind" && candidate.type === PLAY_TYPES.triple) {
+    } else if (isLeadTurn && candidate.type === PLAY_TYPES.triple) {
       const solePair = solePairForTripleRank(resolvedHand, levelRank, candidate.mainRank);
-      if (solePair) {
+      const tripleAnalysis = analyzeRankAvailability(resolvedHand, candidate.mainRank, levelRank);
+      const lockedInPlate = (tripleAnalysis.lockedEntries ?? []).some((e) => e.structure === "钢板");
+      if (lockedInPlate && steelPlate) {
+        score += resolvedHand.length >= 15 ? 14_000 : 12_000;
+        reasons.push(`【P5】手上有完整钢板，不宜裸三张${rankLabel(candidate.mainRank)}拆钢板`);
+        principles.push("P5");
+        hasStrongConflict = true;
+      } else if (leadMode === "catch-wind" && solePair) {
         score += resolvedHand.length >= 15 ? 6800 : 5400;
         reasons.push(`【P5】手上有对${rankLabel(solePair)}可配，不宜裸三张${rankLabel(candidate.mainRank)}`);
         principles.push("P5");
@@ -1998,16 +3613,44 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
         }
       }
 
-      const bombSizeOf = (item) => item.bombSize ?? item.cards?.length ?? 4;
       const minBombSize = Math.min(...bombBeaters.map(bombSizeOf));
       const candidateBombSize = bombSizeOf(candidate);
       const sizeGap = candidateBombSize - minBombSize;
       const physicalHeld = physicalRankCount(resolvedHand, candidate.mainRank);
+      const standalonePureBeater = hasStandalonePureBombBeater(resolvedHand, bombBeaters);
+      if (isSplitBombPlay(candidate, resolvedHand)) {
+        score += 18_000;
+        reasons.push("不宜拆厚炸出四炸，应满张出炸或过牌");
+        principles.push("P7");
+        hasStrongConflict = true;
+      } else if (
+        isThickRankBombPlay(candidate, resolvedHand)
+        && candidateBombSize < physicalHeld
+        && standalonePureBeater
+      ) {
+        score += isSplitBombPlay(candidate, resolvedHand) ? 16_000 : 12_000;
+        reasons.push(reasonFromPrinciple("P7", { standalonePureBomb: true }));
+        principles.push("P7");
+        hasStrongConflict = true;
+      } else if (
+        candidateBombSize === 4
+        && physicalHeld === 4
+        && standalonePureBeater
+        && bombBeaters.some((item) => isThickRankBombPlay(item, resolvedHand))
+      ) {
+        score -= 6400;
+        reasons.push(reasonFromPrinciple("P7", { standalonePureBomb: true }));
+        principles.push("P7");
+      }
       const wantFullBomb = prefersFullBombForControl(
         resolvedHand,
         candidate.mainRank,
         previousPlay,
         tableContext,
+      ) || (
+        BOMB_TYPES.has(previousPlay.type)
+        && !standalonePureBeater
+        && physicalHeld > 4
       );
 
       if (wantFullBomb) {
@@ -2048,6 +3691,26 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
           hasStrongConflict = true;
         }
       }
+    }
+  }
+
+  // —— P7 延伸：须压钢板有普通炸弹可压，不宜亮同花顺 ——
+  if (
+    candidate.type === PLAY_TYPES.straightFlush
+    && isFollowingOpponentPlane(previousPlay, levelRank, tableContext)
+    && previousPlay
+  ) {
+    const bombBeaters = (tableContext._candidates ?? []).filter(
+      (item) => item.type === PLAY_TYPES.bomb && canBeat(item, previousPlay),
+    );
+    const structureSafeBombs = bombBeaters.filter(
+      (item) => !breaksStrategicStraightFlush(item, resolvedHand, levelRank),
+    );
+    if (structureSafeBombs.length > 0) {
+      score += 16_000;
+      reasons.push("【P7】有普通炸弹可压钢板，不宜亮同花顺");
+      principles.push("P7");
+      hasStrongConflict = true;
     }
   }
 
@@ -2158,8 +3821,22 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       || (candidate.cards ?? []).filter((card) => isWildCard(card, levelRank) && card.rank !== candidate.mainRank).length;
     if (lowValueWild) {
       const openingLike = isOpening || leadMode === "fresh-open";
-      score += openingLike ? 7600 : 4200;
-      reasons.push(reasonFromPrinciple("P8"));
+      const smallRoutineBeat = previousPlay
+        && shouldReserveWildForSmallRoutineBeat(tableContext, resolvedHand, previousPlay, levelRank);
+      const wildFillCount = (candidate.wildcardAssignments ?? []).length
+        || (candidate.cards ?? []).filter(
+          (card) => isWildCard(card, levelRank) && card.rank !== candidate.mainRank,
+        ).length;
+      let penalty = openingLike ? 7600 : 4200;
+      if (smallRoutineBeat) {
+        penalty = wildFillCount >= 2 ? 18_000 : 14_000;
+        reasons.push(wildFillCount >= 2
+          ? "【P8】不宜双逢人配压对手小三张/对子，宜过牌保留"
+          : "【P8】不宜逢人配压对手小牌型，宜过牌保留");
+      } else {
+        reasons.push(reasonFromPrinciple("P8"));
+      }
+      score += penalty;
       principles.push("P8");
       hasStrongConflict = true;
     } else if (
@@ -2214,20 +3891,58 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     principles.push("P10");
   }
   if (tableContext.partnerOwnsTrick && !tableContext.isFinishingPlay && !canFinishThisTurn) {
-    if (candidate.type === PLAY_TYPES.pass) {
-      score -= 7200;
-      reasons.push(reasonFromPrinciple("P10"));
+    const yieldPass = shouldYieldPassToPartner(tableContext);
+    if (BOMB_TYPES.has(candidate.type)) {
+      score += 6200 + 4800;
+      reasons.push(reasonFromPrinciple("P10", { stackBomb: true }));
       principles.push("P10");
-    } else {
-      score += 6200;
-      reasons.push(reasonFromPrinciple("P10"));
-      principles.push("P10");
-      if (BOMB_TYPES.has(candidate.type)) {
-        score += 4800;
-        reasons.push(reasonFromPrinciple("P10", { stackBomb: true }));
-        principles.push("P10");
-      }
       hasStrongConflict = true;
+    } else if (yieldPass) {
+      if (candidate.type === PLAY_TYPES.pass) {
+        score -= 7200;
+        reasons.push(reasonFromPrinciple("P10"));
+        principles.push("P10");
+      } else {
+        score += 6200;
+        reasons.push(reasonFromPrinciple("P10"));
+        principles.push("P10");
+        hasStrongConflict = true;
+      }
+    } else if (
+      candidate.type === PLAY_TYPES.pass
+      && opponentsPendingAfterPlayer(tableContext.state, tableContext.playerIndex ?? 0).length > 0
+    ) {
+      score += 6800;
+      reasons.push("【P10】下家对手未表态，不宜盲过，防抢队友小牌");
+      principles.push("P10");
+      hasStrongConflict = true;
+    } else if (
+      candidate.type === PLAY_TYPES.single
+      && previousPlay?.type === PLAY_TYPES.single
+      && canBeat(candidate, previousPlay)
+    ) {
+      const beatCtx = tableContext._mustBeatSingleCtx
+        ?? analyzeMustBeatSingleContext(resolvedHand, levelRank, previousPlay, tableContext);
+      const preferRank = beatCtx.minPlayableLooseRank
+        ?? beatCtx.minPairRank
+        ?? beatCtx.minSafeLooseRank
+        ?? beatCtx.minLooseRank;
+      const tier = effectiveBeatSingleTier(resolvedHand, candidate.mainRank, levelRank);
+      if (preferRank && candidate.mainRank === preferRank) {
+        score -= 4200;
+        reasons.push("【P10】队友小牌占权，宜最小散单防对手抢权");
+        principles.push("P10");
+      } else if (preferRank && compareRanks(candidate.mainRank, preferRank, levelRank) > 0) {
+        score += 5200;
+        reasons.push(`【P10】有散单${rankLabel(preferRank)}够压，不宜用${rankLabel(candidate.mainRank)}`);
+        principles.push("P10");
+        hasStrongConflict = true;
+      } else if (tier === "pair" && preferRank) {
+        score += 6800;
+        reasons.push(`【P1】有散单${rankLabel(preferRank)}够压，不宜拆对${rankLabel(candidate.mainRank)}`);
+        principles.push("P1");
+        hasStrongConflict = true;
+      }
     }
   }
 
@@ -2240,6 +3955,10 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
   const robotFollow = robotMustFollowAdjustment(candidate, previousPlay, tableContext);
   score += robotFollow.score;
   reasons.push(...robotFollow.reasons);
+
+  const personaAdj = opponentPersonaAdjustment(candidate, tableContext);
+  score += personaAdj.score;
+  reasons.push(...personaAdj.reasons);
 
   return { score, reasons, principles, hasStrongConflict };
 }
@@ -2287,23 +4006,28 @@ export function principleMlVetoFactor(principleResult, tableContext = null, cand
 function findLooseBeaterRank(hand, counts, mustBeatRank, levelRank, preferredRank = null) {
   if (preferredRank) {
     const held = counts.get(preferredRank) ?? 0;
-    if (held === 1 && compareRanks(preferredRank, mustBeatRank, levelRank) > 0) {
+    if (
+      held >= 1
+      && compareRanks(preferredRank, mustBeatRank, levelRank) > 0
+      && isActionableLooseSingleBeater(preferredRank, hand, levelRank, mustBeatRank)
+    ) {
       return preferredRank;
     }
   }
   const beaters = [];
-  for (const [rank, count] of counts.entries()) {
-    if (rank === "SJ" || rank === "BJ") continue;
-    if (count === 1 && compareRanks(rank, mustBeatRank, levelRank) > 0) {
+  for (const [rank] of counts.entries()) {
+    if (isActionableLooseSingleBeater(rank, hand, levelRank, mustBeatRank)) {
       beaters.push(rank);
     }
   }
-  const safeBeaters = beaters.filter(
+  const pureBeaters = beaters.filter((rank) => (counts.get(rank) ?? 0) === 1);
+  const pool = pureBeaters.length > 0 ? pureBeaters : beaters;
+  const safeBeaters = pool.filter(
     (rank) => !resolveStraightBreakForSingle(rank, hand, levelRank).breaksStraight,
   );
-  const pool = safeBeaters.length > 0 ? safeBeaters : beaters;
+  const finalPool = safeBeaters.length > 0 ? safeBeaters : pool;
   let looseRank = null;
-  for (const rank of pool) {
+  for (const rank of finalPool) {
     if (!looseRank || compareRanks(rank, looseRank, levelRank) < 0) {
       looseRank = rank;
     }
@@ -2355,7 +4079,12 @@ export function buildBeatSinglePrincipleAnswer(context, counts, options = {}) {
   const looseDesc = describeLooseCard(hand, looseRank);
   const topRank = topPlay?.mainRank ?? null;
   const topTier = topRank ? getRankStructureTier(hand, topRank, levelRank) : null;
-  const topBreaksPair = topTier === "pair";
+  const topBreaksPair = topTier === "pair"
+    && topRank
+    && !hasSpareSingleOutsideStraights(topRank, hand, levelRank);
+  const topBreaksStraight = topRank
+    ? resolveStraightBreakForSingle(topRank, hand, levelRank).breaksStraight
+    : false;
   const topBreaksPlate = topTier === "plate";
   const topShort = topPlay?.label ?? (topRank ? `单${rankLabel(topRank)}` : "—");
   const plates = buildStrategicGroups(hand, levelRank).filter(
@@ -2372,6 +4101,10 @@ export function buildBeatSinglePrincipleAnswer(context, counts, options = {}) {
     contentLines.push(
       `原则P1（散单优先）：推荐1${topShort}会拆${plateLabel}；跟牌压${beatLabel}，你手里有${looseDesc}，应出单${rankLabel(looseRank)}。`,
     );
+  } else if (topBreaksStraight && topRank) {
+    contentLines.push(
+      `原则P1（散单优先）：推荐1${topShort}会拆顺子；跟牌压${beatLabel}，你手里有${looseDesc}，应出单${rankLabel(looseRank)}。`,
+    );
   } else if (topRank && topRank !== looseRank) {
     contentLines.push(
       `原则P1（散单优先）：跟牌压${beatLabel}，你手里有${looseDesc}，应出单${rankLabel(looseRank)}，不必出${topShort}。`,
@@ -2382,7 +4115,7 @@ export function buildBeatSinglePrincipleAnswer(context, counts, options = {}) {
     );
   }
 
-  if (topRank !== looseRank || topBreaksPair || topBreaksPlate) {
+  if (topRank !== looseRank || topBreaksPair || topBreaksPlate || topBreaksStraight) {
     contentLines.push("这手左侧推荐偏了：有散单够压时不该拆结构。");
   }
 

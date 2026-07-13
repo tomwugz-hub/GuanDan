@@ -220,3 +220,67 @@ export function buildStrategicGroups(hand, levelRank, { skipStraightFlush = fals
 
   return groups;
 }
+
+function cardKeyForMerge(card) {
+  return `${card.rank}:${card.suit}:${card.deckIndex}`;
+}
+
+/** UI 理牌列 classify 失败时，按 label 仍视为顺子/同花顺等成组结构 */
+export function resolveStrategicGroupPlay(group, levelRank) {
+  const cards = group?.cards ?? [];
+  if (group?.play?.type && group.play.type !== PLAY_TYPES.invalid) return group.play;
+  const classified = classifyPlay(cards, levelRank);
+  if (classified.type !== PLAY_TYPES.invalid) return classified;
+  const label = group?.label ?? "";
+  if (/同花顺/.test(label) && cards.length >= 4) {
+    return { ...classified, type: PLAY_TYPES.straightFlush, label };
+  }
+  if (/顺子/.test(label) && cards.length >= 4) {
+    return { ...classified, type: PLAY_TYPES.straight, label };
+  }
+  if (/连对/.test(label) && cards.length >= 4) {
+    return { ...classified, type: PLAY_TYPES.consecutivePairs, label };
+  }
+  if (/钢板|飞机/.test(label) && cards.length >= 5) {
+    return { ...classified, type: PLAY_TYPES.plane, label };
+  }
+  return classified;
+}
+
+/** 须压时合并战略同花顺/王炸/连对/钢板/顺子等组，避免 UI 理牌列漏识导致拆结构推荐 */
+export function mergePremiumStrategicGroups(
+  preferredGroups,
+  hand,
+  levelRank,
+  prebuiltStrategic = null,
+) {
+  if (!hand?.length) return preferredGroups ?? [];
+  const base = (preferredGroups ?? []).map((group) => ({
+    ...group,
+    play: resolveStrategicGroupPlay(group, levelRank),
+  }));
+  const coveredKeys = new Set(
+    base.flatMap((group) => (group.cards ?? []).map(cardKeyForMerge)),
+  );
+  const mergeTypes = new Set([
+    PLAY_TYPES.straightFlush,
+    PLAY_TYPES.jokerBomb,
+    PLAY_TYPES.consecutivePairs,
+    PLAY_TYPES.plane,
+    PLAY_TYPES.straight,
+  ]);
+  const strategic = prebuiltStrategic ?? buildStrategicGroups(hand, levelRank);
+  for (const group of strategic) {
+    const play = group.play ?? classifyPlay(group.cards ?? [], levelRank);
+    if (!mergeTypes.has(play.type)) continue;
+    const keys = (group.cards ?? []).map(cardKeyForMerge);
+    if (keys.length === 0 || keys.every((key) => coveredKeys.has(key))) continue;
+    base.push({
+      cards: group.cards,
+      label: group.label ?? play.label,
+      play,
+    });
+    for (const key of keys) coveredKeys.add(key);
+  }
+  return base;
+}

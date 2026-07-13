@@ -12,6 +12,7 @@ const SCENARIO_TAGS = Object.freeze({
   BOMB_TIMING: "炸弹时机",
   PASS_RELEASE: "过牌放行",
   TRIPLE_PAIR_LEAD: "三带二减手",
+  MUST_BEAT_KEEP_SF: "须压保同花顺",
 });
 
 function normalizeScenarioTag(tag) {
@@ -244,6 +245,36 @@ export const DRILL_SCENARIOS = Object.freeze([
       currentPlayerIndex: 0,
       lastActivePlayerIndex: null,
       lastActivePlayCards: null,
+    },
+  },
+  {
+    id: "must-beat-twp-keep-sf-level3",
+    tag: SCENARIO_TAGS.MUST_BEAT_KEEP_SF,
+    title: "须压三带二别拆同花顺",
+    summary: "级牌3，勇哥出 QQQ+55；你有红桃同花顺跑道，教练应推过牌而非拆跑道组三带二。",
+    levelRank: "3",
+    seed: 31007,
+    assignments: {
+      0: [
+        c("3", SUITS.diamonds), c("7", SUITS.diamonds), c("9", SUITS.diamonds), c("10", SUITS.diamonds), c("J", SUITS.diamonds),
+        c("8", SUITS.spades), c("8", SUITS.hearts), c("9", SUITS.hearts), c("10", SUITS.hearts), c("10", SUITS.spades),
+        c("A", SUITS.clubs), c("2", SUITS.clubs), c("3", SUITS.clubs), c("4", SUITS.clubs), c("5", SUITS.clubs),
+        c("J", SUITS.hearts), c("J", SUITS.diamonds, 1), c("J", SUITS.spades),
+        c("5", SUITS.spades), c("7", SUITS.hearts), c("A", SUITS.spades),
+        c("3", SUITS.hearts),
+      ],
+      1: [
+        c("Q", SUITS.clubs), c("Q", SUITS.diamonds), c("Q", SUITS.spades),
+        c("5", SUITS.clubs, 1), c("5", SUITS.diamonds),
+      ],
+    },
+    table: {
+      currentPlayerIndex: 0,
+      lastActivePlayerIndex: 1,
+      lastActivePlayCards: [
+        ["Q", SUITS.clubs], ["Q", SUITS.diamonds], ["Q", SUITS.spades],
+        ["5", SUITS.clubs, 1], ["5", SUITS.diamonds],
+      ],
     },
   },
 ]);

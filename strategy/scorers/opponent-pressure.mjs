@@ -10,17 +10,31 @@ import {
   isPressingJokerBombOnly,
   isPressingRoutineNonBomb,
   isPressingSmallSingle,
+  isPressingHighProbeSingle,
   isSmallFaceRank,
   prefersFullBombForControl,
+  isSplitBombPlay,
+  isThickRankBombPlay,
+  hasStandalonePureBombBeater,
   reasonFromPrinciple,
   shouldBombForOpponentSprint,
   shouldBombForPartnerFinish,
   shouldReserveBombForHeavyHand,
+  shouldReserveBombForHighProbeSingle,
   shouldReserveStraightFlushForConsecutivePairs,
+  shouldReserveStraightFlushForSmallCards,
   shouldReservePureBombEarly,
+  shouldYieldPassAfterPartnerLeadOnOpponentBomb,
 } from "../principles.mjs";
+import { breaksStrategicStraightFlush } from "./structure.mjs";
 import { generateBasicCandidates } from "../../engine/generate-candidates.mjs";
-import { isTeammate, minOpponentHandCount, shouldYieldPassToPartner } from "../table-context.mjs";
+import {
+  isTeammate,
+  minOpponentHandCount,
+  opponentDangerLevel,
+  opponentsWithOneCard,
+  shouldYieldPassToPartner,
+} from "../table-context.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 const FINISH_TEMPO_TYPES = new Set([
@@ -82,18 +96,6 @@ function opponentBombLabel(play) {
   if (play.type === PLAY_TYPES.straightFlush) return "同花顺";
   if (play.type === PLAY_TYPES.jokerBomb) return "天王炸";
   return "炸弹";
-}
-
-/** 尚未出完的对手中是否有人只剩 1 张（报单） */
-function opponentsWithOneCard(tableContext) {
-  const state = tableContext.state;
-  if (!state) return [];
-  const selfIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? 0;
-  return state.players.filter(
-    (player) => !player.finishedOrder
-      && !isTeammate(selfIndex, player.seatIndex)
-      && player.hand.length === 1,
-  );
 }
 
 function resolveScoringHand(tableContext) {
@@ -163,6 +165,17 @@ function passVsOpponentBombPenalty(previousPlay, tableContext) {
         score: 2200,
         reasons: ["队友占牌，仍须评估能否用更大同花顺抢权"],
       };
+    }
+    if (
+      tableContext.partnerAttemptedCurrentRound
+      && danger < 2
+      && shouldYieldPassAfterPartnerLeadOnOpponentBomb(
+        tableContext,
+        resolveScoringHand(tableContext),
+        previousPlay,
+      )
+    ) {
+      return { score: -1200, reasons: [reasonFromPrinciple("P10", { stackBomb: true })] };
     }
     return { score: 6200, reasons: [`对手${label}占牌，有更大炸应抢牌权`] };
   }
@@ -249,8 +262,32 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
       bombOnlyPassPenalty = -1200;
       reasons.push(reasonFromPrinciple("P10"));
     } else if (isPressingJokerBombOnly(previousPlay, tableContext)) {
-      bombOnlyPassPenalty = 12_800 + danger * 520;
-      reasons.push("须压王且只有炸弹能跟，不宜过牌");
+      const handCount = resolveScoringHand(tableContext).length;
+      const plainBombs = (tableContext._candidates ?? []).filter(
+        (item) => item.type === PLAY_TYPES.bomb && previousPlay && canBeat(item, previousPlay),
+      );
+      const sfOnly = (tableContext._candidates ?? []).some(
+        (item) => item.type === PLAY_TYPES.straightFlush && previousPlay && canBeat(item, previousPlay),
+      );
+      if (handCount > 8 && danger < 3 && plainBombs.length === 0 && sfOnly) {
+        bombOnlyPassPenalty = -5200;
+        reasons.push("须压王但局面尚早，不宜亮同花顺，过牌保留");
+      } else {
+        bombOnlyPassPenalty = 12_800 + danger * 520;
+        reasons.push("须压王且只有炸弹能跟，不宜过牌");
+      }
+    } else if (
+      previousPlay?.type === PLAY_TYPES.single
+      && isPressingHighProbeSingle(previousPlay, levelRankFrom(tableContext), tableContext)
+      && shouldReserveBombForHighProbeSingle(
+        tableContext,
+        resolveScoringHand(tableContext),
+        previousPlay,
+        levelRankFrom(tableContext),
+      )
+    ) {
+      bombOnlyPassPenalty = -5600;
+      reasons.push("对手级牌/大单试探，不必动炸，过牌等循环");
     } else if (
       previousPlay?.type === PLAY_TYPES.single
       && isSmallFaceRank(previousPlay.mainRank, levelRankFrom(tableContext))
@@ -269,15 +306,26 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
       isBombOnlyBeatContext(tableContext)
       && previousPlay?.type === PLAY_TYPES.pair
     ) {
-      bombOnlyPassPenalty = 7600 + danger * 480;
-      reasons.push("须压对子且只有炸弹能跟，不宜过牌");
+      if (
+        shouldReserveStraightFlushForSmallCards(
+          tableContext,
+          resolveScoringHand(tableContext),
+          previousPlay,
+        )
+      ) {
+        bombOnlyPassPenalty = -5600;
+        reasons.push("局面尚早，同花顺不压小单/对子，过牌保留");
+      } else {
+        bombOnlyPassPenalty = 7600 + danger * 480;
+        reasons.push("须压对子且只有炸弹能跟，不宜过牌");
+      }
     } else if (
       isPressingRoutineNonBomb(previousPlay, tableContext)
       && shouldReserveBombForHeavyHand(tableContext, resolveScoringHand(tableContext).length)
-      && tableContext.hasActionableRegularWinner
+      && (tableContext.danger ?? opponentDangerLevel(tableContext)) < 3
     ) {
       bombOnlyPassPenalty = -4800;
-      reasons.push("对手普通牌型，不必动炸，过牌放行");
+      reasons.push("对手普通牌型，手牌仍多不必动炸，过牌等循环");
     } else if (
       shouldReserveStraightFlushForConsecutivePairs(
         tableContext,
@@ -287,9 +335,24 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
     ) {
       bombOnlyPassPenalty = -4800;
       reasons.push("对手连对不值得消耗同花顺，可过牌等接风");
+    } else if (
+      shouldReserveStraightFlushForSmallCards(
+        tableContext,
+        resolveScoringHand(tableContext),
+        previousPlay,
+      )
+    ) {
+      bombOnlyPassPenalty = -5600;
+      reasons.push("局面尚早，同花顺不压小单/对子，过牌保留");
     } else if (isBombOnlyBeatContext(tableContext)) {
       bombOnlyPassPenalty = 7200 + danger * 460;
-      reasons.push("只有炸弹能压，不宜过牌");
+      const minOpp = minOpponentHandCount(tableContext);
+      if (minOpp === 5) {
+        bombOnlyPassPenalty = 11_200 + danger * 520;
+        reasons.push("【B5】敌剩5张仅炸弹可压，不宜过牌，炸5出对");
+      } else {
+        reasons.push("只有炸弹能压，不宜过牌");
+      }
     } else {
       reasons.push("只有炸弹能压，不宜过牌");
     }
@@ -300,6 +363,7 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
     const sfReserve = straightFlushReserveAdjustment(candidate, previousPlay, tableContext);
     const levelRank = levelRankFrom(tableContext);
     const pressingSmallSingle = isPressingSmallSingle(previousPlay, levelRank, tableContext);
+    const pressingHighProbe = isPressingHighProbeSingle(previousPlay, levelRank, tableContext);
     const handCount = resolveScoringHand(tableContext).length;
     const bombOnlyBeatStraight = isBombOnlyBeatContext(tableContext)
       && previousPlay?.type === PLAY_TYPES.straight;
@@ -329,7 +393,16 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
     if (!tableContext.hasActionableRegularWinner && !tableContext.isFinishingPlay) {
       let grab = -1400 - danger * 120 + sfReserve.score;
       let grabReason = "只有炸弹能压，应抢牌权";
-      if (shouldBombForPartnerFinish(tableContext, resolveScoringHand(tableContext), previousPlay)) {
+      const minOpp = minOpponentHandCount(tableContext);
+      // B5 敌剩5张：炸5出对逼炸（第18篇）
+      if (
+        minOpp === 5
+        && isBombOnlyBeatContext(tableContext)
+        && !shouldReserveBombForHeavyHand(tableContext, handCount)
+      ) {
+        grab -= 8400 + danger * 380;
+        grabReason = "【B5】敌剩5张，炸5出对逼炸夺权";
+      } else if (shouldBombForPartnerFinish(tableContext, resolveScoringHand(tableContext), previousPlay)) {
         const bombSize = candidate.bombSize ?? candidate.cards?.length ?? 4;
         const hand = resolveScoringHand(tableContext);
         const physicalHeld = physicalRankCount(hand, candidate.mainRank);
@@ -346,28 +419,85 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
         grab += 11_000 + Math.max(0, gap) * 420;
         grabReason = "对手小单试探，非必要不炸，优先过牌";
       } else if (
+        pressingHighProbe
+        && danger < 2
+        && shouldReserveBombForHighProbeSingle(tableContext, resolveScoringHand(tableContext), previousPlay, levelRank)
+      ) {
+        const sfExtra = candidate.type === PLAY_TYPES.straightFlush ? 12_000 : 0;
+        const bombSize = candidate.bombSize ?? candidate.cards?.length ?? 4;
+        grab += 14_000 + sfExtra + Math.max(0, bombSize - 4) * 600;
+        grabReason = "对手级牌/大单试探，非必要不炸，优先过牌";
+      } else if (
         isBombOnlyBeatContext(tableContext)
-        && previousPlay?.type === PLAY_TYPES.straight
+        && (previousPlay?.type === PLAY_TYPES.straight || isOpponentBombPlay(previousPlay))
       ) {
         const hand = resolveScoringHand(tableContext);
         const bombSize = candidate.bombSize ?? candidate.cards?.length ?? 4;
         const physicalHeld = physicalRankCount(hand, candidate.mainRank);
+        const bombBeaters = (tableContext._candidates ?? []).filter(
+          (item) => item.type === PLAY_TYPES.bomb && canBeat(item, previousPlay),
+        );
+        const standalonePureBeater = hasStandalonePureBombBeater(hand, bombBeaters);
         const wantFullBomb = prefersFullBombForControl(
           hand,
           candidate.mainRank,
           previousPlay,
           tableContext,
+        ) || (
+          isOpponentBombPlay(previousPlay)
+          && !standalonePureBeater
+          && physicalHeld > 4
         );
-        if (wantFullBomb) {
+        if (isThickRankBombPlay(candidate, hand) && standalonePureBeater) {
+          grab += isSplitBombPlay(candidate, hand) ? 10_000 : 8200;
+          grabReason = reasonFromPrinciple("P7", { standalonePureBomb: true });
+        } else if (
+          bombSize === 4
+          && physicalHeld === 4
+          && standalonePureBeater
+          && bombBeaters.some((item) => isThickRankBombPlay(item, hand))
+        ) {
+          grab -= 5200;
+          grabReason = reasonFromPrinciple("P7", { standalonePureBomb: true });
+        } else if (wantFullBomb) {
           grab -= bombSize === physicalHeld ? 5400 : bombSize === 4 ? 3200 : 4000;
           grabReason = bombSize === physicalHeld
             ? "【P7】满张炸弹控牌权，四炸易被反压"
             : "【P7】拆炸出四炸牌力弱，应满张出炸控权";
-        } else {
+        } else if (previousPlay?.type === PLAY_TYPES.straight) {
           grab -= bombSize === 4 ? 4200 : bombSize >= 6 ? 1800 : 3000;
           grabReason = bombSize === 4
             ? "【P7】四炸够压顺子，打完剩对子仍可减手"
             : "【P7】压顺子需炸弹抢牌权，优先最小够压炸";
+        }
+      } else if (
+        isBombOnlyBeatContext(tableContext)
+        && previousPlay?.type === PLAY_TYPES.plane
+      ) {
+        const hand = resolveScoringHand(tableContext);
+        const bombSize = candidate.bombSize ?? candidate.cards?.length ?? 4;
+        const physicalHeld = physicalRankCount(hand, candidate.mainRank);
+        if (candidate.type === PLAY_TYPES.straightFlush) {
+          const plainBombs = (tableContext._candidates ?? []).filter(
+            (item) => item.type === PLAY_TYPES.bomb
+              && canBeat(item, previousPlay)
+              && !breaksStrategicStraightFlush(item, hand, levelRank),
+          );
+          if (plainBombs.length > 0) {
+            grab += 14_000;
+            grabReason = "有普通炸弹可压钢板，不宜亮同花顺";
+          }
+        } else if (
+          candidate.type === PLAY_TYPES.bomb
+          && !breaksStrategicStraightFlush(candidate, hand, levelRank)
+        ) {
+          if (physicalHeld > 4 && bombSize === physicalHeld) {
+            grab -= 8200;
+            grabReason = "【P7】满张炸弹压钢板，保留同花顺";
+          } else if (bombSize >= 4) {
+            grab -= 5600;
+            grabReason = "【P7】普通炸弹可压钢板，保留同花顺";
+          }
         }
       } else if (reserveBombVsRoutine) {
         const bombSize = candidate.bombSize ?? candidate.cards?.length ?? 4;
@@ -383,12 +513,18 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
         grabReason = "对手连对不值得消耗同花顺，可过牌等接风";
       } else if (
         candidate.type === PLAY_TYPES.straightFlush
+        && [PLAY_TYPES.single, PLAY_TYPES.pair].includes(previousPlay?.type)
+        && handCount > 8
+        && danger < 3
+        && candidate.cards?.length !== handCount
+      ) {
+        grab += 14_000;
+        grabReason = "局面尚早，同花顺不压小单/对子，过牌保留";
+      } else if (
+        candidate.type === PLAY_TYPES.straightFlush
         && isOpponentBombPlay(previousPlay)
         && tableContext.partnerAttemptedCurrentRound
         && danger < 2
-        && (tableContext._candidates ?? []).some(
-          (item) => item.type === PLAY_TYPES.bomb && canBeat(item, previousPlay),
-        )
       ) {
         grab += 12_000;
         grabReason = "队友本墩已出过牌，不必强行亮同花顺";
@@ -399,7 +535,7 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
       ) {
         grab += 9200;
         grabReason = "队友本墩已出过牌，不必叠炸拦对手";
-      } else if (tableContext.hasRegularWinner) {
+      } else if (isBombOnlyBeatContext(tableContext)) {
         grabReason = previousPlay?.type === PLAY_TYPES.consecutivePairs
           ? "无更大连对可压，需用炸弹抢牌权"
           : "无可用更大普通牌可压，需用炸弹抢牌权";
@@ -437,22 +573,22 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
   }
 
   let bonus = -3200 - danger * 280;
-  if (previousPlay?.type === PLAY_TYPES.consecutivePairs) {
-    bonus -= candidate.power * 3;
+  if (previousPlay?.type === PLAY_TYPES.consecutivePairs && canBeat(candidate, previousPlay)) {
+    bonus += candidate.power * 3;
     reasons.push("用最小连对压住对手连对，打断接风");
-  } else if (previousPlay?.type === PLAY_TYPES.pair) {
-    bonus -= candidate.power * 3;
+  } else if (previousPlay?.type === PLAY_TYPES.pair && canBeat(candidate, previousPlay)) {
+    bonus += candidate.power * 3;
     reasons.push("用最小对子压住对手对子，打断接风");
   } else if (previousPlay?.type === PLAY_TYPES.single) {
     const blockAdj = opponentSingleCardBlockAdjustment(candidate, previousPlay, tableContext);
     if (blockAdj.reasons.length > 0) {
       bonus += blockAdj.score;
       reasons.push(...blockAdj.reasons);
-    } else {
+    } else if (canBeat(candidate, previousPlay)) {
       bonus -= 3800 - Math.min(candidate.power * 4, 160);
       reasons.push("跟住对手单张，避免其连续占牌");
     }
-  } else {
+  } else if (canBeat(candidate, previousPlay)) {
     bonus -= candidate.length * 12 + candidate.power;
     reasons.push("对手占牌，优先用普通牌型抢回牌权");
   }
@@ -493,10 +629,15 @@ function straightFlushReserveAdjustment(candidate, previousPlay, tableContext) {
   }
   if (
     plainBombBeaters.length > 0
-    && [PLAY_TYPES.single, PLAY_TYPES.pair].includes(oppType)
+    && (
+      [PLAY_TYPES.single, PLAY_TYPES.pair].includes(oppType)
+      || oppType === PLAY_TYPES.plane
+    )
   ) {
     penalty += 14_000;
-    reasons.push("有普通炸弹可压，不宜亮同花顺");
+    reasons.push(oppType === PLAY_TYPES.plane
+      ? "有普通炸弹可压钢板，不宜亮同花顺"
+      : "有普通炸弹可压，不宜亮同花顺");
   }
 
   const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex;
@@ -509,11 +650,14 @@ function straightFlushReserveAdjustment(candidate, previousPlay, tableContext) {
   const earlyForSelf = selfHandCount > 8;
 
   if (oppType === PLAY_TYPES.single || oppType === PLAY_TYPES.pair) {
+    if (candidate.cards?.length === resolvedHand.length) {
+      return { score: 0, reasons: [] };
+    }
     if (lowThreat) {
-      penalty += 8800;
+      penalty += 12_000;
       reasons.push("同花顺留给关键控权，不压小单/对子");
     } else if (mediumThreat && earlyForSelf) {
-      penalty += 6200;
+      penalty += 10_000;
       reasons.push("局面尚早，同花顺不压小单/对子");
     }
   } else if (lowThreat || (mediumThreat && earlyForSelf)) {

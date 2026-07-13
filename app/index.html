@@ -2,8 +2,185 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no, interactive-widget=resizes-content" />
+    <meta name="theme-color" content="#124830" data-mobile-felt media="(max-width: 932px)" />
+    <meta name="theme-color" content="#e8efe6" media="(min-width: 933px)" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="掼蛋教练" />
     <title>掼蛋教练 Pro 2.0</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="stylesheet" href="./mobile-ui.css" />
+    <style id="mobile-critical-css">
+      /* 首屏防闪：手机 UA 横屏在 CSS 加载前即隐藏桌面壳、竖列绿毡骨架 */
+      @media (max-width: 960px), (orientation: landscape) and (max-height: 520px) {
+        html.mobile-boot #desktopShell { display: none !important; }
+        html.mobile-boot.mobile-landscape-boot #landscapeRoot {
+          display: flex !important;
+          flex-direction: column !important;
+          position: fixed !important;
+          inset: 0 !important;
+          z-index: 5 !important;
+          width: 100% !important;
+          height: var(--app-vh, 100dvh) !important;
+          max-height: var(--app-vh, 100dvh) !important;
+          min-height: var(--app-vh, 100dvh) !important;
+          overflow: hidden !important;
+          background: #124830 !important;
+          color: #eef4ef !important;
+        }
+        html.mobile-boot.mobile-landscape-boot header.ml-hud {
+          flex: 0 0 calc(36px + env(safe-area-inset-top, 0px)) !important;
+          background: rgba(12, 24, 18, 0.88) !important;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
+          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
+          color: #eef4ef !important;
+        }
+        html.mobile-boot.mobile-landscape-boot .ml-stage {
+          flex: 1 1 auto !important;
+          min-height: 0 !important;
+          display: flex !important;
+          flex-direction: column !important;
+        }
+        html.mobile-boot.mobile-landscape-boot .ml-felt {
+          height: 100% !important;
+          min-height: 0 !important;
+          background: linear-gradient(168deg, #228052 0%, #1a6b45 38%, #124830 68%, #0d3324 100%) !important;
+        }
+        html.mobile-boot.mobile-landscape-boot #landscapeRoot {
+          pointer-events: auto !important;
+        }
+        html.mobile-boot.mobile-landscape-boot .ml-hand-scroll {
+          overflow-y: visible !important;
+        }
+      }
+      /* 横屏首屏：引导 pill 与底栏手牌 token（与 mobile-ui.css 同步，防外链 CSS 缓存/未加载） */
+      body.mobile-layout.mobile-landscape {
+        --ml-card-w: clamp(42px, 10dvw, 58px);
+        --ml-card-aspect: 1.28;
+        --ml-card-h: calc(var(--ml-card-w) * var(--ml-card-aspect));
+        --ml-hand-peek-h: clamp(32px, calc(var(--ml-card-h) * 0.44), 42px);
+        --ml-hand-col-overlap: calc((var(--ml-card-h) - var(--ml-hand-peek-h)) * -1);
+        --ml-hand-lift: 10px;
+        --ml-hand-stack-h: calc(var(--ml-card-h) + var(--ml-hand-peek-h) * 4);
+        --ml-hand-zone: min(30dvh, 184px);
+        --ml-hand-bar-h: max(
+          calc(var(--ml-hand-stack-h) + 8px + max(var(--safe-gesture-min, 0px), env(safe-area-inset-bottom, 0px))),
+          calc(var(--ml-hand-zone) + max(var(--safe-gesture-min, 0px), env(safe-area-inset-bottom, 0px)))
+        );
+        --ml-action-band-h: 48px;
+        --ml-hud-h: calc(36px + env(safe-area-inset-top, 0px));
+        --ml-seat-play-gap: 3px;
+        --ml-seat-play-slots: 8;
+        --ml-seat-play-zone-w: min(calc(100vw - 120px), calc(100dvw - 120px));
+        --ml-seat-card-w: min(56px, max(30px, calc((var(--ml-seat-play-zone-w) - (var(--ml-seat-play-slots) - 1) * var(--ml-seat-play-gap)) / var(--ml-seat-play-slots))));
+        --ml-seat-card-h: calc(var(--ml-seat-card-w) * 3 / 2);
+      }
+      /* 横屏出牌区花色（与 mobile-ui.css 同步，防外链 CSS 缓存未刷新） */
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card {
+        overflow: visible !important;
+        position: relative;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card .corner {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        left: 2px;
+        top: 2px;
+        line-height: 1;
+        z-index: 2;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card .corner .rank.wide {
+        font-size: max(9px, calc(var(--ml-seat-card-w) * 0.42));
+        font-weight: 900;
+        line-height: 1;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="1"] .seat-cards .table-play-card .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="2"] .seat-cards .table-play-card .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="3"] .seat-cards .table-play-card .corner .rank {
+        font-size: max(9px, calc(var(--ml-seat-side-card-w, var(--ml-seat-card-w)) * 0.42));
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card .corner .suit-mark {
+        position: static;
+        display: block;
+        font-size: max(8px, calc(var(--ml-seat-card-w) * 0.32));
+        font-weight: 900;
+        line-height: 1;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="1"] .seat-cards .table-play-card .corner .suit-mark,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="2"] .seat-cards .table-play-card .corner .suit-mark,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="3"] .seat-cards .table-play-card .corner .suit-mark {
+        font-size: max(8px, calc(var(--ml-seat-side-card-w, var(--ml-seat-card-w)) * 0.32));
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card > .suit-mark {
+        display: none !important;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card .suit.suit-br {
+        display: block !important;
+        position: absolute;
+        right: 2px;
+        bottom: 2px;
+        left: auto;
+        top: auto;
+        transform: none;
+        font-size: calc(var(--ml-seat-card-w) * 0.5);
+        font-weight: 900;
+        line-height: 1;
+        opacity: 1;
+        pointer-events: none;
+        z-index: 1;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="1"] .seat-cards .table-play-card .suit.suit-br,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="2"] .seat-cards .table-play-card .suit.suit-br,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-play[data-seat="3"] .seat-cards .table-play-card .suit.suit-br {
+        font-size: calc(var(--ml-seat-side-card-w, var(--ml-seat-card-w)) * 0.5);
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.red .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.red .corner .suit-mark,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.red .suit.suit-br {
+        color: #e52424;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card:not(.red):not(.joker) .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card:not(.red):not(.joker) .corner .suit-mark,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card:not(.red):not(.joker) .suit.suit-br {
+        color: #182028;
+      }
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.joker .corner .rank,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.joker .corner .suit-mark,
+      body.mobile-layout.mobile-landscape .ml-seat-plays .seat-cards .table-play-card.joker .suit.suit-br {
+        color: #3a7a9e;
+      }
+      body.mobile-layout.mobile-landscape .first-tip-bar {
+        top: calc(var(--ml-hud-h) + 2px) !important;
+        bottom: auto !important;
+        left: 50% !important;
+        right: auto !important;
+        transform: translateX(-50%) !important;
+        width: max-content !important;
+        max-width: min(calc(100vw - 160px), 240px) !important;
+        padding: 4px 8px !important;
+        border-radius: 999px !important;
+        background: rgba(12, 24, 18, 0.92) !important;
+        border: 1px solid rgba(255, 255, 255, 0.12) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.28) !important;
+        color: #eef4ef !important;
+        font-size: 9px !important;
+        z-index: 12 !important;
+        pointer-events: none !important;
+      }
+      body.mobile-layout.mobile-landscape .first-tip-actions {
+        pointer-events: auto !important;
+      }
+      body.mobile-layout.mobile-landscape .first-tip-text {
+        font-size: 9px !important;
+        color: rgba(238, 244, 239, 0.82) !important;
+      }
+      body.mobile-layout.mobile-landscape .ml-hand-scroll {
+        overflow-y: visible !important;
+      }
+    </style>
     <style>
       :root {
         color-scheme: only light;
@@ -36,11 +213,12 @@
         --played-card-h: 74px;
         --seat-card-w: 41px;
         --seat-card-h: 57px;
-        /* 刘海屏/底部横条安全区（iOS 等） */
+        /* 刘海屏/底部横条安全区（iOS 等；Android 手势条见 mobile-ui.css --safe-gesture-min） */
         --safe-top: env(safe-area-inset-top, 0px);
         --safe-right: env(safe-area-inset-right, 0px);
-        --safe-bottom: env(safe-area-inset-bottom, 0px);
+        --safe-bottom: max(var(--safe-gesture-min, 0px), env(safe-area-inset-bottom, 0px));
         --safe-left: env(safe-area-inset-left, 0px);
+        --safe-gesture-min: 0px;
       }
 
       * {
@@ -73,7 +251,48 @@
         flex-direction: column;
       }
 
-      header {
+      /* 桌面三栏：#aiPanel 在 #desktopShell 外，由 body 网格承载 */
+      @media (min-width: 933px) {
+        body:not(.mobile-layout) {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) var(--coach-col-width) var(--side-col-width);
+          grid-template-rows: auto 1fr auto;
+          min-height: 100vh;
+          gap: 0;
+        }
+
+        body:not(.mobile-layout) #desktopShell {
+          display: contents;
+        }
+
+        body:not(.mobile-layout) #desktopShell > header {
+          grid-column: 1 / -1;
+          grid-row: 1;
+        }
+
+        body:not(.mobile-layout) #desktopShell > main {
+          grid-column: 1 / 3;
+          grid-row: 2;
+          min-height: 0;
+          grid-template-columns: minmax(0, 1fr) var(--coach-col-width);
+        }
+
+        body:not(.mobile-layout) #aiPanel {
+          grid-column: 3;
+          grid-row: 2;
+          align-self: stretch;
+          min-height: 0;
+          height: var(--layout-col-height);
+          max-height: var(--layout-col-height);
+        }
+
+        body:not(.mobile-layout) #desktopShell > footer {
+          grid-column: 1 / -1;
+          grid-row: 3;
+        }
+      }
+
+      header:not(.ml-hud) {
         z-index: 2;
         display: grid;
         gap: 8px;
@@ -200,7 +419,8 @@
         flex: 1;
         min-height: 0;
         display: grid;
-        grid-template-columns: minmax(0, 1fr) var(--coach-col-width) var(--side-col-width);
+        /* 复盘栏 #aiPanel 在 body 第三栏，main 仅牌桌 + 教练建议两列 */
+        grid-template-columns: minmax(0, 1fr) var(--coach-col-width);
         gap: 12px;
         padding: 12px;
         align-items: stretch;
@@ -260,6 +480,17 @@
         text-align: left;
       }
 
+      .table-status-card .status.review-reopen-entry {
+        cursor: pointer;
+        touch-action: manipulation;
+        border-radius: 6px;
+        outline-offset: 2px;
+      }
+
+      .table-status-card .status.review-reopen-entry:hover {
+        background: rgba(61, 184, 122, 0.08);
+      }
+
       .table-status-card .status:last-child {
         text-align: right;
       }
@@ -293,6 +524,19 @@
         background: rgba(255, 255, 255, 0.92);
         color: var(--ink);
         box-shadow: 0 8px 20px rgba(18, 31, 43, 0.12);
+      }
+
+      /* 提示条居中浮在桌心上方，避免与左上角级牌框叠压 */
+      .table > .key-pause-banner:not([hidden]),
+      .table > .hint-banner:not([hidden]) {
+        position: absolute;
+        z-index: 9;
+        left: 50%;
+        top: 26%;
+        transform: translateX(-50%);
+        right: auto;
+        max-width: min(380px, calc(100% - 200px));
+        margin: 0;
       }
 
       .status {
@@ -405,16 +649,16 @@
         outline: 2px solid var(--gold);
       }
 
-      .player.thinking {
-        animation: player-thinking-pulse 1.1s ease-in-out infinite;
+      .player.robot-walking {
+        animation: player-robot-walking-pulse 1.1s ease-in-out infinite;
       }
 
-      .player.thinking::before {
+      .player.robot-walking::before {
         background: #fff3d6;
         color: #8a5a00;
       }
 
-      @keyframes player-thinking-pulse {
+      @keyframes player-robot-walking-pulse {
         0%, 100% { box-shadow: 0 8px 18px rgba(24, 34, 42, 0.16); }
         50% { box-shadow: 0 8px 22px rgba(212, 168, 75, 0.45); }
       }
@@ -465,11 +709,13 @@
         z-index: 7;
         left: 20px;
         bottom: calc(var(--hand-zone-height) + 10px);
-        width: 98px;
+        width: auto;
+        min-width: 0;
         min-height: 30px;
-        padding: 0 8px;
+        padding: 0 10px;
         border-radius: 8px;
         white-space: nowrap;
+        font-size: 12px;
       }
 
       .player[data-seat="0"] {
@@ -893,15 +1139,29 @@
         display: none;
       }
 
-      .hand-zone {
+      .hand-fan-zone {
         position: absolute;
-        left: 20px;
-        right: 20px;
+        left: 50%;
         bottom: 12px;
+        z-index: 6;
+        transform: translateX(-50%);
+        width: max-content;
+        max-width: calc(100% - 40px);
+        pointer-events: none;
+      }
+
+      .hand-fan-zone > * {
+        pointer-events: auto;
+      }
+
+      .hand-zone {
         display: grid;
         grid-template-rows: var(--hand-zone-height);
         gap: 5px;
-        z-index: 6;
+      }
+
+      .center-turn-hint {
+        display: none;
       }
 
       .table-action-dock {
@@ -936,12 +1196,12 @@
 
       .hand {
         align-items: flex-end;
-        justify-content: flex-start;
+        justify-content: center;
         align-content: flex-end;
         flex-wrap: wrap;
         min-height: var(--hand-zone-height);
         max-width: 100%;
-        padding: 4px 10px 0 104px;
+        padding: 4px 10px 0;
         overflow-x: hidden;
         overflow-y: visible;
         gap: 4px;
@@ -1050,6 +1310,12 @@
         box-shadow: 0 4px 14px rgba(47, 143, 106, 0.12);
       }
 
+      /* display:flex 会盖掉 HTML hidden 默认隐藏，空壳会露成绿毡顶部的白条 */
+      .hint-banner[hidden],
+      .key-pause-banner[hidden] {
+        display: none !important;
+      }
+
       .hint-banner strong {
         flex-shrink: 0;
         color: #1f6b4f;
@@ -1059,62 +1325,60 @@
         color: var(--muted);
       }
 
-      .report-reminder-banner {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin: 0 0 6px;
-        padding: 8px 12px;
-        border: 1px solid rgba(201, 142, 36, 0.4);
-        border-radius: 10px;
-        background: linear-gradient(90deg, rgba(201, 142, 36, 0.14), rgba(201, 142, 36, 0.05));
-        color: var(--ink);
-        font-size: 13px;
-        line-height: 1.45;
-        box-shadow: 0 4px 14px rgba(201, 142, 36, 0.1);
-      }
-
-      .report-reminder-banner strong {
-        flex-shrink: 0;
-        color: #9a6b12;
-      }
-
-      .report-reminder-banner span {
-        color: var(--muted);
-      }
-
       .key-pause-banner {
         display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 10px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
         margin: 0 0 6px;
         padding: 10px 12px;
-        border: 1px solid rgba(91, 95, 199, 0.42);
-        border-radius: 10px;
-        background: linear-gradient(90deg, rgba(91, 95, 199, 0.18), rgba(91, 95, 199, 0.06));
+        max-width: 320px;
+        border: 1px solid rgba(18, 72, 48, 0.18);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.97);
         color: var(--ink);
         font-size: 13px;
-        line-height: 1.45;
-        box-shadow: 0 4px 14px rgba(91, 95, 199, 0.14);
+        line-height: 1.4;
+        box-shadow: 0 4px 14px rgba(20, 40, 30, 0.12);
         pointer-events: auto;
+      }
+
+      .key-pause-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
       }
 
       .key-pause-banner strong {
         flex-shrink: 0;
-        color: #4348a8;
+        color: #124830;
+        font-size: 13px;
+      }
+
+      .key-pause-never {
+        border: none;
+        background: none;
+        padding: 0;
+        font-size: 11px;
+        color: var(--muted);
+        cursor: pointer;
+        text-decoration: underline;
+        white-space: nowrap;
       }
 
       .key-pause-banner .key-pause-msg {
-        flex: 1 1 180px;
+        margin: 0;
         color: var(--ink);
+        font-size: 12px;
+        line-height: 1.4;
       }
 
       .key-pause-actions {
         display: flex;
         flex-wrap: wrap;
         gap: 8px;
-        margin-left: auto;
+        justify-content: flex-end;
       }
 
       .key-pause-actions .btn {
@@ -1234,6 +1498,51 @@
       @keyframes improve-pulse {
         0%, 100% { box-shadow: 0 0 0 0 rgba(217, 28, 28, 0); }
         50% { box-shadow: 0 0 0 4px rgba(217, 28, 28, 0.18); }
+      }
+
+      .improve-cards-sub {
+        margin: 0 0 8px;
+        font-size: 12px;
+      }
+
+      .game-result-line {
+        margin: 0 0 10px;
+        font-size: 14px;
+        line-height: 1.45;
+      }
+
+      .review-advanced-details {
+        margin-top: 8px;
+        font-size: 13px;
+      }
+
+      .review-advanced-details summary {
+        cursor: pointer;
+        color: var(--muted);
+        padding: 4px 0;
+      }
+
+      .mobile-advice-strip {
+        display: none;
+      }
+
+      .mobile-advice-strip strong {
+        color: var(--gold-deep);
+        margin-right: 6px;
+      }
+
+      .mobile-advice-play {
+        font-weight: 800;
+        margin-right: 6px;
+      }
+
+      .mobile-advice-reason {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .dev-only {
+        display: none !important;
       }
 
       .onboarding-overlay {
@@ -1481,6 +1790,99 @@
         min-width: 9px;
         height: 8px;
         font-size: 6px;
+      }
+
+      .game-review-summary .review-block {
+        margin-top: 10px;
+        padding: 10px 12px;
+        border-radius: 12px;
+        background: #f8faf9;
+        border: 1px solid rgba(18, 31, 43, 0.08);
+      }
+
+      .game-review-summary .review-block summary {
+        cursor: pointer;
+        font-weight: 800;
+        font-size: 13px;
+        color: var(--ink);
+        list-style: none;
+      }
+
+      .game-review-summary .review-block summary::-webkit-details-marker {
+        display: none;
+      }
+
+      .review-remaining-list {
+        display: grid;
+        gap: 10px;
+        margin-top: 8px;
+      }
+
+      .review-remaining-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 13px;
+        margin-bottom: 6px;
+      }
+
+      .review-remaining-title span {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .review-remaining-cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      .review-card-chip {
+        display: inline-block;
+        padding: 2px 7px;
+        border-radius: 6px;
+        background: #fff;
+        border: 1px solid rgba(18, 31, 43, 0.12);
+        font-size: 12px;
+        font-weight: 800;
+        line-height: 1.35;
+        color: var(--ink);
+      }
+
+      .review-play-list {
+        margin: 8px 0 0;
+        padding-left: 0;
+        list-style: none;
+        display: grid;
+        gap: 6px;
+        max-height: min(50vh, 420px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      .review-play-row {
+        display: grid;
+        grid-template-columns: auto auto 1fr;
+        gap: 6px;
+        align-items: baseline;
+        font-size: 12px;
+        line-height: 1.45;
+        padding: 6px 8px;
+        border-radius: 8px;
+        background: #fff;
+      }
+
+      .review-play-row--diverged {
+        border-left: 3px solid rgba(214, 137, 16, 0.75);
+        background: #fffaf2;
+      }
+
+      .review-play-turn {
+        color: var(--muted);
+        font-weight: 800;
+        white-space: nowrap;
       }
 
       .recommendation {
@@ -1850,6 +2252,27 @@
         background: var(--accent-soft);
       }
 
+      .ai-coach-head-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .ai-coach-close {
+        flex-shrink: 0;
+        min-height: 32px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
       .ai-coach-head h2 {
         margin: 0;
         font-size: 15px;
@@ -1874,12 +2297,20 @@
         overscroll-behavior: contain;
       }
 
-      .ai-body > .improve-cards,
-      .ai-body > .game-review-summary,
-      .ai-body > .divergence-detail,
-      .ai-body > .progress-panel,
-      .ai-body > .ai-toolbar,
-      .ai-body > .optional-note {
+      .ai-review-scroll {
+        display: contents;
+      }
+
+      .ai-review-scroll > .improve-cards,
+      .ai-review-scroll > .game-review-summary,
+      .ai-review-scroll > .divergence-detail,
+      .ai-review-scroll > .progress-panel,
+      .ai-review-scroll > .drill-panel,
+      .ai-review-scroll > .optional-note {
+        flex-shrink: 0;
+      }
+
+      .ai-body > .ai-toolbar {
         flex-shrink: 0;
       }
 
@@ -2005,18 +2436,21 @@
 
       .game-review-summary .divergence-list {
         margin: 8px 0 0;
-        padding-left: 18px;
+        padding-left: 0;
+        list-style: none;
       }
 
       .ai-coach-panel.game-over-review .game-review-summary .divergence-list li {
-        margin-bottom: 10px;
-        padding: 6px 0;
-        line-height: 1.55;
-        min-height: 2.6em;
+        margin-bottom: 12px;
+        padding: 14px 16px;
+        line-height: 1.5;
+        min-height: 0;
+        background: #f8faf9;
+        border-radius: 12px;
       }
 
       .game-review-summary .divergence-list li {
-        margin-bottom: 4px;
+        margin-bottom: 8px;
       }
 
       .game-review-summary .muted {
@@ -2111,7 +2545,7 @@
         right: 14px;
         bottom: calc(var(--hand-zone-height) + 68px);
         width: min(340px, calc(100% - 28px));
-        max-height: min(360px, calc(100% - var(--hand-zone-height) - 90px));
+        max-height: min(520px, 85dvh, calc(100% - var(--hand-zone-height) - 90px));
         display: flex;
         flex-direction: column;
         gap: 8px;
@@ -2145,6 +2579,18 @@
         align-items: center;
         justify-content: space-between;
         gap: 8px;
+        flex-shrink: 0;
+      }
+
+      .coach-fab-body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior: contain;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
       }
 
       .coach-fab-drawer-head h3 {
@@ -2167,6 +2613,7 @@
         flex-wrap: wrap;
         gap: 8px;
         align-items: stretch;
+        flex-shrink: 0;
       }
 
       .coach-fab-input-row textarea {
@@ -2266,14 +2713,30 @@
       }
 
       .coach-fab-log {
-        flex: 1;
-        min-height: 0;
-        overflow: auto;
         display: flex;
         flex-direction: column;
         gap: 10px;
-        -webkit-overflow-scrolling: touch;
-        overscroll-behavior: contain;
+      }
+
+      .coach-sheet-advice {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: var(--panel-soft);
+        border: 1px solid var(--line);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .coach-sheet-advice strong {
+        color: var(--accent);
+      }
+
+      .coach-sheet-reason {
+        word-break: keep-all;
+        overflow-wrap: anywhere;
       }
 
       .coach-fab-hint {
@@ -2355,23 +2818,73 @@
 
       .divergence-list .divergence-item {
         cursor: pointer;
-        border-radius: 6px;
-        padding: 4px 6px;
-        margin-left: -6px;
+        border-radius: 12px;
+        padding: 14px 16px;
+        margin-left: 0;
+        background: #f8faf9;
         overflow-wrap: anywhere;
-        transition: background 120ms ease;
+        transition: background 120ms ease, box-shadow 120ms ease;
+      }
+
+      .divergence-item-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .divergence-item-turn {
+        font-size: 14px;
+        font-weight: 900;
+        color: var(--ink);
+        white-space: nowrap;
+      }
+
+      .divergence-item-plays {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .divergence-play {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .divergence-play-label {
+        flex-shrink: 0;
+        font-weight: 800;
+        color: var(--muted);
+      }
+
+      .divergence-play-text {
+        flex: 1;
+        min-width: 0;
+        word-break: break-word;
+      }
+
+      .divergence-item-note {
+        margin: 8px 0 0;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--muted);
       }
 
       .divergence-list .divergence-item:hover,
       .divergence-list .divergence-item:focus-visible {
-        background: rgba(47, 143, 106, 0.1);
+        background: rgba(47, 143, 106, 0.08);
         outline: none;
+        box-shadow: inset 0 0 0 1px rgba(47, 143, 106, 0.18);
       }
 
       .divergence-dispute-inline {
-        display: inline-block;
-        margin-left: 6px;
-        vertical-align: middle;
+        display: block;
+        margin: 8px 0 0;
+        margin-left: 0;
       }
 
       button.dispute-btn,
@@ -2887,7 +3400,73 @@
         font-size: 12px;
       }
 
+      /* 手机横屏：覆盖上方桌面 .first-tip-bar，紧凑 HUD pill */
+      body.mobile-layout.mobile-landscape .first-tip-bar {
+        top: calc(var(--ml-hud-h) + 2px);
+        bottom: auto;
+        left: 50%;
+        right: auto;
+        transform: translateX(-50%);
+        width: max-content;
+        max-width: min(calc(100vw - 160px), 240px);
+        padding: 4px 8px;
+        gap: 4px;
+        border-radius: 999px;
+        background: rgba(8, 14, 11, 0.92);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+        color: #f0f5f2;
+        font-size: 9px;
+        line-height: 1.25;
+        z-index: 12;
+      }
+
+      body.mobile-layout.mobile-landscape .first-tip-text {
+        font-size: 9px;
+        color: rgba(238, 244, 239, 0.92);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      body.mobile-layout.mobile-landscape .first-tip-actions .btn {
+        min-height: 20px;
+        padding: 0 6px;
+        font-size: 9px;
+        border-radius: 999px;
+        border-color: rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.1);
+        color: #eef4ef;
+      }
+
+      body.mobile-layout.mobile-landscape .first-tip-actions .btn.primary {
+        background: linear-gradient(145deg, #3aa87a, #2f8f6a);
+        border-color: rgba(255, 255, 255, 0.22);
+        color: #fff;
+      }
+
       @media (max-width: 1320px) {
+        body:not(.mobile-layout) {
+          grid-template-columns: minmax(0, 1fr) var(--coach-col-width);
+        }
+
+        body:not(.mobile-layout) #desktopShell > main {
+          grid-column: 1 / -1;
+        }
+
+        body:not(.mobile-layout) #aiPanel {
+          grid-column: 1 / -1;
+          grid-row: 3;
+          max-width: none;
+          width: 100%;
+          height: min(340px, 36vh);
+          max-height: min(340px, 36vh);
+        }
+
+        body:not(.mobile-layout) #desktopShell > footer {
+          grid-row: 4;
+        }
+
         main {
           grid-template-columns: minmax(0, 1fr) var(--coach-col-width);
         }
@@ -2917,6 +3496,21 @@
           --hand-zone-height: clamp(176px, 24vh, 212px);
         }
 
+        body:not(.mobile-layout) {
+          grid-template-columns: 1fr;
+        }
+
+        body:not(.mobile-layout) #desktopShell > main {
+          grid-column: 1;
+        }
+
+        body:not(.mobile-layout) #aiPanel {
+          grid-column: 1;
+          grid-row: auto;
+          height: auto;
+          max-height: none;
+        }
+
         main {
           grid-template-columns: 1fr;
         }
@@ -2941,15 +3535,10 @@
           inset: 30px 16px calc(var(--hand-zone-height) + 52px);
         }
 
-        .key-pause-banner:not([hidden]),
-        .hint-banner:not([hidden]),
-        .report-reminder-banner:not([hidden]) {
-          position: absolute;
-          z-index: 7;
-          left: 12px;
-          right: 12px;
-          top: 48px;
-          margin: 0;
+        .table > .key-pause-banner:not([hidden]),
+        .table > .hint-banner:not([hidden]) {
+          top: 24%;
+          max-width: min(340px, calc(100% - 32px));
           padding: 6px 10px;
           font-size: 12px;
           line-height: 1.35;
@@ -2968,290 +3557,7 @@
         }
       }
 
-      @media (max-width: 740px) {
-        header,
-        .score-strip {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        .header-main .toolbar .btn {
-          min-height: 44px;
-          padding: 0 14px;
-        }
-
-        main {
-          padding: 0 calc(8px + var(--safe-left)) calc(10px + var(--safe-bottom)) calc(8px + var(--safe-right));
-        }
-
-        :root {
-          --hand-zone-height: clamp(168px, 24vh, 196px);
-          --hand-card-w: 42px;
-          --hand-card-h: 59px;
-        }
-
-        /* 窄屏复盘区加高并保证内部可滚动 */
-        .ai-coach-panel {
-          height: min(420px, 48dvh);
-          max-height: min(420px, 48dvh);
-        }
-
-        .ai-coach-panel.game-over-review {
-          height: min(520px, 58dvh);
-          max-height: min(520px, 58dvh);
-        }
-
-        .coach-panel .history {
-          max-height: min(240px, 32dvh);
-        }
-
-        body.coach-fab-open {
-          overflow: hidden;
-        }
-
-        .table {
-          min-height: max(400px, calc(100dvh - 260px - var(--safe-top) - var(--safe-bottom)));
-          height: max(400px, calc(100dvh - 260px - var(--safe-top) - var(--safe-bottom)));
-        }
-
-        .table::before {
-          inset: 28px 10px calc(var(--hand-zone-height) + 50px);
-        }
-
-        .key-pause-banner:not([hidden]),
-        .hint-banner:not([hidden]),
-        .report-reminder-banner:not([hidden]) {
-          position: absolute;
-          z-index: 7;
-          left: 8px;
-          right: 8px;
-          top: 44px;
-          margin: 0;
-          padding: 5px 8px;
-          font-size: 11px;
-          line-height: 1.3;
-        }
-
-        .key-pause-actions .btn {
-          min-width: 60px;
-          padding: 4px 8px;
-          font-size: 11px;
-        }
-
-        .coach-fab {
-          top: calc(82px + var(--safe-top));
-          right: calc(8px + var(--safe-right));
-          left: auto;
-          bottom: auto;
-          min-width: 44px;
-          min-height: 44px;
-          padding: 0 12px;
-          font-size: 12px;
-          touch-action: manipulation;
-        }
-
-        .coach-fab-drawer {
-          position: fixed;
-          z-index: 50;
-          left: var(--safe-left);
-          right: var(--safe-right);
-          top: auto;
-          bottom: 0;
-          width: auto;
-          max-height: min(72dvh, calc(100dvh - var(--safe-top) - 72px));
-          border-radius: 14px 14px 0 0;
-          padding-bottom: calc(12px + var(--safe-bottom));
-        }
-
-        .coach-fab-close,
-        .coach-fab-input-row .btn {
-          min-height: 44px;
-          min-width: 44px;
-          touch-action: manipulation;
-        }
-
-        .coach-fab-entry-actions .btn {
-          min-height: 40px;
-          padding: 0 12px;
-        }
-
-        .player[data-seat] {
-          left: 12px;
-          right: auto;
-          top: auto;
-          bottom: auto;
-          transform: none;
-        }
-
-        .player[data-seat="0"] { bottom: calc(var(--hand-zone-height) + 16px); }
-        .player[data-seat="1"] { top: 88px; }
-        .player[data-seat="2"] { top: 18px; left: 50%; transform: translateX(-50%); }
-        .player[data-seat="3"] { right: 12px; left: auto; top: 88px; }
-
-        .sort-hand-near-player {
-          left: 8px;
-          bottom: calc(var(--hand-zone-height) + 46px);
-          width: auto;
-          min-width: 84px;
-          min-height: 44px;
-          padding: 0 10px;
-          font-size: 12px;
-          z-index: 8;
-          touch-action: manipulation;
-        }
-
-        .table-middle-band {
-          top: auto;
-          bottom: calc(var(--hand-zone-height) + 4px);
-          left: 50%;
-          right: auto;
-          width: calc(100% - 12px);
-          max-width: calc(100% - 12px);
-          transform: translateX(-50%);
-          gap: 4px;
-        }
-
-        .seat-play[data-seat="1"] {
-          left: 18%;
-          top: 184px;
-        }
-
-        .seat-play[data-seat="3"] {
-          left: 82%;
-          top: 184px;
-        }
-
-        .last-play h2 {
-          max-width: 100%;
-          white-space: normal;
-        }
-
-        .table-action-dock .actions {
-          gap: 5px;
-          padding: 4px 6px;
-        }
-
-        .table-action-dock .actions .btn {
-          min-height: 44px;
-          min-width: 44px;
-          padding: 0 12px;
-          font-size: 13px;
-          touch-action: manipulation;
-        }
-
-        .seat-plays {
-          inset: 0;
-        }
-
-        .seat-play {
-          width: min(292px, calc(100% - 32px));
-          max-width: min(292px, calc(100% - 32px));
-        }
-
-        .seat-play[data-seat="0"] {
-          top: 56%;
-        }
-
-        .seat-play[data-seat="1"] {
-          left: 16px;
-          top: 228px;
-        }
-
-        .seat-play[data-seat="2"] {
-          top: 152px;
-        }
-
-        .seat-play[data-seat="3"] {
-          right: 16px;
-          top: 302px;
-        }
-
-        .hand-zone {
-          left: 10px;
-          right: 10px;
-        }
-
-        .hand {
-          min-height: var(--hand-zone-height);
-          padding: 4px 6px 2px;
-          justify-content: flex-start;
-          gap: 5px;
-          row-gap: 4px;
-        }
-
-        .hand-column {
-          min-width: 40px;
-        }
-
-        .hand-column .card + .card {
-          margin-top: -30px;
-        }
-
-        .hand .card.selected {
-          transform: translateY(-12px);
-        }
-
-        .hand .card.hint-recommended {
-          transform: translateY(-10px);
-        }
-
-        .card {
-          width: 58px;
-          height: 79px;
-        }
-
-        .hand .card {
-          width: var(--hand-card-w);
-          height: var(--hand-card-h);
-        }
-
-        .first-tip-bar {
-          flex-direction: column;
-          align-items: stretch;
-          bottom: calc(6px + var(--safe-bottom));
-          width: calc(100vw - 16px - var(--safe-left) - var(--safe-right));
-        }
-
-        .first-tip-actions .btn {
-          min-height: 44px;
-        }
-
-        .rules-drawer {
-          width: min(400px, calc(100vw - var(--safe-left) - var(--safe-right)));
-          padding-bottom: var(--safe-bottom);
-        }
-
-        .first-tip-actions {
-          justify-content: flex-end;
-        }
-
-        .card .rank {
-          font-size: 22px;
-        }
-
-        .card .rank.wide {
-          font-size: 19px;
-        }
-
-        .card .suit-mark {
-          right: 3px;
-          top: 4px;
-          font-size: 12px;
-        }
-
-        .card .suit {
-          right: 2px;
-          bottom: 2px;
-          font-size: 26px;
-        }
-
-        .hand .card .level-badge {
-          bottom: 1px;
-          min-width: 11px;
-          height: 10px;
-          font-size: 7px;
-        }
-      }
+      /* 手机版样式见 mobile-ui.css（≤900px） */
     </style>
   </head>
   <body>
@@ -3266,7 +3572,11 @@
         });
       }
     </script>
-    <div class="app">
+    <div class="mobile-a2hs-hint" id="mobileA2hsHint" hidden>
+      <p class="mobile-a2hs-text" id="mobileA2hsText">添加到主屏幕可全屏试玩</p>
+      <button class="btn mobile-a2hs-close" id="mobileA2hsClose" type="button" aria-label="关闭">知道了</button>
+    </div>
+    <div class="app desktop-shell" id="desktopShell">
       <header>
         <div class="header-main">
         <h1>掼蛋教练 Pro</h1>
@@ -3289,19 +3599,21 @@
             </select>
           </label>
           <button class="btn primary" id="newGame" type="button">新开一局</button>
+          <button class="btn warn" id="startMustBeatSfDrill" type="button" title="勇哥出QQQ+55，练教练是否推过牌">练须压保同花顺</button>
           <button class="btn" id="newMatch" type="button">竞技开赛</button>
+          <button class="btn" id="openDrillPanel" type="button" title="直接进入「须压保同花顺」教学局面">专项练习</button>
           <button class="btn" id="rulesBtn" type="button" title="掼蛋规则速查">规则</button>
           <details class="advanced-menu" id="advancedMenu">
             <summary class="btn advanced-toggle" type="button">⚙️ 高级</summary>
             <div class="advanced-menu-panel">
-              <span class="self-train-wrap">
+              <span class="self-train-wrap dev-only">
                 <button class="btn" id="selfTrain" type="button">策略自测</button>
                 <span class="training-tooltip" id="trainingResult" role="tooltip">运行 8 局自测，观察当前策略完成速度和稳定性。</span>
               </span>
-              <button class="btn" id="saveTrainingSample" type="button">保存样本</button>
+              <button class="btn dev-only" id="saveTrainingSample" type="button">保存样本</button>
               <button class="btn" id="importReplayBtn" type="button">导入牌谱</button>
               <input id="importReplayFiles" type="file" accept=".json,.jsonl,application/json" multiple hidden />
-              <label class="ml-toggle" title="高价值决策点自动弹出「先想再出」提示"><input type="checkbox" id="useKeyPause" checked /> 关键时刻暂停</label>
+              <label class="ml-toggle" title="高价值决策点自动弹出教练推荐"><input type="checkbox" id="useKeyPause" checked /> 关键时刻推荐</label>
               <label class="ml-toggle" title="智能融合：压牌用ML；接风/开局限制推炸"><input type="checkbox" id="useMlPolicy" checked /> ML智能</label>
               <button class="btn" id="exportLog" type="button">导出记录</button>
               <button class="btn" id="autoGame" type="button" title="仅观察 AI 对局，不计入你的复盘">自动打完</button>
@@ -3326,7 +3638,7 @@
             </div>
           </div>
 
-          <section class="table">
+          <section class="table" id="mobileTable">
             <div class="level-card table-level-card">己方 <strong id="ourLevel">6</strong> 对方 <strong id="theirLevel">6</strong></div>
             <div class="table-status-card">
               <div class="status">
@@ -3339,14 +3651,14 @@
               </div>
             </div>
             <div class="players" id="players"></div>
-            <button class="btn sort-hand-near-player" id="sortHand" type="button">一键理牌</button>
             <div class="seat-plays" id="seatPlays"></div>
 
             <div class="key-pause-banner" id="keyPauseBanner" hidden></div>
             <div class="hint-banner" id="hintBanner" hidden></div>
-            <div class="report-reminder-banner" id="reportReminderBanner" hidden></div>
-            <div class="table-middle-band">
+
+            <div class="table-middle-band" id="centerActions">
               <div class="table-center-cluster">
+                <p class="center-turn-hint" id="centerTurnHint" hidden></p>
                 <div class="last-play">
                   <h2 id="lastPlayTitle">桌面暂无出牌</h2>
                   <div class="played-cards" id="lastCards"></div>
@@ -3362,27 +3674,16 @@
               </div>
             </div>
 
-            <div class="hand-zone">
-              <div class="hand" id="hand"></div>
+            <div class="hand-fan-zone" id="handFan">
+              <div class="hand-zone">
+                <div class="hand" id="hand"></div>
+              </div>
             </div>
+            <button class="btn sort-hand-near-player" id="sortHand" type="button">理牌</button>
 
-            <button class="coach-fab" id="coachFab" type="button" title="向本机规则教练提问">❓ 问教练</button>
-            <div class="coach-fab-backdrop" id="coachFabBackdrop" hidden aria-hidden="true"></div>
-            <div class="coach-fab-drawer" id="coachFabDrawer" hidden>
-              <div class="coach-fab-drawer-head">
-                <h3>问教练</h3>
-                <button class="coach-fab-close" id="coachFabClose" type="button">收起</button>
-              </div>
-              <p class="coach-fab-limit" id="coachFabLimit"></p>
-              <div class="coach-fab-input-row">
-                <textarea id="coachFabQuestion" rows="2" placeholder="例如：这手拆炸合适吗？不应拆对组顺子？"></textarea>
-                <button class="btn primary" id="coachFabSend" type="button">发送</button>
-                <button class="btn" id="coachFabObjection" type="button" title="对当前推荐提意见">这手不合理</button>
-              </div>
-              <div class="coach-fab-log" id="coachFabLog">
-                <p class="coach-fab-hint">本机规则引擎直接作答，与左侧推荐一致。</p>
-              </div>
-            </div>
+            <div class="mobile-advice-strip" id="mobileAdviceStrip" hidden></div>
+
+            <button class="coach-fab" id="coachFab" type="button" title="教练建议与提问">教练</button>
           </section>
         </section>
 
@@ -3400,48 +3701,261 @@
             </div>
           </div>
         </aside>
+      </main>
 
-        <aside class="side-panel ai-coach-panel" id="aiPanel">
+      <footer id="message">专注打牌即可，局末会自动给你简要复盘。</footer>
+    </div>
+
+    <aside class="side-panel ai-coach-panel" id="aiPanel">
           <div class="ai-coach-head">
-            <h2>本局复盘</h2>
-            <p class="ai-status" id="aiStatus">专注打牌即可，局末会自动记录复盘。</p>
+            <div class="ai-coach-head-row">
+              <h2>本局复盘</h2>
+              <button class="ai-coach-close" id="dismissGameReview" type="button" hidden>知道了</button>
+            </div>
+            <p class="ai-status" id="aiStatus">专注打牌即可，局末会自动给你简要复盘。</p>
+            <p class="review-rotate-hint" id="reviewRotateHint" hidden>横屏可滚动浏览；旋转竖屏阅读更佳</p>
           </div>
           <div class="ai-body">
-            <div class="improve-cards" id="improveCards" hidden></div>
-            <div class="game-review-summary" id="gameReviewSummary"></div>
-            <div class="divergence-detail" id="divergenceDetail" hidden></div>
-            <details class="progress-panel" id="progressPanel">
-              <summary>我的进度</summary>
-              <div id="progressStats"></div>
-              <div class="review-history-section" id="reviewHistorySection">
-                <h4>历史复盘</h4>
-                <div id="reviewHistoryList"></div>
-                <div class="review-history-detail" id="reviewHistoryDetail" hidden></div>
-                <div class="divergence-detail saved-divergence-detail" id="savedDivergenceDetail" hidden></div>
-              </div>
-            </details>
-            <details class="drill-panel" id="drillPanel">
-              <summary>专项练习</summary>
-              <p class="muted">从「教练更对」差异提取弱项，点「练这个」进入<strong>预设教学局面</strong>，教练会标【专项】提示。</p>
-              <div id="drillPracticeList"></div>
-            </details>
+            <div class="ai-review-scroll">
+              <div class="improve-cards" id="improveCards" hidden></div>
+              <div class="game-review-summary" id="gameReviewSummary"></div>
+              <div class="divergence-detail" id="divergenceDetail" hidden></div>
+              <details class="progress-panel" id="progressPanel">
+                <summary>我的进度</summary>
+                <div id="progressStats"></div>
+                <div class="review-history-section" id="reviewHistorySection">
+                  <h4>历史复盘</h4>
+                  <div id="reviewHistoryList"></div>
+                  <div class="review-history-detail" id="reviewHistoryDetail" hidden></div>
+                  <div class="divergence-detail saved-divergence-detail" id="savedDivergenceDetail" hidden></div>
+                </div>
+              </details>
+              <details class="drill-panel" id="drillPanel" open>
+                <summary>专项练习</summary>
+                <p class="muted">点「练这个」进入预设局面；置顶「须压保同花顺」可复现你反馈的那类局面。</p>
+                <div id="drillPracticeList"></div>
+              </details>
+              <details class="optional-note dev-only">
+                <summary>补充一句（可选）</summary>
+                <textarea id="aiQuestion" rows="3" placeholder="例如：逢人配别配小三带"></textarea>
+                <button class="btn" id="askAiCoach" type="button">单条反馈</button>
+              </details>
+              <div class="ai-chat-log" id="aiChatLog" hidden></div>
+            </div>
             <div class="ai-toolbar">
               <div class="ai-actions">
                 <button class="btn primary" id="submitGameReview" type="button" disabled>保存复盘</button>
               </div>
             </div>
-            <details class="optional-note">
-              <summary>补充一句（可选）</summary>
-              <textarea id="aiQuestion" rows="3" placeholder="例如：逢人配别配小三带"></textarea>
-              <button class="btn" id="askAiCoach" type="button">单条反馈</button>
-            </details>
-            <div class="ai-chat-log" id="aiChatLog" hidden></div>
           </div>
         </aside>
-      </main>
 
-      <footer id="message">专注打牌，教练会自动记录并优化推荐。</footer>
+    <!-- 手机横屏专用骨架（与桌面 DOM 分离，见 mobile-ui.css） -->
+    <div id="landscapeRoot" class="ml-root" hidden aria-label="手机横屏牌桌">
+      <header class="ml-hud" id="mobileTopBar">
+        <div class="ml-hud-left">
+          <span class="ml-hud-brand">掼蛋</span>
+          <span class="ml-hud-trial" id="mobileTrialVersion" aria-label="试玩版本"></span>
+          <div class="ml-hud-score" aria-label="级牌与比分">
+            <span class="ml-hud-level-tag">级</span>
+            <strong class="ml-hud-level" id="mobileLevelRank">6</strong>
+            <span class="ml-hud-divider">·</span>
+            <span class="ml-hud-team" id="mobileOurLevel">6</span>
+            <span class="ml-hud-slash">/</span>
+            <span class="ml-hud-enemy" id="mobileTheirLevel">6</span>
+          </div>
+        </div>
+        <div class="ml-hud-center" id="mlHudTeammate" aria-live="polite"></div>
+        <div class="ml-hud-right">
+          <span class="ml-turn-chip waiting" id="mobileTurnChip">点新开一局开始</span>
+          <button class="ml-hud-icon-btn" id="mobileRulesHud" type="button" aria-label="规则">规则</button>
+          <button class="ml-hud-icon-btn" id="mobileMenuBtn" type="button" aria-label="菜单">⋯</button>
+        </div>
+      </header>
+      <p class="ml-hud-advice" id="mlHudAdvice" hidden aria-live="polite"></p>
+
+      <div class="ml-stage">
+        <div class="ml-table-frame">
+          <div class="ml-felt">
+            <div class="ml-seats" id="mlSeats"></div>
+            <div class="ml-seat-plays" id="mlSeatPlays"></div>
+
+            <div class="ml-banners" id="mlBanners">
+              <div class="key-pause-banner ml-banner" id="mlKeyPauseBanner" hidden></div>
+              <div class="hint-banner ml-banner" id="mlHintBanner" hidden></div>
+            </div>
+
+            <div class="ml-center" id="mlCenter">
+              <p class="ml-turn-caption" id="mlTurnCaption">点「新开一局」开始</p>
+              <button class="ml-btn ml-btn-newgame" id="mlNewGame" type="button" data-ml-action="newGame">新开一局</button>
+              <div class="ml-actions">
+                <button class="ml-btn ml-btn-pass" id="mlPassTurn" type="button" hidden>不出</button>
+                <button class="ml-btn ml-btn-hint" id="mlPlayRecommended" type="button" hidden>提示</button>
+                <button class="ml-btn ml-btn-play" id="mlPlaySelected" type="button" hidden>出牌</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="ml-hand-bar">
+          <div class="ml-hand-scroll">
+            <div class="ml-hand" id="mlHand"></div>
+          </div>
+          <div class="ml-hand-tools">
+            <button class="ml-tool-btn" id="mlSortHand" type="button">理牌</button>
+            <button class="ml-tool-btn ml-coach-btn" id="mlCoachFab" type="button">教练</button>
+          </div>
+        </div>
+      </div>
     </div>
+
+    <script>
+      (function bootMobileLayout() {
+        function isTouchMobile() {
+          try {
+            if (matchMedia("(pointer: coarse)").matches) return true;
+            if (matchMedia("(any-pointer: coarse)").matches) return true;
+            if (matchMedia("(hover: none)").matches) return true;
+          } catch (e) { /* ignore */ }
+          return (typeof navigator !== "undefined" && navigator.maxTouchPoints > 0);
+        }
+        function isMobileUa() {
+          var ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+          return /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini|MicroMessenger/i.test(ua);
+        }
+        function isObviousDesktopUa() {
+          var ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
+          return /Windows NT|Macintosh|CrOS|Linux x86_64|Linux i686/.test(ua)
+            && !/Mobile|Android|iPhone|iPad|iPod|Tablet/i.test(ua);
+        }
+        function isNarrowViewport() {
+          if (matchMedia("(max-width: 932px)").matches) return true;
+          try {
+            if (matchMedia("(orientation: landscape) and (max-height: 520px)").matches) return true;
+            if (isMobileUa() && matchMedia("(orientation: landscape) and (max-width: 960px)").matches) return true;
+          } catch (e) { /* ignore */ }
+          return false;
+        }
+        function isMobile() {
+          var narrow = isNarrowViewport();
+          if (!narrow) return false;
+          if (isMobileUa()) return true;
+          try {
+            if (matchMedia("(max-width: 932px) and (any-pointer: coarse)").matches) return true;
+            if (matchMedia("(max-width: 932px) and (pointer: coarse)").matches) return true;
+          } catch (e) { /* ignore */ }
+          if ((typeof navigator !== "undefined" ? navigator.maxTouchPoints : 0) > 0 && !isObviousDesktopUa()) return true;
+          if (!isTouchMobile()) return false;
+          if (isObviousDesktopUa()) return false;
+          try {
+            if (matchMedia("(pointer: fine)").matches) return false;
+          } catch (e) { /* ignore */ }
+          return true;
+        }
+        function syncViewportHeight() {
+          var vv = window.visualViewport;
+          var height = (vv && vv.height) ? vv.height : window.innerHeight;
+          if (height > 0) {
+            document.documentElement.style.setProperty("--app-vh", Math.round(height) + "px");
+          }
+        }
+        function sync() {
+          var mobile = isMobile();
+          var portraitMode = mobile && matchMedia("(orientation: portrait)").matches;
+          var dismissed = false;
+          try {
+            dismissed = localStorage.getItem("guandan-coach-pro-portrait-dismiss-v1") === "1";
+          } catch (e) { /* ignore */ }
+          var landscape = mobile && !portraitMode;
+          var html = document.documentElement;
+          var body = document.body;
+          if (!body) return;
+          html.classList.toggle("mobile-boot", mobile);
+          html.classList.toggle("mobile-layout", mobile);
+          html.classList.toggle("mobile-landscape-boot", landscape);
+          body.classList.toggle("mobile-layout", mobile);
+          body.classList.toggle("mobile-landscape", landscape);
+          body.classList.toggle("mobile-portrait", portraitMode && !dismissed);
+          var root = document.getElementById("landscapeRoot");
+          if (root) root.hidden = !landscape;
+          if (mobile) syncViewportHeight();
+          if (!mobile) {
+            if (root) root.hidden = true;
+            var mlHand = document.getElementById("mlHand");
+            if (mlHand) mlHand.replaceChildren();
+            var mlSeats = document.getElementById("mlSeats");
+            if (mlSeats) mlSeats.replaceChildren();
+            var mlSeatPlays = document.getElementById("mlSeatPlays");
+            if (mlSeatPlays) mlSeatPlays.replaceChildren();
+          }
+          var blocker = document.getElementById("portraitBlocker");
+          if (blocker) blocker.hidden = !portraitMode || dismissed;
+        }
+        sync();
+        window.addEventListener("orientationchange", function () {
+          setTimeout(sync, 60);
+        });
+        window.addEventListener("resize", sync);
+        window.visualViewport && window.visualViewport.addEventListener("resize", syncViewportHeight);
+      }());
+    </script>
+
+    <div class="coach-fab-backdrop" id="coachFabBackdrop" hidden aria-hidden="true"></div>
+    <div class="coach-fab-drawer" id="coachFabDrawer" hidden>
+      <div class="coach-fab-drawer-head">
+        <h3>教练</h3>
+        <button class="coach-fab-close" id="coachFabClose" type="button">收起</button>
+      </div>
+      <div class="coach-fab-body">
+        <div class="coach-sheet-advice" id="coachSheetAdvice" hidden></div>
+        <p class="coach-fab-limit" id="coachFabLimit"></p>
+        <div class="coach-fab-log" id="coachFabLog">
+          <p class="coach-fab-hint">本机规则引擎直接作答，与左侧推荐一致。</p>
+        </div>
+      </div>
+      <div class="coach-fab-input-row">
+        <textarea id="coachFabQuestion" rows="2" placeholder="例如：这手拆炸合适吗？不应拆对组顺子？"></textarea>
+        <button class="btn primary" id="coachFabSend" type="button">发送</button>
+        <button class="btn" id="coachFabObjection" type="button" title="对当前推荐提意见">这手不合理</button>
+      </div>
+    </div>
+
+    <div class="mobile-menu-backdrop" id="mobileMenuBackdrop" hidden aria-hidden="true"></div>
+    <aside class="mobile-menu-drawer" id="mobileMenuDrawer" hidden aria-label="游戏菜单">
+      <div class="mobile-menu-head">
+        <h2>菜单</h2>
+        <button class="mobile-menu-close" id="mobileMenuClose" type="button">收起</button>
+      </div>
+      <p class="mobile-menu-status" id="mobileMenuStatus">
+        <strong>单局练习</strong>
+        <span>竞技赛未开始；可先用单局继续练习。</span>
+      </p>
+      <label class="mobile-menu-field">级牌
+        <select id="mobileLevelSelect" aria-label="选择级牌"></select>
+      </label>
+      <details class="mobile-menu-drill" id="mobileDrillPanel" open>
+        <summary>专项练习</summary>
+        <p class="mobile-menu-drill-hint">置顶「须压保同花顺」可复现须压三带二别拆跑道；点「练这个」开局。</p>
+        <div id="mobileDrillPracticeList"></div>
+      </details>
+      <div class="mobile-menu-actions">
+        <button class="btn warn" id="mobileStartMustBeatSfDrill" type="button">练须压保同花顺</button>
+        <button class="btn" id="mobileOpenDrill" type="button" title="直接进入须压保同花顺教学局">专项练习</button>
+        <button class="btn primary" id="mobileNewGame" type="button">新开一局</button>
+        <button class="btn" id="mobileNewMatch" type="button">竞技开赛</button>
+        <button class="btn" id="mobileNextMatch" type="button" hidden>下一局</button>
+        <button class="btn primary" id="mobileViewReview" type="button" hidden>本局复盘</button>
+        <button class="btn" id="mobileRules" type="button">规则速查</button>
+        <button class="btn" id="mobileImport" type="button">导入牌谱</button>
+        <button class="btn" id="mobileExport" type="button">导出记录</button>
+        <button class="btn" id="mobileTrialFeedback" type="button">试玩反馈</button>
+      </div>
+      <div class="mobile-menu-toggles">
+        <label class="ml-toggle"><input type="checkbox" id="mobileKeyPause" checked /> 关键时刻推荐</label>
+        <label class="ml-toggle"><input type="checkbox" id="mobileMlPolicy" checked /> ML 智能</label>
+        <label class="ml-toggle"><input type="checkbox" id="mobileGuideTips" /> 新手引导</label>
+      </div>
+    </aside>
 
     <div class="onboarding-target-ring" id="onboardingRing" hidden></div>
     <div class="onboarding-overlay" id="onboardingOverlay" hidden>
@@ -3459,6 +3973,15 @@
       <div class="first-tip-actions">
         <button class="btn" id="firstTipSkipAll" type="button">不再提示</button>
         <button class="btn primary" id="firstTipDismiss" type="button">知道了</button>
+      </div>
+    </div>
+
+    <div class="portrait-blocker" id="portraitBlocker" hidden aria-live="polite">
+      <div class="portrait-blocker-card">
+        <div class="portrait-blocker-icon" aria-hidden="true">↻</div>
+        <p class="portrait-blocker-title">请旋转手机横屏游玩</p>
+        <p class="portrait-blocker-sub">掼蛋教练仅支持手机横屏布局</p>
+        <button class="btn primary portrait-blocker-review" id="portraitBlockerReview" type="button" hidden>看本局复盘</button>
       </div>
     </div>
 
@@ -3501,10 +4024,7 @@
         </section>
         <section class="rules-section">
           <h3>报牌规则</h3>
-          <p><strong>官方标准</strong>：出完一手后，手里剩余 ≤10 张须<strong>主动报牌</strong>。娱乐局口头说「剩 X 张」「报 10 张」等即可，<strong>只报张数、不报牌型</strong>；10 张档通常只报一次（民间可约定 7/4/1 张再报）。</p>
-          <p><strong>民间补充</strong>：部分地区 ≤6 张才报；剩 1 张几乎必报。<strong>问报</strong>（问别人剩几张）正式比赛禁用。</p>
-          <p><strong>违规判罚</strong>：未报或报错 → 收回重出并警告；若已再出牌则停一圈；若已出完判下游。</p>
-          <p class="muted">口诀：十张主动报，只报张数不报套；一牌必报是惯例，违规要被下游靠。</p>
+          <p class="muted">本教练不提醒报牌；正式比赛常见规则：出完一手后剩余 ≤10 张须主动报张数（不报牌型），各地民间约定不一。</p>
         </section>
       </div>
     </aside>
