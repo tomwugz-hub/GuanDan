@@ -106,7 +106,7 @@ function renderMarkdown(result) {
     for (const [field, value] of fields) lines.push(`| ${field} | ${escapeMarkdown(value)} |`);
     lines.push("");
   }
-  return `${lines.join("\n")}\n`;
+  return `${lines.join("\n").trimEnd()}\n`;
 }
 
 function prepareOutputDirectory(accountDir, accountReal) {

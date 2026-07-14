@@ -153,6 +153,8 @@ try {
   assert.match(parsed.candidates[0].confidence.level, /^(?:low|medium-low)$/u);
   const markdown = firstMarkdownBytes.toString("utf8");
   assert.match(markdown, /needs-validation/u);
+  assert.equal(markdown.endsWith("\n"), true, "Markdown must end with a newline");
+  assert.equal(markdown.endsWith("\n\n"), false, "Markdown must end with exactly one newline");
   for (const label of ["Candidate ID", "Trigger", "Inference", "Action", "Confidence", "Evidence time", "Exceptions", "Risks", "Given", "When", "Then"]) {
     assert.match(markdown, new RegExp(label, "u"));
   }

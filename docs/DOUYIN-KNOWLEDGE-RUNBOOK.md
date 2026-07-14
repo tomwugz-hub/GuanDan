@@ -105,6 +105,14 @@ npm.cmd run data:douyin:run -- --account 74480108075 --media-dir .cache\douyin\i
 npm.cmd run data:douyin:refine -- --account 74480108075 --video <videoId>
 ```
 
+首次运行不传 `--generated-at` 时，工具会把当前时间写入产物的审计时间 `generatedAt`。需要精确回放已有产物时，先读取该 JSON 中现有的 `generatedAt`，再显式传入同一规范 ISO 时间：
+
+```powershell
+npm.cmd run data:douyin:refine -- --account 74480108075 --video <videoId> --generated-at <existing-generatedAt>
+```
+
+只改变 `generatedAt` 会改变审计时间和产物字节，但不会改变稳定候选 ID；固定相同输入和 `--generated-at` 时，JSON 与 Markdown 必须可字节级重现。
+
 工具按证据起始时间输出稳定的一条纠错对应一条候选：
 
 ```text
