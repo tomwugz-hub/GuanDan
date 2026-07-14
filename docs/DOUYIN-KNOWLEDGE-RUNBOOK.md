@@ -65,6 +65,55 @@ npm.cmd run data:douyin:run -- --account 74480108075 --media-dir .cache\douyin\i
 
 `knowledge.jsonl` 和 `doctrine-candidates.jsonl` 中的新候选必须保持 `reviewStatus: "pending"`，并核对原视频、规范 URL、时间段、逐字证据、模型和语言元数据。以下候选应驳回：纯营销、关注/点赞引导、空泛口号、重复内容、证据不足、时间范围无效或无法形成可核查主张的内容。
 
+### 人工纠错与候选策略提炼
+
+人工逐段核对原视频和规范 transcript 后，在 `reviews\<videoId>.corrections.json` 写入一个确认 envelope；不得改写 transcript、`knowledge.jsonl` 或 `doctrine-candidates.jsonl`。envelope 结构如下，子纠错从 envelope 继承账号、视频、规范 URL 和确认状态，子项不得覆盖这些身份字段：
+
+```json
+{
+  "schemaVersion": 1,
+  "accountId": "74480108075",
+  "videoId": "<videoId>",
+  "url": "https://www.douyin.com/video/<videoId>",
+  "status": "confirmed",
+  "confirmedBy": "user",
+  "confirmedAt": "<canonical ISO timestamp>",
+  "corrections": [
+    {
+      "start": 4.16,
+      "end": 12.12,
+      "correctedText": "<人工核对文本>",
+      "interpretation": {
+        "key": "<stable-rule-key>",
+        "trigger": "<触发条件>",
+        "inference": "<保留可能、大概率、弱信号或待验证等不确定措辞>",
+        "action": "<可复核行动>",
+        "applicability": "<适用局面>",
+        "exceptions": ["<例外一>", "<例外二>"],
+        "risks": ["<风险一>", "<风险二>"],
+        "confidence": "low",
+        "testScenario": { "given": "<前提>", "when": "<动作>", "then": "<预期>" }
+      }
+    }
+  ]
+}
+```
+
+`corrections` 不得为空，同一 envelope 的 `interpretation.key` 必须唯一，`confirmedAt` 必须是规范 ISO 时间。每条解释至少保留具体例外、风险和 given/when/then 场景；现阶段置信度上限为 `medium-low`，`sourceCount` 固定为 1。确认后运行：
+
+```powershell
+npm.cmd run data:douyin:refine -- --account 74480108075 --video <videoId>
+```
+
+工具按证据起始时间输出稳定的一条纠错对应一条候选：
+
+```text
+training-samples\sources\douyin\74480108075\strategy-candidates\<videoId>.json
+training-samples\sources\douyin\74480108075\strategy-candidates\<videoId>.md
+```
+
+提炼结果必须保持 `status: "needs-validation"`。它只是一座从人工纠错到实验候选的隔离桥，不得自动写入 `strategy/`、正式教义、原 transcript、`knowledge.jsonl`、`doctrine-candidates.jsonl` 或 manifest；进入生产策略仍须遵循下方的独立来源核验、doctrine ticket 和回归门禁。
+
 不得自动编辑 `strategy/`。任何候选晋升为教义前必须完成：
 
 1. 与其他独立来源、现有书籍教义和实战案例交叉核验；
@@ -107,6 +156,9 @@ training-samples\sources\douyin\74480108075\manifest.json
 training-samples\sources\douyin\74480108075\transcripts\<videoId>.json
 training-samples\sources\douyin\74480108075\knowledge.jsonl
 training-samples\sources\douyin\74480108075\doctrine-candidates.jsonl
+training-samples\sources\douyin\74480108075\reviews\<videoId>.corrections.json
+training-samples\sources\douyin\74480108075\strategy-candidates\<videoId>.json
+training-samples\sources\douyin\74480108075\strategy-candidates\<videoId>.md
 training-samples\sources\douyin\74480108075\failures.jsonl
 training-samples\sources\douyin\74480108075\reports\latest.json
 training-samples\sources\douyin\74480108075\reports\latest.md
