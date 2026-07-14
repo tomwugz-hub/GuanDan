@@ -109,6 +109,82 @@ assert.equal(candidate.evidence.rawText, "RAW-A RAW-B", "evidence must retain th
 
 assert.doesNotThrow(() => validateCorrectionReview(fixture().correctionReview, { accountId, videoId }));
 
+function envelopeFixture() {
+  const value = fixture();
+  value.correctionReview = {
+    schemaVersion: 1,
+    accountId,
+    videoId,
+    url,
+    status: "confirmed",
+    confirmedBy: "user",
+    confirmedAt: "2026-07-14T00:00:00.000Z",
+    corrections: [
+      {
+        start: 2,
+        end: 4,
+        correctedText: "CORRECTED-LATER",
+        interpretation: {
+          key: "later-rule",
+          trigger: "later evidence trigger",
+          inference: "可能 later evidence inference",
+          action: "retain the later hypothesis",
+          applicability: "later evidence window",
+          exceptions: ["later exception"],
+          risks: ["later risk"],
+          confidence: "low",
+          testScenario: {
+            given: "later evidence is available",
+            when: "the later trigger appears",
+            then: "the later hypothesis remains provisional",
+          },
+        },
+      },
+      {
+        start: 0,
+        end: 2,
+        correctedText: "CORRECTED-EARLIER",
+        interpretation: {
+          key: "earlier-rule",
+          trigger: "earlier evidence trigger",
+          inference: "可能 earlier evidence inference",
+          action: "retain the earlier hypothesis",
+          applicability: "earlier evidence window",
+          exceptions: ["earlier exception"],
+          risks: ["earlier risk"],
+          confidence: "medium-low",
+          testScenario: {
+            given: "earlier evidence is available",
+            when: "the earlier trigger appears",
+            then: "the earlier hypothesis remains provisional",
+          },
+        },
+      },
+    ],
+  };
+  return value;
+}
+
+const envelopeInput = envelopeFixture();
+const envelopeOutput = refineCandidateStrategies({ ...envelopeInput, generatedAt });
+assert.equal(envelopeOutput.candidates.length, 2);
+assert.deepEqual(envelopeOutput.candidates.map((row) => row.evidence.start), [0, 2]);
+assert.deepEqual(envelopeOutput.candidates.map((row) => row.trigger), [
+  "earlier evidence trigger",
+  "later evidence trigger",
+]);
+assert.equal(new Set(envelopeOutput.candidates.map((row) => row.id)).size, 2);
+const envelopeLater = refineCandidateStrategies({
+  ...envelopeFixture(),
+  generatedAt: "2030-01-01T00:00:00.000Z",
+});
+assert.deepEqual(
+  envelopeLater.candidates.map((row) => row.id),
+  envelopeOutput.candidates.map((row) => row.id),
+  "envelope candidate IDs must be stable",
+);
+assert.doesNotThrow(() => validateCorrectionReview(envelopeFixture().correctionReview, { accountId, videoId }));
+
 function rejects(label, mutate, pattern) {
   const value = fixture();
   mutate(value);
@@ -146,5 +222,31 @@ rejects("identity mismatch", (value) => {
 rejects("missing overlapping pending knowledge", (value) => {
   value.knowledge = value.knowledge.map((row) => ({ ...row, reviewStatus: "reviewed" }));
 }, /overlap|pending|knowledge/i);
+
+function rejectsEnvelope(label, mutate, pattern) {
+  const value = envelopeFixture();
+  mutate(value);
+  assert.throws(
+    () => refineCandidateStrategies({ ...value, generatedAt }),
+    pattern,
+    label,
+  );
+}
+
+rejectsEnvelope("empty corrections envelope", (value) => {
+  value.correctionReview.corrections = [];
+}, /corrections|empty/i);
+rejectsEnvelope("duplicate interpretation keys", (value) => {
+  value.correctionReview.corrections[1].interpretation.key = "later-rule";
+}, /duplicate|key/i);
+rejectsEnvelope("invalid confirmedAt", (value) => {
+  value.correctionReview.confirmedAt = "2026-07-14";
+}, /confirmedAt|ISO|timestamp/i);
+rejectsEnvelope("envelope identity mismatch", (value) => {
+  value.correctionReview.videoId = "different-video";
+}, /videoId|identity/i);
+rejectsEnvelope("child identity override", (value) => {
+  value.correctionReview.corrections[0].accountId = accountId;
+}, /override|accountId|identity/i);
 
 console.log("抖音候选策略提炼测试通过");

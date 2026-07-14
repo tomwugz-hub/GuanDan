@@ -37,7 +37,7 @@ function validateTestScenario(value) {
   for (const field of ["given", "when", "then"]) requiredString(value[field], `testScenario.${field}`);
 }
 
-export function validateCorrectionReview(review, { accountId, videoId }) {
+function validateSingleCorrectionReview(review, { accountId, videoId }) {
   if (review === null || typeof review !== "object" || Array.isArray(review)) {
     throw new Error("correction review must be an object");
   }
@@ -69,6 +69,62 @@ export function validateCorrectionReview(review, { accountId, videoId }) {
   return true;
 }
 
+function canonicalIso(value, name) {
+  requiredString(value, name);
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new Error(`${name} must be a canonical ISO timestamp`);
+  }
+  return value;
+}
+
+function correctionReviews(review, { accountId, videoId }) {
+  if (review === null || typeof review !== "object" || Array.isArray(review)) {
+    throw new Error("correction review must be an object");
+  }
+  if (!Object.hasOwn(review, "corrections")) {
+    validateSingleCorrectionReview(review, { accountId, videoId });
+    return [review];
+  }
+
+  if (review.schemaVersion !== 1) throw new Error("correction review schemaVersion must be 1");
+  requireIdentity(review.accountId, accountId, "accountId");
+  requireIdentity(review.videoId, videoId, "videoId");
+  if (review.url !== canonicalUrl(videoId)) throw new Error("correction review URL must be canonical");
+  if (review.status !== "confirmed") throw new Error("correction review status must be confirmed");
+  requiredString(review.confirmedBy, "confirmedBy");
+  canonicalIso(review.confirmedAt, "confirmedAt");
+  if (!Array.isArray(review.corrections) || review.corrections.length === 0) {
+    throw new Error("corrections must be a non-empty array");
+  }
+
+  const inherited = review.corrections.map((correction) => {
+    if (correction === null || typeof correction !== "object" || Array.isArray(correction)) {
+      throw new Error("correction must be an object");
+    }
+    for (const field of ["accountId", "videoId", "url", "status"]) {
+      if (Object.hasOwn(correction, field)) throw new Error(`correction child must not override ${field}`);
+    }
+    const single = {
+      ...correction,
+      accountId: review.accountId,
+      videoId: review.videoId,
+      url: review.url,
+      status: review.status,
+    };
+    validateSingleCorrectionReview(single, { accountId, videoId });
+    return single;
+  });
+  const keys = inherited.map((correction) => correction.interpretation.key);
+  if (new Set(keys).size !== keys.length) throw new Error("correction interpretation keys must be unique; duplicate key found");
+  return inherited;
+}
+
+export function validateCorrectionReview(review, { accountId, videoId }) {
+  correctionReviews(review, { accountId, videoId });
+  return true;
+}
+
 function stableId(videoId, interpretation) {
   return createHash("sha256")
     .update(`${videoId}\0${interpretation.key}\0${interpretation.trigger}\0${interpretation.inference}`)
@@ -95,38 +151,39 @@ export function refineCandidateStrategies({
   const url = canonicalUrl(videoId);
   if (video.url !== url) throw new Error("video URL must be canonical");
   assertSourceIdentity(transcript?.source, { accountId, videoId, url }, "transcript");
-  validateCorrectionReview(correctionReview, { accountId, videoId });
+  const reviews = correctionReviews(correctionReview, { accountId, videoId })
+    .sort((left, right) => left.start - right.start || left.end - right.end);
 
   const segments = transcript?.segments;
   if (!Array.isArray(segments)) throw new Error("transcript.segments must be an array");
-  const contained = segments.filter((segment) => {
+  for (const segment of segments) {
     validateRange(segment?.start, segment?.end, "transcript segment");
     requiredString(segment?.text, "transcript segment text");
-    return segment.start >= correctionReview.start && segment.end <= correctionReview.end;
-  });
-  if (contained.length === 0) throw new Error("correction range must contain raw transcript segments");
-  contained.sort((left, right) => left.start - right.start || left.end - right.end);
-  const rawText = contained.map((segment) => segment.text).join("");
+  }
 
   if (!Array.isArray(knowledge)) throw new Error("knowledge must be an array");
-  const overlapping = knowledge.filter((row) => {
-    if (row?.reviewStatus !== "pending") return false;
-    const evidence = row?.evidence;
-    if (evidence?.videoId !== videoId || evidence?.url !== url) return false;
-    if (!Number.isFinite(evidence.start) || !Number.isFinite(evidence.end) || evidence.end <= evidence.start) return false;
-    return evidence.start < correctionReview.end && evidence.end > correctionReview.start;
-  });
-  if (overlapping.length === 0) throw new Error("at least one overlapping pending knowledge row is required");
-
-  const interpretation = correctionReview.interpretation;
   const result = {
     schemaVersion: "1.0.0",
     generatedAt,
     accountId,
     videoId,
     source: { accountId, videoId, url },
-    candidates: [
-      {
+    candidates: reviews.map((review) => {
+      const contained = segments
+        .filter((segment) => segment.start >= review.start && segment.end <= review.end)
+        .sort((left, right) => left.start - right.start || left.end - right.end);
+      if (contained.length === 0) throw new Error("correction range must contain raw transcript segments");
+      const rawText = contained.map((segment) => segment.text).join("");
+      const overlapping = knowledge.filter((row) => {
+        if (row?.reviewStatus !== "pending") return false;
+        const evidence = row?.evidence;
+        if (evidence?.videoId !== videoId || evidence?.url !== url) return false;
+        if (!Number.isFinite(evidence.start) || !Number.isFinite(evidence.end) || evidence.end <= evidence.start) return false;
+        return evidence.start < review.end && evidence.end > review.start;
+      });
+      if (overlapping.length === 0) throw new Error("at least one overlapping pending knowledge row is required");
+      const interpretation = review.interpretation;
+      return {
         id: stableId(videoId, interpretation),
         status: "needs-validation",
         trigger: interpretation.trigger,
@@ -139,20 +196,20 @@ export function refineCandidateStrategies({
         evidence: {
           videoId,
           url,
-          start: correctionReview.start,
-          end: correctionReview.end,
+          start: review.start,
+          end: review.end,
           rawText,
           transcriptSegments: contained,
           knowledgeIds: overlapping.map((row) => row.id),
           knowledge: overlapping.map((row) => row.evidence),
         },
         correction: {
-          status: correctionReview.status,
-          correctedText: correctionReview.correctedText,
+          status: review.status,
+          correctedText: review.correctedText,
         },
         testScenario: interpretation.testScenario,
-      },
-    ],
+      };
+    }),
   };
 
   return structuredClone(result);
