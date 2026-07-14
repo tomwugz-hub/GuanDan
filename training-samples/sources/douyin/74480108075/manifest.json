@@ -62,7 +62,7 @@
       "status": "extracted",
       "lastSuccessfulStage": "extracted",
       "discoveredAt": "2026-07-14T08:31:14.954Z",
-      "updatedAt": "2026-07-14T09:28:50.874Z",
+      "updatedAt": "2026-07-14T09:34:08.896Z",
       "retries": 1,
       "error": null,
       "transcriptPath": "transcripts/7660454136994975018.json",
@@ -73,8 +73,7 @@
         "754a65c64a8de220",
         "c0c05432ce7c318e",
         "65e44bc68d6422fa",
-        "bc8b7d26f5a533c6",
-        "23280c7f949b362e"
+        "bc8b7d26f5a533c6"
       ],
       "contentHash": "ea7e27602ccb823802de4713353ff4c7f91c437e9180e19a10a5a2acdfc53fa2"
     },

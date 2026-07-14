@@ -96,7 +96,7 @@ function coalesceSegments(input) {
   for (const segment of input ?? []) {
     const start = segment?.start;
     const end = segment?.end;
-    const text = removeGenericOutcomeClauses(segment?.text);
+    const text = cleanText(segment?.text);
     if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end <= start || !text) {
       continue;
     }
@@ -158,7 +158,7 @@ export function extractCandidates(video, transcript) {
   for (const segment of coalesceSegments(transcript?.segments)) {
     const start = segment?.start;
     const end = segment?.end;
-    const text = cleanText(segment?.text);
+    const text = removeGenericOutcomeClauses(segment?.text);
     if (
       !Number.isFinite(start) ||
       !Number.isFinite(end) ||

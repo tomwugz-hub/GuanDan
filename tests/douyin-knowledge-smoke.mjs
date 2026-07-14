@@ -166,4 +166,15 @@ const nonStrategicInference = extractCandidates(
 );
 assert.equal(nonStrategicInference.length, 0, "inference words alone must not make praise into Guandan knowledge");
 
+const asrDistortedOutcome = extractCandidates(
+  { videoId: "9", url: "https://www.douyin.com/video/9", title: "拆牌思路" },
+  {
+    segments: [
+      { start: 0, end: 1.2, text: "学会拆牌思路" },
+      { start: 1.2, end: 3, text: "灌烂就赢了一万" },
+    ],
+  },
+);
+assert.equal(asrDistortedOutcome.length, 0, "ASR-distorted generic win claims must remain filtered");
+
 console.log("抖音知识提取测试通过");
