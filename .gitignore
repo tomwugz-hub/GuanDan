@@ -12,3 +12,8 @@ datasets/v1/rows.jsonl
 guandan-coach-standalone.html
 tools/_debug-*.txt
 tools/_*.txt
+
+# Local Douyin media, Python environment, and model cache
+.cache/douyin/
+.venv-douyin/
+.cache/huggingface/

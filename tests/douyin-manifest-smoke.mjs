@@ -1,7 +1,13 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
@@ -10,6 +16,11 @@ import {
   mergeManifest,
   normalizeObservedManifest,
 } from "../tools/lib/douyin-manifest.mjs";
+import {
+  cachePaths,
+  cleanupSuccessfulMedia,
+  transitionVideo,
+} from "../tools/lib/douyin-state.mjs";
 
 function assert(value, message) {
   if (!value) throw new Error(message);
@@ -85,6 +96,118 @@ assert(preserved.contentHash === "sha256:durable", "应保留内容哈希");
 assert(preserved.title === "刷新后的标题", "允许刷新标题");
 assert(preserved.updatedAt === mergedAt, "重新发现应刷新更新时间");
 assert(merged.source.declaredWorkCount === 325, "合并后应保留声明作品数");
+
+const discovered = observed.videos[0];
+const downloaded = transitionVideo(
+  discovered,
+  "downloaded",
+  { downloadPath: "temporary/source.mp4" },
+  "2026-07-14T01:00:00.000Z",
+);
+assert(downloaded.status === "downloaded", "discovered should advance to downloaded");
+assert(downloaded.lastSuccessfulStage === "downloaded", "success should advance the last successful stage");
+assert(downloaded.retries === 0, "success should preserve retry count");
+assert(downloaded.updatedAt === "2026-07-14T01:00:00.000Z", "transition should use the supplied timestamp");
+assert(downloaded.downloadPath === "temporary/source.mp4", "transition should retain patch metadata");
+
+const transcribed = transitionVideo(downloaded, "transcribed", {}, "2026-07-14T02:00:00.000Z");
+const extracted = transitionVideo(transcribed, "extracted", {}, "2026-07-14T03:00:00.000Z");
+const reviewed = transitionVideo(extracted, "reviewed", {}, "2026-07-14T04:00:00.000Z");
+assert(reviewed.lastSuccessfulStage === "reviewed", "the full successful progression should be legal");
+
+const failed = transitionVideo(
+  downloaded,
+  "failed",
+  { error: { category: "transcription", message: "temporary failure" } },
+  "2026-07-14T05:00:00.000Z",
+);
+assert(failed.retries === 1, "entering failed should increment retries");
+assert(failed.lastSuccessfulStage === "downloaded", "failed should not advance the last successful stage");
+assert(failed.error.category === "transcription", "failed should retain categorized errors");
+const resumed = transitionVideo(failed, "transcribed", {}, "2026-07-14T06:00:00.000Z");
+assert(resumed.retries === 1, "recovery should preserve retries");
+assert(resumed.lastSuccessfulStage === "transcribed", "failed should resume at a legal successful stage");
+
+const blocked = transitionVideo(
+  discovered,
+  "blocked",
+  { error: { category: "access", message: "video unavailable" } },
+  "2026-07-14T07:00:00.000Z",
+);
+assert(blocked.status === "blocked", "access errors should enter blocked");
+assert(blocked.lastSuccessfulStage === "discovered", "blocked should not advance the last successful stage");
+assert(blocked.retries === 0, "blocked should not increment retries");
+assert(blocked.error.category === "access", "blocked should retain categorized errors");
+
+for (const terminal of [reviewed, blocked]) {
+  let rejectedTerminal = false;
+  try {
+    transitionVideo(terminal, "failed");
+  } catch {
+    rejectedTerminal = true;
+  }
+  assert(rejectedTerminal, `${terminal.status} should be terminal`);
+}
+
+let rejectedSkip = false;
+try {
+  transitionVideo(downloaded, "reviewed");
+} catch {
+  rejectedSkip = true;
+}
+assert(rejectedSkip, "downloaded should not skip directly to reviewed");
+
+for (const next of ["downloaded", "transcribed", "extracted", "blocked"]) {
+  const fromFailed = transitionVideo(failed, next);
+  assert(fromFailed.status === next, `failed should allow transition to ${next}`);
+}
+
+const failedAfterExtraction = transitionVideo(extracted, "failed");
+const retriedDownload = transitionVideo(failedAfterExtraction, "downloaded");
+assert(
+  retriedDownload.lastSuccessfulStage === "extracted",
+  "retrying an earlier stage must not regress the last successful stage",
+);
+const failedAgain = transitionVideo(retriedDownload, "failed");
+assert(failedAgain.retries === 2, "each entry into failed should increment retries");
+
+const cacheRoot = await mkdtemp(join(tmpdir(), "douyin-state-"));
+try {
+  const cache = cachePaths(cacheRoot, "74480108075", discovered.videoId);
+  const relativeDir = relative(resolve(cacheRoot), cache.dir);
+  assert(relativeDir && !relativeDir.startsWith(`..${sep}`), "cache directory should stay inside its root");
+  assert(cache.video === join(cache.dir, "source.mp4"), "cache should include the raw video path");
+  assert(cache.audio === join(cache.dir, "audio.wav"), "cache should include the audio path");
+
+  let rejectedTraversal = false;
+  try {
+    cachePaths(cacheRoot, "..", "escape");
+  } catch {
+    rejectedTraversal = true;
+  }
+  assert(rejectedTraversal, "account and video IDs must not escape the cache root");
+
+  mkdirSync(cache.dir, { recursive: true });
+  writeFileSync(cache.video, "video");
+  writeFileSync(cache.audio, "audio");
+  cleanupSuccessfulMedia(cache);
+  assert(!existsSync(cache.video) && !existsSync(cache.audio), "cleanup should remove successful media");
+  assert(!existsSync(cache.dir), "cleanup should remove the unused video directory");
+  cleanupSuccessfulMedia(cache);
+
+  const sentinel = join(cacheRoot, "keep.txt");
+  writeFileSync(sentinel, "keep");
+  let rejectedOutsideCleanup = false;
+  try {
+    cleanupSuccessfulMedia({ ...cache, video: sentinel });
+  } catch {
+    rejectedOutsideCleanup = true;
+  }
+  assert(rejectedOutsideCleanup, "cleanup should reject paths outside the video directory");
+  assert(existsSync(sentinel), "cleanup must not remove files outside the video directory");
+} finally {
+  await rm(cacheRoot, { recursive: true, force: true });
+}
 
 const tempRoot = await mkdtemp(join(tmpdir(), "douyin-manifest-"));
 try {
