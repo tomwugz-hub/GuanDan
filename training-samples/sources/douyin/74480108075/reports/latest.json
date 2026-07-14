@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-14T09:28:52.745Z",
+  "accountId": "74480108075",
+  "source": {
+    "platform": "douyin",
+    "displayName": "掼蛋教父",
+    "profileUrl": "https://www.douyin.com/user/MS4wLjABAAAATsLdpkhBjN2ytHaJV5pmxHiMsBU1WOfNJPI1s_MTlPOUH14zt-T2FbIwQFxWI6mi",
+    "capturedAt": "2026-07-14"
+  },
+  "declared": 325,
+  "observed": 306,
+  "missingFromDeclared": 19,
+  "discovered": 305,
+  "downloaded": 0,
+  "transcribed": 0,
+  "extracted": 1,
+  "reviewed": 0,
+  "blocked": 0,
+  "failed": 0,
+  "totalStates": 306
+}
