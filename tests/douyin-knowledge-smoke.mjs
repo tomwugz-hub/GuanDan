@@ -91,6 +91,34 @@ const titleFallback = extractCandidates(
 );
 assert.equal(titleFallback[0].topic, "炸弹", "title should provide a topic only when the segment has no obvious match");
 
+const fragmentedSpeech = extractCandidates(
+  { videoId: "5", url: "https://www.douyin.com/video/5", title: "拆牌推理" },
+  {
+    model: { name: "small", device: "cpu", computeType: "int8" },
+    language: "zh",
+    segments: [
+      { start: 0, end: 1.44, text: "掼蛋高手的拆牌思路", avgLogProb: -0.2 },
+      { start: 1.44, end: 2.64, text: "从你打出的第一手牌", avgLogProb: -0.2 },
+      { start: 2.64, end: 3.84, text: "就能看穿你的牌型", avgLogProb: -0.2 },
+      { start: 4.16, end: 6.12, text: "例如下家起手出三个九带对三", avgLogProb: -0.3 },
+      { start: 6.12, end: 6.96, text: "那可以预判", avgLogProb: -0.3 },
+      { start: 6.96, end: 8.6, text: "他手中有四到八的杂顺", avgLogProb: -0.3 },
+      { start: 12, end: 14, text: "学会拆牌思路掼蛋就赢了一半", avgLogProb: -0.1 },
+    ],
+  },
+);
+assert.equal(fragmentedSpeech.length, 2, "a new example should start a separate candidate and generic outcomes should be filtered");
+assert.deepEqual(fragmentedSpeech.map((row) => row.evidence.start), [0, 4.16]);
+assert.equal(fragmentedSpeech[0].evidence.end, 3.84, "intro fragments should form one complete setup");
+assert.equal(fragmentedSpeech[1].evidence.end, 8.6, "example fragments should form one complete inference");
+assert.match(fragmentedSpeech[1].claim, /三个九带对三.*可以预判.*杂顺/u);
+assert.doesNotMatch(fragmentedSpeech.map((row) => row.claim).join(" "), /赢了一半/u);
+assert.deepEqual(fragmentedSpeech[1].evidence.model, {
+  name: "small",
+  device: "cpu",
+  computeType: "int8",
+});
+
 const concreteAdvice = extractCandidates(
   { videoId: "4", url: "https://www.douyin.com/video/4", title: "实战技巧" },
   {
@@ -104,5 +132,38 @@ const concreteAdvice = extractCandidates(
 );
 assert.equal(concreteAdvice.length, 4, "concrete slogan-qualified, comparative, and conditional advice should be retained");
 assert.equal(concreteAdvice[0].topic, "残局", "specific advice should retain its segment topic");
+
+const inferenceAdvice = extractCandidates(
+  { videoId: "6", url: "https://www.douyin.com/video/6", title: "拆牌推理" },
+  {
+    segments: [
+      { start: 0, end: 4, text: "如果下家先出小顺子，这代表他手中大概率还有单张。" },
+      { start: 4, end: 8, text: "对家先拆三带二，说明原有组合可能需要交换。" },
+    ],
+  },
+);
+assert.equal(inferenceAdvice.length, 2, "prediction language should remain as checkable pending knowledge");
+assert.deepEqual(inferenceAdvice.map((row) => row.topic), ["组牌", "配合"]);
+
+const sloganWithAdvice = extractCandidates(
+  { videoId: "7", url: "https://www.douyin.com/video/7", title: "记牌实战" },
+  {
+    segments: [
+      { start: 0, end: 5, text: "学会记牌就能提高胜率，实战中要先统计已经出现的大牌。" },
+    ],
+  },
+);
+assert.equal(sloganWithAdvice.length, 1, "a generic outcome clause must not discard adjacent concrete advice");
+assert.equal(sloganWithAdvice[0].claim, "实战中要先统计已经出现的大牌。");
+
+const nonStrategicInference = extractCandidates(
+  { videoId: "8", url: "https://www.douyin.com/video/8", title: "比赛复盘" },
+  {
+    segments: [
+      { start: 0, end: 4, text: "这说明这位选手今天发挥得非常出色。" },
+    ],
+  },
+);
+assert.equal(nonStrategicInference.length, 0, "inference words alone must not make praise into Guandan knowledge");
 
 console.log("抖音知识提取测试通过");

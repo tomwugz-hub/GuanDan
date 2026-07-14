@@ -8,7 +8,8 @@ function option(name) {
 }
 
 if (process.env.DOUYIN_MOCK_FAIL === "1") {
-  throw new Error("mock transcription failure https://cdn.example/video.mp4?token=secret");
+  process.stderr.write(`${"ffmpeg diagnostic banner\n".repeat(40)}ROOT_CAUSE: mock transcription failure https://cdn.example/video.mp4?token=secret\ncleanup complete\nprocess exiting\n`);
+  process.exit(2);
 }
 
 const output = option("--output");

@@ -158,6 +158,8 @@ try {
   assert.equal(failedRow.retries, 1);
   assert.doesNotMatch(JSON.stringify(failedRow.error), /https?:\/\//iu);
   assert.ok(JSON.stringify(failedRow.error).length <= 600);
+  assert.match(failedRow.error.message, /ROOT_CAUSE: mock transcription failure/u);
+  assert.doesNotMatch(failedRow.error.message, /ffmpeg diagnostic banner/u);
   assert.equal(existsSync(join(mediaDir, `${secondId}.mp4`)), true);
   const secondCache = cachePaths(join(temp, ".cache/douyin"), accountId, secondId);
   assert.equal(existsSync(secondCache.video), true);
@@ -227,15 +229,82 @@ try {
   assert.equal(recoveredRow.status, "extracted", "durable transcript must resume without media or retranscription");
   assert.equal(recoveredRow.transcriptPath, `transcripts/${thirdId}.json`);
 
+  const firstBeforeReextract = readJson(manifestPath).videos.find((row) => row.videoId === firstId);
+  const firstTranscriptPath = join(accountDir, `transcripts/${firstId}.json`);
+  const firstTranscript = readJson(firstTranscriptPath);
+  firstTranscript.segments = [
+    {
+      start: 0,
+      end: 4,
+      text: "对家报牌以后，应该优先控制出牌权。",
+      avgLogProb: -0.15,
+    },
+  ];
+  writeFileSync(firstTranscriptPath, `${JSON.stringify(firstTranscript, null, 2)}\n`, "utf8");
+
+  const fourthId = "7660888888888888888";
+  const mixedStateManifest = readJson(manifestPath);
+  const reviewedRow = mixedStateManifest.videos.find((row) => row.videoId === thirdId);
+  reviewedRow.status = "reviewed";
+  reviewedRow.lastSuccessfulStage = "reviewed";
+  const reviewedSnapshot = structuredClone(reviewedRow);
+  mixedStateManifest.videos.unshift({
+    videoId: fourthId,
+    url: `https://www.douyin.com/video/${fourthId}`,
+    title: "重提取不得顺带处理",
+    status: "discovered",
+    lastSuccessfulStage: "discovered",
+    discoveredAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    retries: 0,
+    error: null,
+    transcriptPath: null,
+    knowledgeIds: [],
+    contentHash: null,
+  });
+  writeFileSync(manifestPath, `${JSON.stringify(mixedStateManifest, null, 2)}\n`, "utf8");
+  writeFileSync(join(mediaDir, `${fourthId}.mp4`), "must remain untouched", "utf8");
+
+  const reextracted = runProcessor(["--resume", "--reextract"]);
+  assert.equal(reextracted.status, 0, reextracted.stderr);
+  const afterReextractManifest = readJson(manifestPath);
+  const firstAfterReextract = afterReextractManifest.videos.find((row) => row.videoId === firstId);
+  assert.equal(firstAfterReextract.status, "extracted", "re-extraction should preserve extracted state");
+  assert.notDeepEqual(firstAfterReextract.knowledgeIds, firstBeforeReextract.knowledgeIds);
+  assert.equal(
+    afterReextractManifest.videos.find((row) => row.videoId === fourthId).status,
+    "discovered",
+    "re-extraction mode must not process eligible non-extracted rows",
+  );
+  assert.equal(existsSync(join(mediaDir, `${fourthId}.mp4`)), true);
+  assert.deepEqual(
+    afterReextractManifest.videos.find((row) => row.videoId === thirdId),
+    reviewedSnapshot,
+    "reviewed rows must never be rewritten by re-extraction",
+  );
+  const refreshedKnowledge = readJsonl(knowledgePath).filter((row) => row.evidence.videoId === firstId);
+  assert.equal(refreshedKnowledge.length, 1, "re-extraction should replace old candidates for the video");
+  assert.equal(refreshedKnowledge[0].claim, "对家报牌以后，应该优先控制出牌权。");
+  assert.deepEqual(
+    readJsonl(doctrinePath).filter((row) => row.evidence.videoId === firstId),
+    refreshedKnowledge,
+  );
+  const knowledgeBeforeIdempotentReextract = readJsonl(knowledgePath);
+  const idempotentReextract = runProcessor(["--resume", "--reextract"]);
+  assert.equal(idempotentReextract.status, 0, idempotentReextract.stderr);
+  assert.deepEqual(readJsonl(knowledgePath), knowledgeBeforeIdempotentReextract);
+
   execFileSync(process.execPath, [reporter, "--account", accountId, "--root", temp], {
     encoding: "utf8",
   });
   const report = readJson(join(accountDir, "reports/latest.json"));
   assert.equal(report.accountId, accountId);
   assert.equal(report.declared, 325);
-  assert.equal(report.observed, 3);
-  assert.equal(report.missingFromDeclared, 322);
-  assert.equal(report.extracted, 3);
+  assert.equal(report.observed, 4);
+  assert.equal(report.missingFromDeclared, 321);
+  assert.equal(report.discovered, 1);
+  assert.equal(report.extracted, 2);
+  assert.equal(report.reviewed, 1);
   assert.equal(report.totalStates, report.observed);
   assert.equal(
     ["discovered", "downloaded", "transcribed", "extracted", "reviewed", "blocked", "failed"]

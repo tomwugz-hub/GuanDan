@@ -50,9 +50,13 @@ function atomicWriteJsonl(path, rows) {
 }
 
 function sanitize(error) {
-  return String(error?.stderr || error?.message || error)
+  const redacted = String(error?.stderr || error?.message || error)
     .replace(/https?:\/\/[^\s"'<>]+/giu, "[url-redacted]")
-    .slice(0, 500);
+    .trim();
+  if (redacted.length <= 500) return redacted;
+  const lines = redacted.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  const rootCause = lines.findLast((line) => /root.?cause|error|fail|exception|denied|blocked|not found|no such/iu.test(line));
+  return String(rootCause || lines.at(-1) || redacted).slice(-500);
 }
 
 function validateTranscript(value) {
@@ -106,6 +110,7 @@ const mediaDirValue = optionValue(args, "--media-dir");
 const limitValue = optionValue(args, "--limit", "1");
 const limit = Number(limitValue);
 const resume = args.includes("--resume");
+const reextract = args.includes("--reextract");
 const python = optionValue(args, "--python", process.env.GUANDAN_DOUYIN_PYTHON);
 const transcriber = resolve(
   optionValue(args, "--transcriber", join(dirname(fileURLToPath(import.meta.url)), "transcribe.py")) ?? "",
@@ -115,7 +120,7 @@ const device = optionValue(args, "--device", "cpu");
 const computeType = optionValue(args, "--compute-type", "int8");
 
 if (!accountId || !mediaDirValue) {
-  throw new Error("usage: --account <id> --media-dir <dir> [--limit N] [--resume]");
+  throw new Error("usage: --account <id> --media-dir <dir> [--limit N] [--resume] [--reextract]");
 }
 if (!/^\d+$/u.test(accountId)) throw new Error("account must contain digits only");
 if (!Number.isInteger(limit) || limit <= 0) {
@@ -176,10 +181,11 @@ for (const row of manifest.videos) {
 const selected = manifest.videos
   .map((row, index) => ({ row, index }))
   .filter(({ row }) => {
+    const durableTranscript = join(transcriptDir, `${row.videoId}.json`);
+    if (reextract) return row.status === "extracted" && existsSync(durableTranscript);
     if (TERMINAL.has(row.status) || (row.status === "failed" && !resume)) return false;
     const paths = cachePaths(cacheRoot, accountId, row.videoId);
     const incoming = join(mediaDir, `${row.videoId}.mp4`);
-    const durableTranscript = join(transcriptDir, `${row.videoId}.json`);
     return existsSync(incoming) || existsSync(paths.video) || existsSync(durableTranscript);
   })
   .slice(0, limit);
@@ -197,6 +203,30 @@ for (const { index } of selected) {
   };
 
   try {
+    if (reextract && row.status === "extracted") {
+      category = "reextraction";
+      const transcript = JSON.parse(readFileSync(transcriptPath, "utf8"));
+      validateTranscript(transcript);
+      const candidates = extractCandidates(row, transcript);
+      const keepOtherVideos = (candidate) => candidate?.evidence?.videoId !== row.videoId;
+      atomicWriteJsonl(knowledgePath, [
+        ...readJsonl(knowledgePath).filter(keepOtherVideos),
+        ...candidates,
+      ]);
+      atomicWriteJsonl(doctrinePath, [
+        ...readJsonl(doctrinePath).filter(keepOtherVideos),
+        ...candidates,
+      ]);
+      row = {
+        ...row,
+        knowledgeIds: candidates.map((candidate) => candidate.id),
+        error: null,
+        updatedAt: new Date().toISOString(),
+      };
+      persist();
+      continue;
+    }
+
     if (
       row.status !== "transcribed" &&
       row.status !== "extracted" &&
