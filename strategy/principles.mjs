@@ -3289,6 +3289,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
         );
         if (
           prematureEntries.length > 0
+          && !(recovery && resolvedHand.length >= 27)
           && !resolveTripleBreakForConsecutivePairs(candidate, resolvedHand, levelRank).splitsTriple
         ) {
           score -= heavyHand ? 13_200 : 11_000;
@@ -3379,7 +3380,7 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
         && candidate.mainRank
         && looseRanks.includes(candidate.mainRank)
       ) {
-        if (prematureTriples.length > 0) {
+        if (prematureTriples.length > 0 && resolvedHand.length < 27) {
           score += resolvedHand.length >= 15 ? 7600 : 6400;
           reasons.push(`【P5】${prematureTriples[0].reason.replace("宜先走连对减手", "不宜先小单浪费带对路线")}`);
           principles.push("P5");

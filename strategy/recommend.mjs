@@ -49,6 +49,7 @@ import {
   analyzeMustBeatPairContext,
   analyzeMustBeatTripleWithPairContext,
   analyzeReservePairForPendingTriple,
+  looseLeadSingleRanks,
   reasonFromPrinciple,
   requiresBombForPairBeat,
   pickMinStructureBombBeater,
@@ -129,6 +130,14 @@ function isL1LooseSingleOpening(candidate, hand, levelRank, tableContext) {
   const profile = tableContext.handProfile;
   if (profile?.role !== "main-attack" || (profile?.looseSingles ?? 0) < 2) return false;
   return looseSmallSingleRanks(hand, levelRank).includes(candidate.mainRank);
+}
+
+/** P6 大王回收试探：散单须进入评分池，不应被保留组牌的通用过滤提前剔除。 */
+function isP6BigJokerProbeSingleOpening(candidate, hand, levelRank, tableContext) {
+  if (tableContext.leadMode !== "fresh-open" || !tableContext.isOpening || hand.length < 27) return false;
+  if (candidate.type !== PLAY_TYPES.single || !candidate.mainRank) return false;
+  if (!hand.some((card) => card.rank === "BJ")) return false;
+  return looseLeadSingleRanks(hand, levelRank).includes(candidate.mainRank);
 }
 
 /** 须压且仅炸弹可跟时，该炸弹为必出选项（不因拆保留同花顺/王炸而被候选池滤掉） */
@@ -1598,6 +1607,7 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
     const item = scoreCandidate(candidate, hand, levelRank, previousPlay, scoringContext);
     if (isPastDeadline(ctx)) break;
     const l1LooseSingle = isL1LooseSingleOpening(item.candidate, hand, levelRank, scoringContext);
+    const p6ProbeSingle = isP6BigJokerProbeSingleOpening(item.candidate, hand, levelRank, scoringContext);
     const groupReductionAfterBomb = isCatchWindGroupReductionAfterBomb(item.candidate, scoringContext)
       || isCatchWindPremiumReduction(item.candidate, scoringContext);
     const exactTripleLead = isExactTripleWithPairLead(item.candidate, hand, levelRank, scoringContext);
@@ -1617,6 +1627,7 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
     if (isMandatoryBombCandidate(item.candidate, hand, levelRank, scoringContext, previousPlay)
       || allowMustBeatPremiumLooseSingle(item.candidate, hand, levelRank, previousPlay, scoringContext, preferredGroups)
       || l1LooseSingle
+      || p6ProbeSingle
       || groupReductionAfterBomb
       || exactTripleLead
       || prematureConsecutivePairsLead
