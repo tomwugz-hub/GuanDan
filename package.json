@@ -23,6 +23,10 @@
     "data:gate": "node tools/gate-policy.mjs",
     "data:import": "node tools/import-external-replay.mjs",
     "data:merge": "node tools/merge-opengdan-logs.mjs",
-    "data:pipeline": "node tools/pipeline-external-train.mjs"
+    "data:pipeline": "node tools/pipeline-external-train.mjs",
+    "data:douyin:manifest": "node tools/douyin/import-manifest.mjs",
+    "data:douyin:run": "node tools/douyin/process-account.mjs",
+    "data:douyin:report": "node tools/douyin/report.mjs",
+    "test:douyin": "node tests/douyin-manifest-smoke.mjs && node tests/douyin-transcriber-contract.mjs && node tests/douyin-knowledge-smoke.mjs && node tests/douyin-pipeline-smoke.mjs"
   }
 }
