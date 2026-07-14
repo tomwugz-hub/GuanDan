@@ -10,6 +10,12 @@ function requiredString(value, name) {
   return value;
 }
 
+function requiredDigits(value, name) {
+  const normalized = requiredString(value, name);
+  if (!/^\d+$/u.test(normalized)) throw new Error(`${name} must contain digits only`);
+  return normalized;
+}
+
 function requireIdentity(actual, expected, name) {
   if (actual !== expected) throw new Error(`${name} identity mismatch`);
 }
@@ -47,6 +53,9 @@ function validateSingleCorrectionReview(review, { accountId, videoId }) {
   requireIdentity(review.videoId, videoId, "videoId");
   if (review.url !== canonicalUrl(videoId)) throw new Error("correction review URL must be canonical");
   if (review.status !== "confirmed") throw new Error("correction review status must be confirmed");
+  requiredString(review.rawText, "rawText");
+  requiredString(review.confirmedBy, "confirmedBy");
+  canonicalIso(review.confirmedAt, "confirmedAt");
   validateRange(review.start, review.end, "correction review");
   requiredString(review.correctedText, "correctedText");
 
@@ -66,7 +75,7 @@ function validateSingleCorrectionReview(review, { accountId, videoId }) {
     throw new Error("interpretation.confidence must be low or medium-low");
   }
   validateTestScenario(interpretation.testScenario);
-  return true;
+  return structuredClone(review);
 }
 
 function canonicalIso(value, name) {
@@ -83,8 +92,7 @@ function correctionReviews(review, { accountId, videoId }) {
     throw new Error("correction review must be an object");
   }
   if (!Object.hasOwn(review, "corrections")) {
-    validateSingleCorrectionReview(review, { accountId, videoId });
-    return [review];
+    return [validateSingleCorrectionReview(review, { accountId, videoId })];
   }
 
   if (review.schemaVersion !== 1) throw new Error("correction review schemaVersion must be 1");
@@ -111,9 +119,10 @@ function correctionReviews(review, { accountId, videoId }) {
       videoId: review.videoId,
       url: review.url,
       status: review.status,
+      confirmedBy: correction.confirmedBy ?? review.confirmedBy,
+      confirmedAt: correction.confirmedAt ?? review.confirmedAt,
     };
-    validateSingleCorrectionReview(single, { accountId, videoId });
-    return single;
+    return validateSingleCorrectionReview(single, { accountId, videoId });
   });
   const keys = inherited.map((correction) => correction.interpretation.key);
   if (new Set(keys).size !== keys.length) throw new Error("correction interpretation keys must be unique; duplicate key found");
@@ -121,8 +130,9 @@ function correctionReviews(review, { accountId, videoId }) {
 }
 
 export function validateCorrectionReview(review, { accountId, videoId }) {
-  correctionReviews(review, { accountId, videoId });
-  return true;
+  requiredDigits(accountId, "accountId");
+  requiredDigits(videoId, "videoId");
+  return structuredClone(correctionReviews(review, { accountId, videoId }));
 }
 
 function stableId(videoId, interpretation) {
@@ -146,12 +156,12 @@ export function refineCandidateStrategies({
   correctionReview,
   generatedAt = new Date().toISOString(),
 }) {
-  const accountId = requiredString(video?.accountId, "video.accountId");
-  const videoId = requiredString(video?.videoId, "video.videoId");
+  const accountId = requiredDigits(video?.accountId, "video.accountId");
+  const videoId = requiredDigits(video?.videoId, "video.videoId");
   const url = canonicalUrl(videoId);
   if (video.url !== url) throw new Error("video URL must be canonical");
   assertSourceIdentity(transcript?.source, { accountId, videoId, url }, "transcript");
-  const reviews = correctionReviews(correctionReview, { accountId, videoId })
+  const reviews = validateCorrectionReview(correctionReview, { accountId, videoId })
     .sort((left, right) => left.start - right.start || left.end - right.end);
 
   const segments = transcript?.segments;
@@ -174,6 +184,9 @@ export function refineCandidateStrategies({
         .sort((left, right) => left.start - right.start || left.end - right.end);
       if (contained.length === 0) throw new Error("correction range must contain raw transcript segments");
       const rawText = contained.map((segment) => segment.text).join("");
+      if (review.rawText !== rawText) {
+        throw new Error("correction rawText must exactly match the reconstructed transcript range");
+      }
       const overlapping = knowledge.filter((row) => {
         if (row?.reviewStatus !== "pending") return false;
         const evidence = row?.evidence;

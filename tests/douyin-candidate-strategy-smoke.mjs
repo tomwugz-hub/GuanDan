@@ -46,6 +46,9 @@ function fixture() {
     accountId,
     videoId,
     url,
+    rawText: "RAW-A RAW-B",
+    confirmedBy: "user",
+    confirmedAt: "2026-07-14T00:00:00.000Z",
     start: 0,
     end: 4,
     correctedText: "CORRECTED",
@@ -107,7 +110,12 @@ input.transcript.segments[0].text = "mutated raw transcript";
 assert.equal(candidate.exceptions[0], "an opponent is already on one card", "output must be deep-cloned");
 assert.equal(candidate.evidence.rawText, "RAW-A RAW-B", "evidence must retain the original raw transcript");
 
-assert.doesNotThrow(() => validateCorrectionReview(fixture().correctionReview, { accountId, videoId }));
+const singleReviewInput = fixture().correctionReview;
+const normalizedSingle = validateCorrectionReview(singleReviewInput, { accountId, videoId });
+assert.deepEqual(normalizedSingle, [singleReviewInput], "single review must normalize to a correction list");
+assert.notEqual(normalizedSingle[0], singleReviewInput, "normalized single review must be isolated from input");
+normalizedSingle[0].interpretation.trigger = "mutated normalized clone";
+assert.equal(singleReviewInput.interpretation.trigger, "partner can take the lead");
 
 function envelopeFixture() {
   const value = fixture();
@@ -121,6 +129,7 @@ function envelopeFixture() {
     confirmedAt: "2026-07-14T00:00:00.000Z",
     corrections: [
       {
+        rawText: "RAW-B",
         start: 2,
         end: 4,
         correctedText: "CORRECTED-LATER",
@@ -141,6 +150,7 @@ function envelopeFixture() {
         },
       },
       {
+        rawText: "RAW-A ",
         start: 0,
         end: 2,
         correctedText: "CORRECTED-EARLIER",
@@ -183,7 +193,14 @@ assert.deepEqual(
   envelopeOutput.candidates.map((row) => row.id),
   "envelope candidate IDs must be stable",
 );
-assert.doesNotThrow(() => validateCorrectionReview(envelopeFixture().correctionReview, { accountId, videoId }));
+const envelopeReviewInput = envelopeFixture().correctionReview;
+const normalizedEnvelope = validateCorrectionReview(envelopeReviewInput, { accountId, videoId });
+assert.equal(normalizedEnvelope.length, 2);
+assert.equal(normalizedEnvelope[0].confirmedBy, envelopeReviewInput.confirmedBy);
+assert.equal(normalizedEnvelope[0].confirmedAt, envelopeReviewInput.confirmedAt);
+assert.notEqual(normalizedEnvelope[0], envelopeReviewInput.corrections[0], "normalized child must be a clone");
+normalizedEnvelope[0].rawText = "mutated normalized raw text";
+assert.equal(envelopeReviewInput.corrections[0].rawText, "RAW-B");
 
 function rejects(label, mutate, pattern) {
   const value = fixture();
@@ -219,6 +236,33 @@ rejects("canonical URL mismatch", (value) => {
 rejects("identity mismatch", (value) => {
   value.correctionReview.accountId = "different-account";
 }, /accountId|identity/i);
+rejects("non-digit public account identity", (value) => {
+  value.video.accountId = "account-x";
+  value.video.url = `https://www.douyin.com/video/${videoId}`;
+  value.transcript.source.accountId = "account-x";
+  value.correctionReview.accountId = "account-x";
+}, /accountId|digits/i);
+rejects("non-digit public video identity", (value) => {
+  value.video.videoId = "video-x";
+  value.video.url = "https://www.douyin.com/video/video-x";
+  value.transcript.source.videoId = "video-x";
+  value.transcript.source.url = "https://www.douyin.com/video/video-x";
+  value.correctionReview.videoId = "video-x";
+  value.correctionReview.url = "https://www.douyin.com/video/video-x";
+  value.knowledge = value.knowledge.map((row) => ({
+    ...row,
+    evidence: { ...row.evidence, videoId: "video-x", url: "https://www.douyin.com/video/video-x" },
+  }));
+}, /videoId|digits/i);
+rejects("raw transcript mismatch", (value) => {
+  value.correctionReview.rawText = "RAW-A RAW-C";
+}, /rawText|transcript|mismatch/i);
+rejects("missing single confirmedBy", (value) => {
+  delete value.correctionReview.confirmedBy;
+}, /confirmedBy/i);
+rejects("missing single confirmedAt", (value) => {
+  delete value.correctionReview.confirmedAt;
+}, /confirmedAt/i);
 rejects("missing overlapping pending knowledge", (value) => {
   value.knowledge = value.knowledge.map((row) => ({ ...row, reviewStatus: "reviewed" }));
 }, /overlap|pending|knowledge/i);
@@ -248,5 +292,17 @@ rejectsEnvelope("envelope identity mismatch", (value) => {
 rejectsEnvelope("child identity override", (value) => {
   value.correctionReview.corrections[0].accountId = accountId;
 }, /override|accountId|identity/i);
+rejectsEnvelope("missing child rawText", (value) => {
+  delete value.correctionReview.corrections[0].rawText;
+}, /rawText/i);
+
+assert.throws(
+  () => validateCorrectionReview(fixture().correctionReview, { accountId: "account-x", videoId }),
+  /accountId|digits/i,
+);
+assert.throws(
+  () => validateCorrectionReview(fixture().correctionReview, { accountId, videoId: "video-x" }),
+  /videoId|digits/i,
+);
 
 console.log("抖音候选策略提炼测试通过");
