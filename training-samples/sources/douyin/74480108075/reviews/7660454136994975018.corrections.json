@@ -10,6 +10,7 @@
     {
       "start": 4.16,
       "end": 12.12,
+      "rawText": "例如下甲起手出三个9代对杀那可以预判他手中有4-8的杂顺这是根据三个头与对子之间的间隔做出预判",
       "correctedText": "例如下家起手出三个9带对3，那可以预判他手中有4—8的杂顺，这是根据三张头与对子之间的间隔做出预判。",
       "interpretation": {
         "key": "opponent-opening-triplet-pair-gap",
@@ -36,6 +37,7 @@
     {
       "start": 12.12,
       "end": 17.8,
+      "rawText": "而如果下甲出小的3代没有大的3代回收这预判他有大顺子是在做轮趾交换",
       "correctedText": "而如果下家出小的三带，没有大的三带回收，可以预判他有大顺子，是在做轮次交换。",
       "interpretation": {
         "key": "opponent-small-triplet-without-recapture",
@@ -62,6 +64,7 @@
     {
       "start": 18.44,
       "end": 28.12,
+      "rawText": "而如果对甲手发出小顺子这通常意味着他手中还持有与顺子曲线内的单排或对子我们在后续送对甲牌的时候则可以按比这曲线内小的牌去送",
       "correctedText": "而如果对家首发出小顺子，这通常意味着他手中还持有顺子区间内的单牌或对子。我们后续送对家牌时，可以按比这个区间更小的牌去送。",
       "interpretation": {
         "key": "partner-small-straight-feed-window",
@@ -88,10 +91,11 @@
     {
       "start": 28.12,
       "end": 32.92,
+      "rawText": "如果对甲出10勾圈的木板则可以推断他手中大概率没有大顺子",
       "correctedText": "如果对家出10、J、Q的木板，则可以推断他手中大概率没有大顺子。",
       "interpretation": {
         "key": "partner-ten-j-q-wood-board",
-        "trigger": "对家打出以10、J、Q为三张头的木板结构",
+        "trigger": "对家打出由10、J、Q三个连续对子组成的木板结构",
         "inference": "对家手中大概率没有大顺子，但仍可能保留其他顺子结构或借助红心配重组。",
         "action": "降低对家持有大顺子的工作概率，同时保留其他长套与重组可能。",
         "applicability": "观察对家木板拆牌后的剩余结构",
@@ -114,6 +118,7 @@
     {
       "start": 32.92,
       "end": 37.12,
+      "rawText": "而如果对甲手发四射统设杂顺这代表他手中没有红心配",
       "correctedText": "而如果对家首发4张同色杂顺，这代表他手中没有红心配。",
       "interpretation": {
         "key": "partner-four-same-color-mixed-straight",
