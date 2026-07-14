@@ -14,6 +14,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { refineCandidateStrategies } from "../lib/douyin-candidate-strategy.mjs";
+import { publishAfterInputVerification } from "../lib/douyin-candidate-publish.mjs";
 
 const ALLOWED_FLAGS = new Set(["--account", "--video", "--root", "--generated-at"]);
 
@@ -152,7 +153,10 @@ const accountReal = realpathSync(accountDir);
 requireInside(projectReal, accountReal, "account directory");
 
 const generatedAt = options.get("--generated-at") ?? new Date().toISOString();
-if (!Number.isFinite(Date.parse(generatedAt))) throw new Error("--generated-at must be a valid ISO timestamp");
+const generatedDate = new Date(generatedAt);
+if (!Number.isFinite(generatedDate.getTime()) || generatedDate.toISOString() !== generatedAt) {
+  throw new Error("--generated-at must be a canonical ISO timestamp");
+}
 
 const paths = {
   manifest: join(accountDir, "manifest.json"),
@@ -190,16 +194,19 @@ const result = refineCandidateStrategies({
   generatedAt,
 });
 
-const outputDir = prepareOutputDirectory(accountDir, accountReal);
-const outputJson = join(outputDir, `${videoId}.json`);
-const outputMarkdown = join(outputDir, `${videoId}.md`);
-atomicWrite(outputJson, `${JSON.stringify(result, null, 2)}\n`);
-atomicWrite(outputMarkdown, renderMarkdown(result));
-
 const after = snapshotInputs(paths, accountReal);
-if (JSON.stringify(after) !== JSON.stringify(before)) {
-  throw new Error("immutable Douyin source evidence changed during refinement");
-}
+const { outputJson, outputMarkdown } = publishAfterInputVerification({
+  before,
+  after,
+  publish() {
+    const outputDir = prepareOutputDirectory(accountDir, accountReal);
+    const jsonPath = join(outputDir, `${videoId}.json`);
+    const markdownPath = join(outputDir, `${videoId}.md`);
+    atomicWrite(jsonPath, `${JSON.stringify(result, null, 2)}\n`);
+    atomicWrite(markdownPath, renderMarkdown(result));
+    return { outputJson: jsonPath, outputMarkdown: markdownPath };
+  },
+});
 
 console.log(JSON.stringify({
   accountId,

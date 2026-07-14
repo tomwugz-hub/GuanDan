@@ -6,6 +6,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -14,6 +15,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { publishAfterInputVerification } from "../tools/lib/douyin-candidate-publish.mjs";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const cli = join(repo, "tools/douyin/refine-candidate.mjs");
@@ -109,6 +112,19 @@ function hashInputs() {
   ].map((path) => [path, hash(path)]));
 }
 
+let publishCalls = 0;
+assert.throws(
+  () => publishAfterInputVerification({
+    before: { manifest: "before" },
+    after: { manifest: "changed" },
+    publish() {
+      publishCalls += 1;
+    },
+  }),
+  /immutable|changed/i,
+);
+assert.equal(publishCalls, 0, "changed immutable inputs must prevent every artifact write");
+
 try {
   mkdirSync(join(accountDir, "transcripts"), { recursive: true });
   mkdirSync(join(accountDir, "reviews"), { recursive: true });
@@ -155,6 +171,15 @@ try {
   const invalidVideo = spawnSync(process.execPath, [cli, "--account", accountId, "--video", "../x", "--root", temp], { encoding: "utf8" });
   assert.notEqual(invalidVideo.status, 0);
   assert.match(invalidVideo.stderr, /video.*digits/i);
+  const nonCanonicalGeneratedAt = spawnSync(process.execPath, [
+    cli,
+    "--account", accountId,
+    "--video", videoId,
+    "--root", temp,
+    "--generated-at", "1",
+  ], { encoding: "utf8" });
+  assert.notEqual(nonCanonicalGeneratedAt.status, 0);
+  assert.match(nonCanonicalGeneratedAt.stderr, /generated-at.*canonical|ISO/i);
 
   const mismatched = structuredClone(manifest);
   mismatched.source.accountId = "999";
@@ -169,6 +194,18 @@ try {
   assert.notEqual(missingReview.status, 0);
   assert.match(missingReview.stderr, /review|correction|does not exist/i);
   writeJson(reviewPath, review);
+
+  rmSync(outputDir, { recursive: true, force: true });
+  mkdirSync(outputDir);
+  mkdirSync(outputJson);
+  const atomicRenameFailure = run();
+  assert.notEqual(atomicRenameFailure.status, 0);
+  assert.equal(
+    readdirSync(outputDir).some((name) => name.startsWith(`${videoId}.json.tmp-`)),
+    false,
+    "failed atomic JSON rename must clean its sibling temporary file",
+  );
+  rmSync(outputJson, { recursive: true, force: true });
 
   rmSync(outputDir, { recursive: true, force: true });
   const outside = join(temp, "outside-output");
