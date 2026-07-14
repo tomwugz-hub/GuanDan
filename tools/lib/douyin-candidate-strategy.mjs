@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-const UNCERTAINTY = /鍙兘|澶ф鐜噟寮变俊鍙穦寰呴獙璇亅鍊惧悜/u;
+const UNCERTAINTY = /可能|大概率|弱信号|待验证|倾向/u;
 const CONFIDENCE_LEVELS = new Set(["low", "medium-low"]);
 
 function requiredString(value, name) {

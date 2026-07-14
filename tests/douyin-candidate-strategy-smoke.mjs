@@ -52,7 +52,7 @@ function fixture() {
     interpretation: {
       key: "partner-feed-window",
       trigger: "partner can take the lead",
-      inference: "鍙兘 the partner retains a finishing route",
+      inference: "可能 the partner retains a finishing route",
       action: "feed the smallest safe card",
       applicability: "partner cooperation",
       exceptions: ["an opponent is already on one card"],
@@ -147,4 +147,4 @@ rejects("missing overlapping pending knowledge", (value) => {
   value.knowledge = value.knowledge.map((row) => ({ ...row, reviewStatus: "reviewed" }));
 }, /overlap|pending|knowledge/i);
 
-console.log("鎶栭煶鍊欓€夌瓥鐣ユ彁鐐兼祴璇曢€氳繃");
+console.log("抖音候选策略提炼测试通过");

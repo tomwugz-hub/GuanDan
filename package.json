@@ -27,6 +27,7 @@
     "data:douyin:manifest": "node tools/douyin/import-manifest.mjs",
     "data:douyin:run": "node tools/douyin/process-account.mjs",
     "data:douyin:report": "node tools/douyin/report.mjs",
-    "test:douyin": "node tests/douyin-manifest-smoke.mjs && node tests/douyin-transcriber-contract.mjs && node tests/douyin-knowledge-smoke.mjs && node tests/douyin-pipeline-smoke.mjs"
+    "data:douyin:refine": "node tools/douyin/refine-candidate.mjs",
+    "test:douyin": "node tests/douyin-manifest-smoke.mjs && node tests/douyin-transcriber-contract.mjs && node tests/douyin-knowledge-smoke.mjs && node tests/douyin-pipeline-smoke.mjs && node tests/douyin-candidate-strategy-smoke.mjs && node tests/douyin-candidate-cli-smoke.mjs"
   }
 }
