@@ -1,0 +1,367 @@
+{
+  "ok": true,
+  "mode": "perf",
+  "reportClass": "performance-diagnostic",
+  "turnBudgetMs": 400,
+  "totalTurns": 1869,
+  "forcedFallbackCount": 0,
+  "actualDeadlineExceededCount": 44,
+  "fallbackPathCounts": {
+    "constant": 0,
+    "fast": 371,
+    "normal": 1498
+  },
+  "elapsedMs": {
+    "p50": 0.92,
+    "p95": 103.98,
+    "p99": 2032.71,
+    "max": 38765.04
+  },
+  "auditedAt": "2026-07-21T15:05:32.246Z",
+  "games": 20,
+  "completed": 20,
+  "incomplete": 0,
+  "completionRate": 1,
+  "avgTurns": 93,
+  "violationCount": 11,
+  "violationsByCode": {
+    "bomb-vs-routine": 7,
+    "pass-with-regular-beat": 4,
+    "split-bomb": 0,
+    "beat-partner": 0,
+    "twp-level-kicker": 0
+  },
+  "topReproductions": [
+    {
+      "code": "bomb-vs-routine",
+      "count": 7,
+      "sample": {
+        "code": "bomb-vs-routine",
+        "detail": "有普通牌可压却动炸",
+        "gameSeed": 42000,
+        "turnNumber": 14,
+        "playerIndex": 2,
+        "playLabel": "Bomb",
+        "reasons": [
+          "机器人快路径：仅炸弹可压"
+        ],
+        "handCount": 23,
+        "mustBeat": "Pair:K"
+      }
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "count": 4,
+      "sample": {
+        "code": "pass-with-regular-beat",
+        "detail": "有普通压牌却过牌",
+        "gameSeed": 42005,
+        "turnNumber": 30,
+        "playerIndex": 2,
+        "playLabel": "Pass",
+        "reasons": [
+          "机器人快路径：无常规够压，过牌保留牌力"
+        ],
+        "handCount": 23,
+        "mustBeat": "Single:4"
+      }
+    }
+  ],
+  "samples": [
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42000,
+      "turnNumber": 14,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 23,
+      "mustBeat": "Pair:K"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42000,
+      "turnNumber": 23,
+      "playerIndex": 1,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Pair:A"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42004,
+      "turnNumber": 38,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Triple:9"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42005,
+      "turnNumber": 30,
+      "playerIndex": 2,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 23,
+      "mustBeat": "Single:4"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42005,
+      "turnNumber": 34,
+      "playerIndex": 2,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 23,
+      "mustBeat": "Single:7"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42005,
+      "turnNumber": 61,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 7,
+      "mustBeat": "Pair:6"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42007,
+      "turnNumber": 29,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Pair:Q"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42014,
+      "turnNumber": 20,
+      "playerIndex": 0,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 17,
+      "mustBeat": "Single:10"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42014,
+      "turnNumber": 79,
+      "playerIndex": 0,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 15,
+      "mustBeat": "Single:10"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42016,
+      "turnNumber": 13,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 18,
+      "mustBeat": "Triple:Q"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42018,
+      "turnNumber": 55,
+      "playerIndex": 1,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 6,
+      "mustBeat": "Pair:K"
+    }
+  ],
+  "autoGameSpotCheck": {
+    "games": 0,
+    "completed": 0,
+    "hitLimit": 0
+  },
+  "levelRank": "2",
+  "seedStart": 42000,
+  "allViolations": [
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42000,
+      "turnNumber": 14,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 23,
+      "mustBeat": "Pair:K"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42000,
+      "turnNumber": 23,
+      "playerIndex": 1,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Pair:A"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42004,
+      "turnNumber": 38,
+      "playerIndex": 2,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Triple:9"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42005,
+      "turnNumber": 30,
+      "playerIndex": 2,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 23,
+      "mustBeat": "Single:4"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42005,
+      "turnNumber": 34,
+      "playerIndex": 2,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 23,
+      "mustBeat": "Single:7"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42005,
+      "turnNumber": 61,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 7,
+      "mustBeat": "Pair:6"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42007,
+      "turnNumber": 29,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 19,
+      "mustBeat": "Pair:Q"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42014,
+      "turnNumber": 20,
+      "playerIndex": 0,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 17,
+      "mustBeat": "Single:10"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 42014,
+      "turnNumber": 79,
+      "playerIndex": 0,
+      "playLabel": "Pass",
+      "reasons": [
+        "机器人快路径：无常规够压，过牌保留牌力"
+      ],
+      "handCount": 15,
+      "mustBeat": "Single:10"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42016,
+      "turnNumber": 13,
+      "playerIndex": 3,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 18,
+      "mustBeat": "Triple:Q"
+    },
+    {
+      "code": "bomb-vs-routine",
+      "detail": "有普通牌可压却动炸",
+      "gameSeed": 42018,
+      "turnNumber": 55,
+      "playerIndex": 1,
+      "playLabel": "Bomb",
+      "reasons": [
+        "机器人快路径：仅炸弹可压"
+      ],
+      "handCount": 6,
+      "mustBeat": "Pair:K"
+    }
+  ]
+}

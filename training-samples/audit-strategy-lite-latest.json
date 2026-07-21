@@ -3,8 +3,21 @@
   "mode": "lite",
   "reportClass": "diagnostic",
   "turnBudgetMs": 0,
-  "timeoutFallbackCount": 1957,
-  "auditedAt": "2026-07-21T10:11:58.550Z",
+  "totalTurns": 1957,
+  "forcedFallbackCount": 1957,
+  "actualDeadlineExceededCount": 0,
+  "fallbackPathCounts": {
+    "constant": 1957,
+    "fast": 0,
+    "normal": 0
+  },
+  "elapsedMs": {
+    "p50": 3.11,
+    "p95": 101.25,
+    "p99": 5325.94,
+    "max": 32572
+  },
+  "auditedAt": "2026-07-21T15:00:36.772Z",
   "games": 20,
   "completed": 20,
   "incomplete": 0,
