@@ -1,8 +1,26 @@
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { isCatchWindPending } from "../engine/game-state.mjs";
+import { isJoker } from "../engine/card.mjs";
+import { compareRanks, isControlRank, rankPower } from "../engine/rank-order.mjs";
+
+/** 散小单张（≤7，非王/级牌控场）— 内联避免 lead-mode ↔ tempo-lead 环依赖 */
+function looseSmallSingleRanks(hand, levelRank) {
+  const rankCounts = new Map();
+  for (const card of hand) {
+    if (isJoker(card)) continue;
+    rankCounts.set(card.rank, (rankCounts.get(card.rank) ?? 0) + 1);
+  }
+  const singles = [];
+  for (const [rank, count] of rankCounts) {
+    if (count !== 1) continue;
+    if (rank === levelRank || isControlRank(rank, levelRank)) continue;
+    if (compareRanks(rank, "7", levelRank) <= 0) singles.push(rank);
+  }
+  return singles.sort((left, right) => rankPower(left, levelRank) - rankPower(right, levelRank));
+}
 
 /** 刚炸/SF 夺权接风后，优先顺子/同花顺跑道减手的最大手牌数 */
-export const CATCH_WIND_RUNWAY_HAND_MAX = 15;
+export const CATCH_WIND_RUNWAY_HAND_MAX = 16;
 
 /** 有牌权时的出牌场景（接风与真开局区分） */
 export function inferLeadMode(state, playerIndex) {
@@ -130,7 +148,14 @@ export function isCatchWindGroupReductionAfterBomb(candidate, tableContext) {
     const handLen = tableContext?.hand?.length
       ?? state?.players?.[playerIndex]?.hand?.length
       ?? 0;
+    const levelRank = tableContext?.levelRank ?? state?.levelRank ?? "2";
+    const looseRanks = looseSmallSingleRanks(
+      tableContext?.hand ?? state?.players?.[playerIndex]?.hand ?? [],
+      levelRank,
+    );
     const usesWild = (candidate.wildcardAssignments?.length ?? 0) > 0;
+    // 手牌仍多（>16）且有散单试探路线时，不宜空扔第二条同花顺（game-4 第13手）；无配自然同花顺在16张以内支持接风减手
+    if (looseRanks.length > 0 && (usesWild ? handLen > 12 : handLen > CATCH_WIND_RUNWAY_HAND_MAX)) return false;
     return !usesWild
       && !playerJustWonTrickWithPlainFourBomb(state, playerIndex)
       && handLen > (candidate.cards?.length ?? 0)

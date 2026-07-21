@@ -3916,6 +3916,22 @@ assert(
 
 // Day 2 五类局面抽查（开局/跟牌/过牌/炸弹/三带二）
 import "./day2-scenario-spotcheck.mjs";
+import "./robot-principles-single-path.mjs";
+import "./emergency-cp-beater-not-null.mjs";
+import "./must-beat-cp-no-break-sf-level3-diamond.mjs";
+import "./must-beat-cp-no-break-sf-level9-spade.mjs";
+import "./in-play-insight-cp-sf-qa.mjs";
+import "./must-beat-pair-no-break-sf-level-a-spade.mjs";
+import "./must-beat-pair-j-spare-vs-10-keep-diamond-sf.mjs";
+import "./competitive-ace-three-strikes.mjs";
+import "./twp-min-kicker-level2.mjs";
+import "./twp-min-kicker-level4-emergency.mjs";
+import "./finishing-pure-five-bomb-lead.mjs";
+import "./robot-no-bare-level-pair-catchwind.mjs";
+import "./robot-no-pair-over-partner-j-pending.mjs";
+import "./hard-invariants-golden.mjs";
+import "./robot-auto-timeline-audit.mjs";
+import "./timeout-fallback-structure-safe-lead.mjs";
 
 // 机器人单步耗时预算：须压炸弹复杂局面
 {

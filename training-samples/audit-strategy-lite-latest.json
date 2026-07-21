@@ -1,0 +1,29 @@
+{
+  "ok": true,
+  "mode": "lite",
+  "reportClass": "diagnostic",
+  "turnBudgetMs": 0,
+  "timeoutFallbackCount": 1957,
+  "auditedAt": "2026-07-21T10:11:58.550Z",
+  "games": 20,
+  "completed": 20,
+  "incomplete": 0,
+  "completionRate": 1,
+  "avgTurns": 98,
+  "violationCount": 0,
+  "violationsByCode": {
+    "split-bomb": 0,
+    "beat-partner": 0,
+    "twp-level-kicker": 0
+  },
+  "topReproductions": [],
+  "samples": [],
+  "autoGameSpotCheck": {
+    "games": 0,
+    "completed": 0,
+    "hitLimit": 0
+  },
+  "levelRank": "2",
+  "seedStart": 42000,
+  "allViolations": []
+}

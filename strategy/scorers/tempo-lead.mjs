@@ -12,7 +12,7 @@ import {
   lastCatchWindWinningPlay,
   CATCH_WIND_RUNWAY_HAND_MAX,
 } from "../lead-mode.mjs";
-import { isThickBombSingleLead, solePairForTripleRank } from "../principles.mjs";
+import { isThickBombSingleLead, solePairForTripleRank, isBareLevelRankPairLead } from "../principles.mjs";
 import { opponentsWithOneCard, partnerHandCount, partnerOpeningRoute } from "../table-context.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -168,6 +168,15 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
       }
       return { score, reasons };
     }
+  }
+
+  if (
+    (leadMode === "catch-wind" || leadMode === "fresh-open")
+    && isBareLevelRankPairLead(candidate, hand, levelRank, tableContext._candidates ?? [])
+  ) {
+    score += hand.length >= 15 ? 9000 : 7500;
+    reasons.push(`级牌对${levelRank}不宜领出/接风裸出，宜三带二或小对减手`);
+    return { score, reasons };
   }
 
   if (leadMode === "catch-wind") {
@@ -421,6 +430,17 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
         score += heavyHand ? 6200 : 5200;
         reasons.push(`接风有${tripleHeld}张${pairRank}，不宜裸对子，优先三带二或连对`);
         return { score, reasons };
+      }
+      if (pairRank === levelRank && tripleHeld === 2 && hand.length > 6) {
+        const hasAltLead = (tableContext._candidates ?? []).some(
+          (item) => item.type !== PLAY_TYPES.pass
+            && !(item.type === PLAY_TYPES.pair && item.mainRank === levelRank),
+        );
+        if (hasAltLead) {
+          score += heavyHand ? 7200 : 6000;
+          reasons.push(`级牌对${pairRank}不宜接风裸出，宜三带二/连对/小对减手`);
+          return { score, reasons };
+        }
       }
       const pairRanks = [...rankCounts.entries()]
         .filter(([, count]) => count === 2)

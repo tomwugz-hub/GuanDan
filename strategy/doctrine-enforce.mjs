@@ -41,6 +41,7 @@ import {
   breaksPreferredStrategicGroup,
   shouldReserveBombForHighProbeSingle,
   solePairForTripleRank,
+  isBareLevelRankPairLead,
 } from "./principles.mjs";
 import {
   analyzeRankAvailability,
@@ -54,7 +55,7 @@ import {
   structureAwareBombs,
 } from "./scorers/structure.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
-import { leadSfRunwayDoctrineViolation, mustBeatCpSfRunwayDoctrineViolation, mustBeatTwpSfRunwayDoctrineViolation } from "./sf-runway-guard.mjs";
+import { leadSfRunwayDoctrineViolation, mustBeatCpSfRunwayDoctrineViolation, mustBeatPairSfRunwayDoctrineViolation, mustBeatTwpSfRunwayDoctrineViolation } from "./sf-runway-guard.mjs";
 import {
   CATCH_WIND_RUNWAY_HAND_MAX,
   inferLeadMode,
@@ -65,6 +66,7 @@ import {
 } from "./lead-mode.mjs";
 import { looseSmallSingleRanks } from "./scorers/tempo-lead.mjs";
 import { partnerHandCount, shouldYieldPassToPartner } from "./table-context.mjs";
+import { detectHardInvariantCodes, filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
@@ -216,6 +218,20 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
 
   const violations = [];
 
+  const hardInvariantSummaries = {
+    "beat-partner": "队友占牌应让牌，不得反压队友",
+    "twp-level-kicker": "三带二不得使用级牌对作带牌",
+    "split-bomb": "不得拆炸弹组成其它牌型",
+  };
+  for (const code of detectHardInvariantCodes(candidate, resolvedHand, levelRank, tableContext)) {
+    violations.push({
+      code,
+      summary: hardInvariantSummaries[code],
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
   // —— P1/P4：跟牌压单，有散单却拆对/拆钢板/拆结构 ——
   const beatSingleDiag = diagnoseBeatSingleViolation(candidate, resolvedHand, levelRank, tableContext);
   if (beatSingleDiag?.violated) {
@@ -226,7 +242,7 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
         : beatSingleDiag.tier === "straightFlush"
           ? "残局仅王+同花顺，不宜拆同花顺出单"
           : beatSingleDiag.tier === "straight"
-            ? "有散单够压，不宜拆顺子"
+            ? "有散单够压，不宜拆杂顺/顺子"
             : "有散单够压，不宜拆对或更大结构",
       blockTop1: true,
       blockTop3: beatSingleDiag.tier === "plate",
@@ -270,6 +286,16 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
   );
   if (mustBeatCpSfDiag) {
     violations.push(mustBeatCpSfDiag);
+  }
+
+  const mustBeatPairSfDiag = mustBeatPairSfRunwayDoctrineViolation(
+    candidate,
+    resolvedHand,
+    levelRank,
+    tableContext,
+  );
+  if (mustBeatPairSfDiag) {
+    violations.push(mustBeatPairSfDiag);
   }
 
   const mustBeatTwpSfDiag = mustBeatTwpSfRunwayDoctrineViolation(
@@ -502,6 +528,18 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       summary: prematureTwpDiag.summary,
       blockTop1: true,
       blockTop3: prematureTwpDiag.blockTop3 ?? false,
+    });
+  }
+
+  if (
+    isLeadTurn(tableContext)
+    && isBareLevelRankPairLead(candidate, resolvedHand, levelRank, tableContext._candidates ?? [])
+  ) {
+    violations.push({
+      code: "P4",
+      summary: `领出/接风不宜裸出级牌对${levelRank}`,
+      blockTop1: true,
+      blockTop3: true,
     });
   }
 
@@ -1138,6 +1176,10 @@ export function enforceDoctrineOnCandidates(scoredCandidates, context) {
   const hand = context.hand ?? context.state?.players?.[context.playerIndex]?.hand ?? [];
   const levelRank = context.levelRank ?? context.state?.levelRank ?? "2";
   const tableContext = { ...context, hand, _candidates: context._candidates ?? [] };
+  const hardSafeCandidates = new Set(
+    filterHardInvariants(scoredCandidates, hand, levelRank, tableContext)
+      .map((item) => item.candidate ?? item),
+  );
 
   const doctrineViolations = [];
 
@@ -1174,8 +1216,11 @@ export function enforceDoctrineOnCandidates(scoredCandidates, context) {
   });
 
   const reranked = rerankAfterDoctrineEnforcement(processed);
-  let candidates = reranked.filter((item) => !candidateBlocksTop3(item));
-  const blocked = reranked.filter((item) => candidateBlocksTop3(item));
+  const hardSafeReranked = filterHardInvariants(reranked, hand, levelRank, tableContext);
+  let candidates = hardSafeReranked.filter((item) => !candidateBlocksTop3(item));
+  const blocked = reranked.filter(
+    (item) => candidateBlocksTop3(item) || !hardSafeCandidates.has(item.candidate),
+  );
 
   const topNeedsBomb = candidates.length === 0
     || candidateBlocksTop1(candidates[0])
@@ -1183,14 +1228,14 @@ export function enforceDoctrineOnCandidates(scoredCandidates, context) {
       && shouldVetoBombOnlyPass({ ...tableContext, hand }, hand, tableContext.previousPlay));
   if (topNeedsBomb) {
     const bombFallback = pickMandatoryBombFallback(processed, tableContext, hand, levelRank);
-    if (bombFallback) {
+    if (bombFallback && filterHardInvariants([bombFallback], hand, levelRank, tableContext).length > 0) {
       const rest = reranked.filter((item) => item !== bombFallback && !candidateBlocksTop3(item));
-      candidates = [bombFallback, ...rest];
+      candidates = filterHardInvariants([bombFallback, ...rest], hand, levelRank, tableContext);
     }
   }
 
-  const fallbackCandidates = candidates.length > 0 ? candidates : reranked.slice(0, 1);
-  const fallbackBlocked = candidates.length > 0 ? blocked : reranked.slice(1);
+  const fallbackCandidates = candidates.length > 0 ? candidates : hardSafeReranked.slice(0, 1);
+  const fallbackBlocked = candidates.length > 0 ? blocked : reranked.filter((item) => !fallbackCandidates.includes(item));
 
   return {
     candidates: fallbackCandidates,
@@ -1272,6 +1317,26 @@ export function doctrineViolationAckLine(violations) {
   if (!violations?.length) return null;
   const codes = [...new Set(violations.map((v) => v.code))].join("/");
   return `这手推荐违规（${codes}），你是对的。`;
+}
+
+const MUST_BEAT_SF_RUNWAY_SUMMARY = /连对压牌|三带二压牌|组对压牌/;
+
+/** 打牌中异议：Top1 须压拆同花顺跑道时的专答（对齐实际推荐，勿扯无关四炸） */
+export function buildTop1MustBeatSfRunwayInsight(context) {
+  const violations = (detectAdviceTop1Violations(context) ?? []).filter((v) => v.blockTop1);
+  const sfRoutine = violations.filter((v) => MUST_BEAT_SF_RUNWAY_SUMMARY.test(v.summary ?? ""));
+  if (!sfRoutine.length) return null;
+
+  const top = context.currentAdvice?.choices?.[0];
+  const topPlay = top?.play ?? top?.candidate;
+  if (!topPlay || topPlay.type === PLAY_TYPES.pass) return null;
+
+  const ack = doctrineViolationAckLine(sfRoutine);
+  const summary = sfRoutine.map((v) => v.summary).filter(Boolean).join("");
+  const label = topPlay.label ?? topPlay.type ?? "—";
+  const prevLabel = context.table?.lastActivePlay?.label ?? "";
+  const prevPart = prevLabel ? `（须压${prevLabel}）` : "";
+  return `${ack}推荐1「${label}」${prevPart}：${summary}`;
 }
 
 /** 用户可见简短警告 */

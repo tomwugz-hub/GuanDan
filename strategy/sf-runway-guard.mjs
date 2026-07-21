@@ -3,7 +3,7 @@
  * 修复须写进本模块，避免各路径各自实现导致复发。
  */
 import { PLAY_TYPES } from "../engine/play-types.mjs";
-import { cardId } from "../engine/card.mjs";
+import { cardId, isJoker, isWildCard } from "../engine/card.mjs";
 import {
   breaksStrategicPremiumForConsecutivePairs,
   breaksStrategicPremiumForPair,
@@ -13,9 +13,11 @@ import {
   breaksStrategicPremiumForTripleWithPair,
   resolveHandStructureCache,
 } from "./scorers/structure.mjs";
+import { enumerateStraightFlushCandidates } from "./straight-flush-arrange.mjs";
+import { buildStrategicGroups } from "./strategic-groups.mjs";
 
 /** 策略修订号：与 app/main.mjs 校验一致，用于识别浏览器是否仍缓存旧模块 */
-export const COACH_STRATEGY_REVISION = 6;
+export const COACH_STRATEGY_REVISION = 31;
 
 const SHAPE_LABELS = {
   [PLAY_TYPES.straight]: "杂顺",
@@ -165,6 +167,71 @@ export function leadSfRunwayPrinciplesPenalty(candidate, hand, levelRank, tableC
   };
 }
 
+function physicalRankCount(hand, rank, levelRank) {
+  if (!hand?.length || !rank) return 0;
+  return hand.filter(
+    (card) => card.rank === rank && !isJoker(card) && !isWildCard(card, levelRank),
+  ).length;
+}
+
+function isLiteStructureContext(tableContext) {
+  return tableContext?.lite === true
+    || tableContext?.scoringAudience === "human-lite"
+    || tableContext?.scoringAudience === "robot";
+}
+
+function candidatePartiallyBreaksSfGroup(candidate, group) {
+  const groupKeys = (group.cards ?? []).map((card) => cardId(card));
+  if (!groupKeys.length) return false;
+  const keys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
+  const used = groupKeys.filter((key) => keys.has(key)).length;
+  return used > 0 && used < groupKeys.length;
+}
+
+/** 须压须保护的主同花顺跑道：UI 理牌列 + buildStrategicGroups 锁定，非全量枚举 */
+function resolveLockedStraightFlushGroups(hand, levelRank, tableContext, cache) {
+  const fromPreferred = (cache.strategicGroups ?? []).filter(
+    (group) => group.play?.type === PLAY_TYPES.straightFlush
+      || /同花顺/.test(group.label ?? ""),
+  );
+  if (fromPreferred.length > 0) return fromPreferred;
+  if (isLiteStructureContext(tableContext) && (tableContext?.preferredGroups?.length ?? 0) > 0) {
+    return buildStrategicGroups(hand, levelRank).filter(
+      (group) => group.play?.type === PLAY_TYPES.straightFlush
+        || /同花顺/.test(group.label ?? ""),
+    );
+  }
+  if (!isLiteStructureContext(tableContext)) {
+    return buildStrategicGroups(hand, levelRank).filter(
+      (group) => group.play?.type === PLAY_TYPES.straightFlush,
+    );
+  }
+  return [];
+}
+
+/** 须压同型常规牌：枚举/分组检测拆同花顺跑道（不因理牌只锁低路 SF 而漏检逢人配高路） */
+function resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, premiumBreak) {
+  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
+  const lockedSf = resolveLockedStraightFlushGroups(hand, levelRank, tableContext, cache);
+  for (const group of lockedSf) {
+    if (candidatePartiallyBreaksSfGroup(candidate, group)) {
+      return group.label ?? premiumBreak ?? "同花顺";
+    }
+  }
+  // 三张同点拆散对：主跑道未伤即可压，勿用 premiumBreak/次要枚举误拦（如 J♣+J♠ 碰低路梅花）
+  if (candidate?.type === PLAY_TYPES.pair) {
+    const held = physicalRankCount(hand, candidate.mainRank, levelRank);
+    if (held > 2) return null;
+  }
+  if (premiumBreak && isSfRunwayPremiumBreakLabel(premiumBreak) && lockedSf.length === 0) {
+    return premiumBreak;
+  }
+  const straightFlushes = cache.straightFlushes.length > 0
+    ? cache.straightFlushes
+    : enumerateStraightFlushCandidates(hand, levelRank);
+  return candidateBreaksEnumeratedStraightFlush(candidate, straightFlushes);
+}
+
 /** 须压连对：候选是否拆同花顺/同花色跑道 */
 export function breaksStraightFlushRunwayOnMustBeatCp(candidate, hand, levelRank, tableContext = null) {
   const previousPlay = tableContext?.previousPlay ?? null;
@@ -176,21 +243,7 @@ export function breaksStraightFlushRunwayOnMustBeatCp(candidate, hand, levelRank
     levelRank,
     tableContext,
   );
-  if (!premiumBreak) return null;
-  if (isSfRunwayPremiumBreakLabel(premiumBreak)) return premiumBreak;
-  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
-  const enumBreak = candidateBreaksEnumeratedStraightFlush(candidate, cache.straightFlushes);
-  if (enumBreak) return enumBreak;
-  for (const group of cache.strategicGroups) {
-    if (group.play?.type !== PLAY_TYPES.straightFlush) continue;
-    const groupKeys = (group.cards ?? []).map((card) => cardId(card));
-    const keys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
-    const used = groupKeys.filter((key) => keys.has(key)).length;
-    if (used > 0 && used < groupKeys.length) {
-      return group.label ?? premiumBreak;
-    }
-  }
-  return null;
+  return resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, premiumBreak);
 }
 
 /** 须压三带二：候选是否拆同花顺/同花色跑道 */
@@ -205,21 +258,39 @@ export function breaksStraightFlushRunwayOnMustBeatTwp(candidate, hand, levelRan
     tableContext?.preferredGroups ?? null,
     tableContext,
   );
+  return resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, premiumBreak);
+}
+
+/** 须压对子：候选是否拆同花顺/同花色跑道 */
+export function breaksStraightFlushRunwayOnMustBeatPair(candidate, hand, levelRank, tableContext = null) {
+  const previousPlay = tableContext?.previousPlay ?? null;
+  if (previousPlay?.type !== PLAY_TYPES.pair) return null;
+  if (candidate?.type !== PLAY_TYPES.pair) return null;
+  const premiumBreak = breaksStrategicPremiumForPair(candidate, hand, levelRank, tableContext);
+  return resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, premiumBreak);
+}
+
+/** 教纲 P1：须压对子拆同花顺跑道 */
+export function mustBeatPairSfRunwayDoctrineViolation(candidate, hand, levelRank, tableContext) {
+  const premiumBreak = breaksStraightFlushRunwayOnMustBeatPair(candidate, hand, levelRank, tableContext);
   if (!premiumBreak) return null;
-  if (isSfRunwayPremiumBreakLabel(premiumBreak)) return premiumBreak;
-  const cache = resolveHandStructureCache(hand, levelRank, tableContext);
-  const enumBreak = candidateBreaksEnumeratedStraightFlush(candidate, cache.straightFlushes);
-  if (enumBreak) return enumBreak;
-  for (const group of cache.strategicGroups) {
-    if (group.play?.type !== PLAY_TYPES.straightFlush) continue;
-    const groupKeys = (group.cards ?? []).map((card) => cardId(card));
-    const keys = new Set((candidate.cards ?? []).map((card) => cardId(card)));
-    const used = groupKeys.filter((key) => keys.has(key)).length;
-    if (used > 0 && used < groupKeys.length) {
-      return group.label ?? premiumBreak;
-    }
-  }
-  return null;
+  return {
+    code: "P1",
+    summary: `不宜拆${premiumBreak}组对压牌，宜过牌保留同花顺`,
+    blockTop1: true,
+    blockTop3: true,
+  };
+}
+
+/** 原则层：须压对子拆跑道评分重罚 */
+export function mustBeatPairSfRunwayPrinciplesPenalty(candidate, hand, levelRank, tableContext) {
+  const premiumBreak = breaksStraightFlushRunwayOnMustBeatPair(candidate, hand, levelRank, tableContext);
+  if (!premiumBreak) return null;
+  const handLen = hand?.length ?? 0;
+  return {
+    score: handLen >= 15 ? 12_000 : 10_000,
+    reason: `【P1】不宜拆${premiumBreak}组对压牌，宜过牌保留同花顺`,
+  };
 }
 
 /** 教纲 P1：须压连对拆同花顺跑道 */

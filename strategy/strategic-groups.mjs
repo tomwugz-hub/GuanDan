@@ -269,7 +269,7 @@ export function mergePremiumStrategicGroups(
     PLAY_TYPES.plane,
     PLAY_TYPES.straight,
   ]);
-  const strategic = prebuiltStrategic ?? buildStrategicGroups(hand, levelRank);
+  const strategic = buildStrategicGroups(hand, levelRank);
   for (const group of strategic) {
     const play = group.play ?? classifyPlay(group.cards ?? [], levelRank);
     if (!mergeTypes.has(play.type)) continue;

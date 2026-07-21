@@ -19,6 +19,7 @@ import { alignReasonsForPlay } from "./reason-align.mjs";
 import { hasOnlyAntiSinglePenaltyReasons, playContradictsReasons } from "./reason-consistency.mjs";
 import { analyzeRankAvailability, breaksBombIntegrity } from "./scorers/structure.mjs";
 import { breaksStraightFlushRunwayOnMustBeatCp, breaksStraightFlushRunwayOnMustBeatTwp } from "./sf-runway-guard.mjs";
+import { shouldReserveStructureForRoutineBeat } from "./wild-doctrine.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
@@ -115,13 +116,16 @@ export function rescueRegularBeatTop1Recommendation(recommendation, pool, hand, 
 
   if (previousPlay?.type === PLAY_TYPES.pair) {
     const pairCtx = analyzeMustBeatPairContext(hand, levelRank, previousPlay, tableContext);
+    const reserveStructure = shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank);
     const minPool = pairCtx.structureSafeDedicated?.length > 0
       ? pairCtx.structureSafeDedicated
       : pairCtx.structureSafeWholePairBeaters?.length > 0
         ? pairCtx.structureSafeWholePairBeaters
-        : pairCtx.dedicatedPairBeaters.length > 0
-          ? pairCtx.dedicatedPairBeaters
-          : pairCtx.wholePairBeaters;
+        : reserveStructure
+          ? []
+          : pairCtx.dedicatedPairBeaters.length > 0
+            ? pairCtx.dedicatedPairBeaters
+            : pairCtx.wholePairBeaters;
     const minPair = minPool.reduce(
       (best, item) => (!best || item.power < best.power ? item : best),
       null,

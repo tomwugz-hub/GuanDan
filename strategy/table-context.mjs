@@ -107,6 +107,13 @@ export function shouldYieldPassToPartner(tableContext) {
   return true;
 }
 
+/** 机器人 P10：队友占牌一律过牌让权（不抢队友牌路），仅本手能走完时例外 */
+export function shouldRobotYieldPassToPartner(tableContext) {
+  if (canFinishOnThisTurn(tableContext)) return false;
+  if (!tableContext.partnerOwnsTrick || tableContext.isFinishingPlay) return false;
+  return true;
+}
+
 /** 占牌者座位：优先 playHistory，避免 lastActivePlayerIndex 滞后误判 P10 队友占牌 */
 export function resolveLastActivePlayerIndex(tableContext) {
   const playerIndex = tableContext.playerIndex ?? tableContext.state?.currentPlayerIndex ?? null;

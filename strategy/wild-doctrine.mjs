@@ -10,6 +10,7 @@ import { isStructureBreakingRoutineBeat } from "./scorers/structure.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 const ROUTINE_BEAT_TYPES = new Set([
+  PLAY_TYPES.single,
   PLAY_TYPES.triple,
   PLAY_TYPES.pair,
   PLAY_TYPES.tripleWithPair,

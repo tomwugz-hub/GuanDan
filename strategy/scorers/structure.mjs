@@ -64,6 +64,44 @@ export function tripleWithPairKickerBreaksStrategicGroup(candidate, hand, levelR
   return null;
 }
 
+/** 三带二可附带的整对点数（从小到大；不含三张主点与王） */
+export function findAvailableKickerPairRanksForTriple(hand, levelRank, tripleRank) {
+  const available = [];
+  for (const rank of rankOrder(levelRank)) {
+    if (rank === tripleRank || rank === "SJ" || rank === "BJ") continue;
+    if (physicalRankCount(hand, rank) >= 2) available.push(rank);
+  }
+  return available;
+}
+
+/** 三带二宜带的最小整对（优先保留级牌对） */
+export function minTripleWithPairKickerRank(hand, levelRank, tripleRank) {
+  const available = findAvailableKickerPairRanksForTriple(hand, levelRank, tripleRank);
+  const nonLevel = available.filter((rank) => rank !== levelRank);
+  return nonLevel[0] ?? available[0] ?? null;
+}
+
+/** 三带二候选池：优先最小非级牌对附件（应急/兜底共用） */
+export function pickBestTripleWithPairLead(pool, hand, levelRank) {
+  if (!pool?.length) return null;
+  const idealKicker = minTripleWithPairKickerRank(hand, levelRank, pool[0]?.mainRank);
+  return pool.reduce((best, item) => {
+    if (!best) return item;
+    const itemK = inferTripleWithPairKickerRank(item);
+    const bestK = inferTripleWithPairKickerRank(best);
+    if (itemK === levelRank && bestK !== levelRank) return best;
+    if (bestK === levelRank && itemK !== levelRank) return item;
+    if (idealKicker && itemK === idealKicker && bestK !== idealKicker) return item;
+    if (idealKicker && bestK === idealKicker && itemK !== idealKicker) return best;
+    if (itemK && bestK) {
+      const cmp = compareRanks(itemK, bestK, levelRank);
+      if (cmp < 0) return item;
+      if (cmp > 0) return best;
+    }
+    return (item.power ?? 0) < (best.power ?? 0) ? item : best;
+  }, null);
+}
+
 /** 三带二可用的安全带对点数（不拆炸、不拆连对/钢板/顺子），从小到大 */
 export function findSafeKickerPairRanksForTriple(hand, levelRank, tripleRank) {
   const chainRanks = ranksInStrategicChainGroups(hand, levelRank);
@@ -154,14 +192,18 @@ function isLiteStructureContext(tableContext) {
     || tableContext?.scoringAudience === "robot";
 }
 
-/** 同手牌只枚举一次同花顺；lite 路径不拉 buildStrategicGroups */
+/** 同手牌只枚举一次同花顺；lite 路径有 preferredGroups 时不全量枚举 */
 export function resolveHandStructureCache(hand, levelRank, tableContext = null) {
   const sig = handCacheSignature(hand);
   if (!sig) return { sig: "", straightFlushes: [], strategicGroups: [] };
   if (tableContext?._handStructureCache?.sig === sig) {
     return tableContext._handStructureCache;
   }
-  const straightFlushes = enumerateStraightFlushCandidates(hand, levelRank);
+  const liteWithPreferred = isLiteStructureContext(tableContext)
+    && (tableContext?.preferredGroups?.length ?? 0) > 0;
+  const straightFlushes = liteWithPreferred
+    ? []
+    : enumerateStraightFlushCandidates(hand, levelRank);
   let strategicGroups = [];
   if ((tableContext?.preferredGroups?.length ?? 0) > 0) {
     strategicGroups = tableContext.preferredGroups;
@@ -482,8 +524,81 @@ export function breaksStrategicPremiumForStraight(candidate, hand, levelRank, ta
   return null;
 }
 
-/** 须压同型常规牌（对子/三张/三带二/钢板）是否拆高价值结构 */
+/** UI 理牌列：候选部分占用保护组（顺子/同花顺/炸弹等） */
+function breaksPreferredStrategicPartialUse(candidate, preferredGroups, levelRank) {
+  if (!candidate || !preferredGroups?.length) return null;
+  const keys = new Set((candidate.cards ?? []).map(cardKeyForPremium));
+  const PROTECTED = new Set([
+    PLAY_TYPES.straightFlush,
+    PLAY_TYPES.jokerBomb,
+    PLAY_TYPES.bomb,
+    PLAY_TYPES.consecutivePairs,
+    PLAY_TYPES.plane,
+    PLAY_TYPES.straight,
+    PLAY_TYPES.triple,
+  ]);
+  for (const group of preferredGroups) {
+    const cards = group.cards ?? group;
+    const play = group.play ?? classifyPlay(cards, levelRank);
+    const groupKeys = cards.map(cardKeyForPremium);
+    const used = groupKeys.filter((key) => keys.has(key)).length;
+    if (used === 0) continue;
+    if (PROTECTED.has(play.type)) {
+      if (used < groupKeys.length) return group.label ?? play.type;
+      if (candidate.cards.length !== groupKeys.length) return group.label ?? play.type;
+      continue;
+    }
+    if (
+      play.type === PLAY_TYPES.pair
+      && candidate.type === PLAY_TYPES.single
+      && candidate.mainRank === play.mainRank
+      && used > 0
+      && used < groupKeys.length
+    ) {
+      return group.label ?? "对子";
+    }
+  }
+  return null;
+}
+
+/** 须压单张是否拆顺子/同花顺/跑道 */
+export function breaksStrategicPremiumForSingle(candidate, hand, levelRank, preferredGroups = null, tableContext = null) {
+  if (candidate?.type !== PLAY_TYPES.single || !hand?.length) return null;
+  const prefBreak = breaksPreferredStrategicPartialUse(candidate, preferredGroups, levelRank);
+  if (prefBreak) return prefBreak;
+  const cache = resolveHandStructureCache(hand, levelRank, {
+    ...tableContext,
+    preferredGroups: preferredGroups ?? tableContext?.preferredGroups,
+  });
+  const groups = preferredGroups?.length ? preferredGroups : cache.strategicGroups;
+  if (breaksPreferredStraightFlushPartialUse(candidate, groups, levelRank)) {
+    for (const group of groups) {
+      const cards = group.cards ?? group;
+      const play = group.play ?? classifyPlay(cards, levelRank);
+      if (play?.type !== PLAY_TYPES.straightFlush) continue;
+      const groupKeys = cards.map(cardKeyForPremium);
+      const keys = new Set((candidate.cards ?? []).map(cardKeyForPremium));
+      const used = groupKeys.filter((key) => keys.has(key)).length;
+      if (used > 0) return group.label ?? "同花顺";
+    }
+    return "同花顺";
+  }
+  const sfBreak = candidateBreaksCachedStraightFlush(candidate, cache.straightFlushes);
+  if (sfBreak) return sfBreak;
+  const groupBreak = candidateBreaksCachedStraightFlushGroups(candidate, cache.strategicGroups, levelRank);
+  if (groupBreak) return groupBreak;
+  const runwayBreak = candidateOverlapsSameSuitRunway(candidate, hand, levelRank);
+  if (runwayBreak) return runwayBreak;
+  const straightBreak = playBreaksStrategicStraight(candidate, hand, levelRank);
+  if (straightBreak) return straightBreak;
+  return null;
+}
+
+/** 须压同型常规牌（对子/三张/三带二/钢板/单张）是否拆高价值结构 */
 export function breaksStrategicPremiumForRoutineBeat(candidate, hand, levelRank, preferredGroups = null) {
+  if (candidate?.type === PLAY_TYPES.single) {
+    return breaksStrategicPremiumForSingle(candidate, hand, levelRank, preferredGroups);
+  }
   if (candidate?.type === PLAY_TYPES.tripleWithPair) {
     return breaksStrategicPremiumForTripleWithPair(candidate, hand, levelRank, preferredGroups);
   }
@@ -953,23 +1068,45 @@ export function structureBreakPenalty(candidate, hand, levelRank, tableContext) 
     }
   }
 
-  // 三带二带对：优先最小孤立对，重罚拆连对/钢板/顺子（对齐 local-qa suggestSafePairRankForTriple）
+  // 三带二带对：优先最小整对（保留级牌对），孤立对优先于拆连对/钢板/顺子
   if (candidate.type === PLAY_TYPES.tripleWithPair) {
     const kickerRank = inferTripleWithPairKickerRank(candidate);
     const chainBreak = tripleWithPairKickerBreaksStrategicGroup(candidate, hand, levelRank);
+    const previousPlay = tableContext.previousPlay ?? null;
+    const mustBeatTripleWithPair = tableContext.leadMode === "must-beat"
+      && previousPlay?.type === PLAY_TYPES.tripleWithPair;
+    const twpKickerContext = openingLead || catchWindLead || mustBeatTripleWithPair;
     if (chainBreak && (openingLead || catchWindLead)) {
       penalty += hand.length >= 15 ? 11_500 : 9500;
       reasons.push(`三带二带对${kickerRank}会拆${chainBreak}，宜用孤立小对`);
     }
+    const minKicker = minTripleWithPairKickerRank(hand, levelRank, candidate.mainRank);
+    if (minKicker && kickerRank && twpKickerContext) {
+      if (kickerRank === levelRank && minKicker !== levelRank) {
+        penalty += hand.length >= 15 ? 12_000 : 10_000;
+        reasons.push(`三带二不宜带级牌对${levelRank}，宜带最小对${minKicker}`);
+      } else if (compareRanks(kickerRank, minKicker, levelRank) > 0) {
+        penalty += chainBreak
+          ? (hand.length >= 15 ? 4000 : 3200)
+          : (hand.length >= 15 ? 5500 : 4500);
+        reasons.push(`三带二宜带最小对${minKicker}，不必带对${kickerRank}`);
+      } else if (kickerRank === minKicker && !chainBreak) {
+        penalty -= hand.length >= 15 ? 1100 : 900;
+        reasons.push(`三带二带最小对${minKicker}，不拆其它成组`);
+      }
+    }
     const safePairs = findSafeKickerPairRanksForTriple(hand, levelRank, candidate.mainRank);
-    if (safePairs.length > 0 && kickerRank && (openingLead || catchWindLead) && !chainBreak) {
+    if (
+      safePairs.length > 0
+      && kickerRank
+      && (openingLead || catchWindLead)
+      && !chainBreak
+      && kickerRank !== minKicker
+    ) {
       const minSafe = safePairs[0];
       if (kickerRank === minSafe) {
-        penalty -= hand.length >= 15 ? 1100 : 900;
-        reasons.push(`三带二带最小对${minSafe}，不拆其它成组`);
-      } else if (safePairs.includes(kickerRank)) {
-        penalty += 800;
-        reasons.push(`三带二宜带最小对${minSafe}，不必带对${kickerRank}`);
+        penalty -= hand.length >= 15 ? 800 : 600;
+        reasons.push(`三带二带孤立小对${minSafe}，不拆其它成组`);
       }
     }
   }

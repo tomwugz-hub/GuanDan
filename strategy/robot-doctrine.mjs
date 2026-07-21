@@ -4,9 +4,10 @@
 import { isJoker, isWildCard } from "../engine/card.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { compareRanks, isControlRank, rankPower } from "../engine/rank-order.mjs";
-import { isTeammate, shouldYieldPassToPartner } from "./table-context.mjs";
+import { isTeammate, shouldYieldPassToPartner, shouldRobotYieldPassToPartner } from "./table-context.mjs";
 import { playerJustWonTrickWithBomb, isCatchWindPremiumReduction } from "./lead-mode.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
+import { breaksBombIntegrity } from "./scorers/structure.mjs";
 import { isWildLowValueBeat, shouldReserveWildForSmallRoutineBeat } from "./wild-doctrine.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -153,7 +154,7 @@ export function scoreRobotDoctrine(candidate, hand, levelRank, tableContext) {
   const handCount = hand?.length ?? 0;
 
   if (tableContext.partnerOwnsTrick && !tableContext.isFinishingPlay) {
-    const yieldPass = shouldYieldPassToPartner(tableContext);
+    const yieldPass = shouldRobotYieldPassToPartner(tableContext);
     if (BOMB_TYPES.has(candidate.type)) {
       const usesWild = (candidate.cards ?? []).some((card) => isWildCard(card, levelRank));
       score += usesWild ? 28_000 : 22_000;
@@ -161,17 +162,25 @@ export function scoreRobotDoctrine(candidate, hand, levelRank, tableContext) {
         ? "【P10】不宜逢人配凑炸压队友"
         : "【P10】队友占牌，不宜炸队友");
       principles.push("P10");
-    } else if (yieldPass) {
-      if (candidate.type === PLAY_TYPES.pass) {
-        score -= 14_000;
-        reasons.push("【P10】队友占牌，机器人应过牌让权");
-        principles.push("P10");
-      } else {
-        score += 18_000;
-        reasons.push("【P10】队友占牌，不宜压队友");
-        principles.push("P10");
-      }
+    } else if (candidate.type === PLAY_TYPES.pass && yieldPass) {
+      score -= 14_000;
+      reasons.push("【P10】队友占牌，机器人应过牌让权");
+      principles.push("P10");
+    } else if (
+      previousPlay
+      && candidate.type !== PLAY_TYPES.pass
+      && canBeat(candidate, previousPlay)
+    ) {
+      score += 22_000;
+      reasons.push("【P10】队友占牌，不宜压队友");
+      principles.push("P10");
     }
+  }
+
+  if (breaksBombIntegrity(candidate, hand, levelRank, tableContext)) {
+    score += 26_000;
+    reasons.push("【P7】不宜拆炸弹出散牌/对子");
+    principles.push("P7");
   }
 
   if (
