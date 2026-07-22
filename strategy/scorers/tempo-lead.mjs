@@ -13,7 +13,13 @@ import {
   CATCH_WIND_RUNWAY_HAND_MAX,
 } from "../lead-mode.mjs";
 import { isThickBombSingleLead, solePairForTripleRank, isBareLevelRankPairLead } from "../principles.mjs";
-import { opponentsWithOneCard, partnerHandCount, partnerOpeningRoute } from "../table-context.mjs";
+import {
+  minOpponentHandCount,
+  opponentReportsTwoCards,
+  opponentsWithOneCard,
+  partnerHandCount,
+  partnerOpeningRoute,
+} from "../table-context.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 const TEMPO_TYPES = new Set([
@@ -167,6 +173,34 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
         reasons.push("对手报单，宜先出控场牌，小单易被放行");
       }
       return { score, reasons };
+    }
+  }
+
+  // P11 报双：对手剩 2 张时接风/领出不宜出对（易被对子一手走完），宜单探留王回收
+  if (
+    opponentReportsTwoCards(tableContext)
+    && (leadMode === "catch-wind" || leadMode === "fresh-open")
+  ) {
+    if (candidate.type === PLAY_TYPES.pair) {
+      score += 20_000;
+      reasons.push("【P11】对手报双，不宜出对子放行一手走完");
+      return { score, reasons };
+    }
+    if (candidate.type === PLAY_TYPES.single) {
+      const hasJokerRecovery = hand.some((card) => isJoker(card));
+      const isJokerLead = candidate.mainRank === "SJ" || candidate.mainRank === "BJ";
+      const isSmallProbe = !isJokerLead
+        && compareRanks(candidate.mainRank, "7", levelRank) <= 0;
+      if (hasJokerRecovery && isSmallProbe) {
+        score -= 11_000;
+        reasons.push("【P11】对手报双，宜单牌试探逼拆牌，留王回收");
+        return { score, reasons };
+      }
+      if (hasJokerRecovery && isJokerLead) {
+        score += 16_000;
+        reasons.push("【P11】对手报双，不宜先出王浪费回收");
+        return { score, reasons };
+      }
     }
   }
 

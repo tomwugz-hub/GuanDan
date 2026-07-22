@@ -156,6 +156,23 @@ export function opponentDangerLevel(tableContext) {
   return danger;
 }
 
+/** 尚未出完的对手中是否有人只剩 2 张（报双） */
+export function opponentsWithTwoCards(tableContext) {
+  const state = tableContext.state;
+  if (!state) return [];
+  const selfIndex = tableContext.playerIndex ?? state.currentPlayerIndex ?? 0;
+  return state.players.filter(
+    (player) => !player.finishedOrder
+      && !isTeammate(selfIndex, player.seatIndex)
+      && player.hand.length === 2,
+  );
+}
+
+/** 对手最少余牌是否为 2 张（报双冲刺） */
+export function opponentReportsTwoCards(tableContext) {
+  return minOpponentHandCount(tableContext) === 2;
+}
+
 /** 尚未出完的对手中是否有人只剩 1 张（报单） */
 export function opponentsWithOneCard(tableContext) {
   const state = tableContext.state;

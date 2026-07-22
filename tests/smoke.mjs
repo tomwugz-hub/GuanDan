@@ -3932,6 +3932,7 @@ import "./robot-no-pair-over-partner-j-pending.mjs";
 import "./hard-invariants-golden.mjs";
 import "./robot-auto-timeline-audit.mjs";
 import "./timeout-fallback-structure-safe-lead.mjs";
+import "./opponent-two-card-catch-wind-lead.mjs";
 
 // 机器人单步耗时预算：须压炸弹复杂局面
 {

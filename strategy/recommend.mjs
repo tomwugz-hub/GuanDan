@@ -6,7 +6,7 @@ import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { rankPower, compareRanks } from "../engine/rank-order.mjs";
 import { alignReasonsForPlay } from "./reason-align.mjs";
-import { enrichScoringContext, evaluateBombInventory, opponentDangerLevel, shouldYieldPassToPartner, shouldRobotYieldPassToPartner } from "./table-context.mjs";
+import { enrichScoringContext, evaluateBombInventory, opponentDangerLevel, opponentReportsTwoCards, shouldYieldPassToPartner, shouldRobotYieldPassToPartner } from "./table-context.mjs";
 import { opponentPressureAdjustment } from "./scorers/opponent-pressure.mjs";
 import {
   breaksBombIntegrity,
@@ -1513,12 +1513,18 @@ function pickRobotLeadByPrinciples(hand, levelRank, candidates, tableContext) {
     scoringAudience: "human-lite",
   };
   if (!isPastDeadline(tableContext)) {
-    let scorePool = hand.length >= 8
-      ? pool.filter((item) => item.type !== PLAY_TYPES.single)
-      : pool;
+    const oppTwoCard = opponentReportsTwoCards(tableContext);
+    let scorePool = pool;
+    if (oppTwoCard) {
+      const noPairs = pool.filter((item) => item.type !== PLAY_TYPES.pair);
+      scorePool = noPairs.length > 0 ? noPairs : pool;
+    } else if (hand.length >= 8) {
+      scorePool = pool.filter((item) => item.type !== PLAY_TYPES.single);
+    }
     if (
       (leadMode === "catch-wind" || leadMode === "fresh-open")
       && hand.length <= 12
+      && !oppTwoCard
       && scorePool.some((item) => item.type === PLAY_TYPES.tripleWithPair)
     ) {
       const noSingles = scorePool.filter((item) => item.type !== PLAY_TYPES.single);
@@ -1552,6 +1558,7 @@ function pickRobotLeadByPrinciples(hand, levelRank, candidates, tableContext) {
       if (
         (leadMode === "catch-wind" || leadMode === "fresh-open")
         && hand.length <= 12
+        && !oppTwoCard
       ) {
         scored.sort((left, right) => {
           const twpBias = (item) => (item.candidate.type === PLAY_TYPES.tripleWithPair ? 1 : 0);
@@ -1841,11 +1848,17 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
   const leadPick = pickRobotLeadByPrinciples(hand, levelRank, candidates, beatCtx);
   if (leadPick) {
     const groupLead = leadPick.type !== PLAY_TYPES.single;
+    const reasons = [groupLead ? "机器人领出：同源原则成组减手" : "机器人领出：同源原则散单试探"];
+    if (opponentReportsTwoCards(beatCtx) && leadPick.type === PLAY_TYPES.single) {
+      reasons.unshift("【P11】对手报双，宜单牌试探逼拆牌，留王回收");
+    } else if (opponentReportsTwoCards(beatCtx) && groupLead) {
+      reasons.unshift("【P11】对手报双，不宜出对子放行一手走完");
+    }
     return {
       top: {
         candidate: leadPick,
         score: -500,
-        reasons: [groupLead ? "机器人领出：同源原则成组减手" : "机器人领出：同源原则散单试探"],
+        reasons,
       },
       pool: [],
       scoringContext: beatCtx,
