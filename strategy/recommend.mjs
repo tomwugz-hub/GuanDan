@@ -2135,13 +2135,6 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
   }
 
   if (previousPlay.type === PLAY_TYPES.tripleWithPair) {
-    const reserveRoutineTwp = shouldPreferPassForHeavyHandRoutineTripleWithPair(
-      beatCtx,
-      hand,
-      previousPlay,
-      levelRank,
-    );
-    if (reserveRoutineTwp) return null;
     const c100Twp = pickC100MustBeatTripleWithPairBeater(
       hand, levelRank, previousPlay, candidates, beatCtx,
     );
@@ -2153,6 +2146,13 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
         blockedCandidates: [],
       };
     }
+    const reserveRoutineTwp = shouldPreferPassForHeavyHandRoutineTripleWithPair(
+      beatCtx,
+      hand,
+      previousPlay,
+      levelRank,
+    );
+    if (reserveRoutineTwp) return null;
     const minTwp = pickMinStructureSafeTripleWithPairBeater(
       { beaters: [], structureSafeBeaters: [], hasStructureSafeBeater: false },
       levelRank,
@@ -2392,12 +2392,6 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
       c100TwpEarly
       && precomputedTwpBeatCtx.opponentActive
       && !precomputedTwpBeatCtx.partnerOwnsTrick
-      && !shouldPreferPassForHeavyHandRoutineTripleWithPair(
-        precomputedTwpBeatCtx,
-        hand,
-        previousPlay,
-        levelRank,
-      )
     ) {
       return {
         top: {
@@ -2682,15 +2676,7 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
           candidates,
           beatCtx,
         );
-        if (
-          c100Twp
-          && !shouldPreferPassForHeavyHandRoutineTripleWithPair(
-            beatCtx,
-            hand,
-            previousPlay,
-            levelRank,
-          )
-        ) {
+        if (c100Twp) {
           return {
             top: {
               candidate: c100Twp,

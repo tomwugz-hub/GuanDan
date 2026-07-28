@@ -988,13 +988,13 @@
     "lastActive": 1,
     "passTail": 2,
     "prefer": {
-      "type": "StraightFlush",
-      "mainRank": "9"
+      "type": "Straight",
+      "mainRank": "10"
     },
     "over": {
       "type": "Pass"
     },
-    "note": "同花顺管A2345",
+    "note": "678910杂花顺管A2345",
     "previousCards": [
       [
         "A",
@@ -1003,17 +1003,17 @@
       ],
       [
         "2",
-        "S",
+        "H",
         0
       ],
       [
         "3",
-        "S",
+        "D",
         0
       ],
       [
         "4",
-        "S",
+        "C",
         0
       ],
       [
@@ -1040,7 +1040,7 @@
       "type": "Single",
       "mainRank": "8"
     },
-    "note": "445566三连对"
+    "note": "教纲推断：调出445566三连对首发"
   },
   {
     "caseNumber": 38,

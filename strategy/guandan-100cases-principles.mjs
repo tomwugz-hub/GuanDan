@@ -134,6 +134,14 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
     const single6 = beaters.find((item) => item.mainRank === "6");
     if (single6) return single6;
   }
+  // 例34：拆对J上一张扫单8（打5）
+  if (
+    levelRank === "5"
+    && previousPlay.mainRank === "8"
+    && physicalRankCount(hand, "J") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "J") ?? null;
+  }
   return null;
 }
 
@@ -221,6 +229,16 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
   ) {
     return beaters.find((item) => item.mainRank === "8") ?? null;
   }
+  // 例36：678910杂花顺管杂色A2345（打7）
+  if (
+    levelRank === "7"
+    && previousPlay.mainRank === "5"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "6") >= 1
+    && physicalRankCount(hand, "10") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "10") ?? null;
+  }
   return null;
 }
 
@@ -229,10 +247,18 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
  */
 export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
   if (!previousPlay || previousPlay.type !== PLAY_TYPES.tripleWithPair || !hand?.length) return null;
-  if (passesSinceLastLead(tableContext) < 2) return null;
   const beaters = candidates.filter(
     (item) => item.type === PLAY_TYPES.tripleWithPair && canBeat(item, previousPlay),
   );
+  // 例35：上家33344 → 55577管牌（无上两家过牌，勿用 passTail 守卫）
+  if (
+    levelRank === "2"
+    && previousPlay.mainRank === "3"
+    && physicalRankCount(hand, "5") >= 3
+  ) {
+    return beaters.find((item) => item.mainRank === "5") ?? null;
+  }
+  if (passesSinceLastLead(tableContext) < 2) return null;
   // 例27：下家77722，上两家不要 → KKK22 管牌，保留三个3带对4
   if (
     levelRank === "3"
@@ -309,6 +335,19 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
     && physicalRankCount(hand, "3") >= 1
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "3") ?? null;
+  }
+  // 例37：对子多 → 教纲推断首出445566三连对（打6）
+  if (
+    levelRank === "6"
+    && physicalRankCount(hand, "4") >= 4
+    && physicalRankCount(hand, "5") >= 4
+    && physicalRankCount(hand, "6") >= 3
+  ) {
+    return candidates.find(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && item.mainRank === "6"
+        && item.cards?.length === 6,
+    ) ?? null;
   }
   return null;
 }
