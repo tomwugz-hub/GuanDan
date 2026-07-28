@@ -104,7 +104,7 @@ import {
 } from "./lead-mode.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
-import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100OpeningLead } from "./guandan-100cases-principles.mjs";
+import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100OpeningLead } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -2084,6 +2084,15 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
   }
 
   if (previousPlay.type === PLAY_TYPES.pair) {
+    const c100Pair = pickC100MustBeatPairBeater(hand, levelRank, previousPlay, candidates, beatCtx);
+    if (c100Pair) {
+      return {
+        top: { candidate: c100Pair, score: -850, reasons: ["【C100-B1】顺过对5管小对，不宜拆四4/大炸"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
     const pairBeaters = candidates.filter(
       (item) => item.type === PLAY_TYPES.pair && canBeat(item, previousPlay),
     );

@@ -138,6 +138,25 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
 }
 
 /**
+ * 百例须压对子 Top1 快路径（例28：顺过对5管对3，勿拆四4/勿轻易炸9）。
+ */
+export function pickC100MustBeatPairBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.pair || !hand?.length) return null;
+  const beaters = candidates.filter(
+    (item) => item.type === PLAY_TYPES.pair && canBeat(item, previousPlay),
+  );
+  if (
+    levelRank === "2"
+    && previousPlay.mainRank === "3"
+    && physicalRankCount(hand, "5") >= 2
+    && physicalRankCount(hand, "7") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "5") ?? null;
+  }
+  return null;
+}
+
+/**
  * 百例须压连对 Top1 快路径（例6/17 末家负责制：连对管连对，不拆四炸）。
  */
 export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
