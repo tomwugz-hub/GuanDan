@@ -25,6 +25,7 @@ import {
   shouldReserveStraightFlushForSmallCards,
   shouldReservePureBombEarly,
   shouldYieldPassAfterPartnerLeadOnOpponentBomb,
+  shouldPreferPassForHeavyHandRoutineTripleWithPair,
 } from "../principles.mjs";
 import { breaksStrategicStraightFlush } from "./structure.mjs";
 import { generateBasicCandidates } from "../../engine/generate-candidates.mjs";
@@ -237,6 +238,20 @@ export function opponentPressureAdjustment(candidate, previousPlay, tableContext
       }
     }
     const actionableRegular = tableContext.hasActionableRegularWinner === true;
+    if (
+      previousPlay?.type === PLAY_TYPES.tripleWithPair
+      && shouldPreferPassForHeavyHandRoutineTripleWithPair(
+        tableContext,
+        resolveScoringHand(tableContext),
+        previousPlay,
+        levelRankFrom(tableContext),
+      )
+    ) {
+      return {
+        score: -5400,
+        reasons: ["【P4】对手中小三带二，手牌仍多宜过牌等循环"],
+      };
+    }
     if (actionableRegular) {
       let passPenalty = previousPlay?.type === PLAY_TYPES.single
         ? 10_800 + danger * 500

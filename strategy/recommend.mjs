@@ -64,10 +64,13 @@ import {
   hasStandalonePureBombBeater,
   shouldReserveBombForHighProbeSingle,
   shouldYieldPassAfterPartnerLeadOnOpponentBomb,
+  isPressingRoutineNonBomb,
+  shouldReserveBombForHeavyHand,
 } from "./principles.mjs";
 import {
   shouldReserveWildForSmallRoutineBeat,
   shouldReserveStructureForRoutineBeat,
+  shouldPreferPassForHeavyHandRoutineTripleWithPair,
   hasStructureSafeRoutineBeater,
   isWildLowValueBeat,
 } from "./wild-doctrine.mjs";
@@ -324,7 +327,12 @@ export function hasActionableRegularBeater(candidates, hand, levelRank, tableCon
     && shouldReserveWildForSmallRoutineBeat(tableContext, hand, previousPlay, levelRank);
   const reserveStructure = mustBeat
     && shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank);
+  const preferPassRoutineTwp = mustBeat
+    && shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, hand, previousPlay, levelRank);
   const preferredGroups = tableContext.preferredGroups ?? null;
+  if (preferPassRoutineTwp) {
+    return false;
+  }
   if (reserveStructure && !hasStructureSafeRoutineBeater(candidates, previousPlay, hand, levelRank, preferredGroups)) {
     // lite 裁池后候选表可能无散对 A；仍须从手牌识别整对够压，供 P4 拦截同花顺
     if (previousPlay?.type === PLAY_TYPES.pair
@@ -599,6 +607,15 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
         const fourAHeld = (physicalByRank.get("A") ?? []).length >= 4;
         if (usesAce || !fourAHeld || pairRank !== "2") continue;
       }
+      if (
+        breaksStrategicPremiumForTripleWithPair(
+          play,
+          hand,
+          levelRank,
+          tableContext.preferredGroups ?? [],
+          tableContext,
+        )
+      ) continue;
       if (straightFlushCardSets.length > 0 && !preservesPhysicalStraightFlush(play)) continue;
       if (
         hasExplicitColumnLayout
@@ -624,9 +641,19 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
     return true;
   })];
   const actionable = structurallySafe.filter(
-    (item) => directNaturalKeys.has((item.cards ?? []).map(physicalCardKey).sort().join("|"))
-      || !twpCtx.hasStructureSafeBeater
-      || isActionableCandidate(item, hand, levelRank, tableContext),
+    (item) => (
+      !breaksStrategicPremiumForTripleWithPair(
+        item,
+        hand,
+        levelRank,
+        tableContext.preferredGroups ?? [],
+        tableContext,
+      )
+      && (
+        directNaturalKeys.has((item.cards ?? []).map(physicalCardKey).sort().join("|"))
+        || isActionableCandidate(item, hand, levelRank, tableContext)
+      )
+    ),
   );
   if (actionable.length === 0) return null;
   const pool = actionable.filter((item) => !usesWild(item));
@@ -1822,6 +1849,25 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
           blockedCandidates: [],
         };
       }
+      if (hasActionableRegularBeater(candidates, hand, levelRank, beatCtx)) {
+        return null;
+      }
+      if (
+        isPressingRoutineNonBomb(previousPlay, beatCtx)
+        && shouldReserveBombForHeavyHand(beatCtx, hand.length)
+        && (beatCtx.danger ?? 0) < 3
+      ) {
+        return {
+          top: {
+            candidate: classifyPlay([], levelRank),
+            score: 0,
+            reasons: ["【P12】对手普通牌型，手牌仍多不必动炸，过牌等循环"],
+          },
+          pool: [],
+          scoringContext: beatCtx,
+          blockedCandidates: [],
+        };
+      }
       const minBomb = pickRobotMinPower(bombsOnly);
       if (minBomb) {
         return {
@@ -2080,6 +2126,13 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
   }
 
   if (previousPlay.type === PLAY_TYPES.tripleWithPair) {
+    const reserveRoutineTwp = shouldPreferPassForHeavyHandRoutineTripleWithPair(
+      beatCtx,
+      hand,
+      previousPlay,
+      levelRank,
+    );
+    if (reserveRoutineTwp) return null;
     const c100Twp = pickC100MustBeatTripleWithPairBeater(
       hand, levelRank, previousPlay, candidates, beatCtx,
     );
@@ -2302,6 +2355,12 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
       c100TwpEarly
       && precomputedTwpBeatCtx.opponentActive
       && !precomputedTwpBeatCtx.partnerOwnsTrick
+      && !shouldPreferPassForHeavyHandRoutineTripleWithPair(
+        precomputedTwpBeatCtx,
+        hand,
+        previousPlay,
+        levelRank,
+      )
     ) {
       return {
         top: {
@@ -2332,6 +2391,12 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
       precomputedSafeTripleWithPair
       && precomputedTwpBeatCtx.opponentActive
       && !precomputedTwpBeatCtx.partnerOwnsTrick
+      && !shouldPreferPassForHeavyHandRoutineTripleWithPair(
+        precomputedTwpBeatCtx,
+        hand,
+        previousPlay,
+        levelRank,
+      )
     ) {
       return {
         top: {
@@ -2536,7 +2601,15 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
           candidates,
           beatCtx,
         );
-        if (c100Twp) {
+        if (
+          c100Twp
+          && !shouldPreferPassForHeavyHandRoutineTripleWithPair(
+            beatCtx,
+            hand,
+            previousPlay,
+            levelRank,
+          )
+        ) {
           return {
             top: {
               candidate: c100Twp,
@@ -2553,7 +2626,20 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         }
         const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, beatCtx);
         const minTwp = pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand, beatCtx);
-        if (minTwp) {
+        const reserveRoutineTwp = shouldPreferPassForHeavyHandRoutineTripleWithPair(
+          beatCtx,
+          hand,
+          previousPlay,
+          levelRank,
+        );
+        const twpBreaksPremium = minTwp && breaksStrategicPremiumForTripleWithPair(
+          minTwp,
+          hand,
+          levelRank,
+          beatCtx.preferredGroups ?? [],
+          beatCtx,
+        );
+        if (minTwp && !twpBreaksPremium && !reserveRoutineTwp && twpCtx.hasStructureSafeBeater) {
           return {
             top: {
               candidate: minTwp,

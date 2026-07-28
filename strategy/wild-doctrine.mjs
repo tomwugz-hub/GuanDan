@@ -53,6 +53,16 @@ export function shouldReserveWildForSmallRoutineBeat(tableContext, hand, previou
   return true;
 }
 
+/** 须压对手中小三带二且手牌仍多：宜过牌等循环，不宜拆结构/耗逢人配/动大三带二 */
+export function shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, hand, previousPlay, levelRank = null) {
+  if (!shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank)) return false;
+  if (previousPlay?.type !== PLAY_TYPES.tripleWithPair) return false;
+  const resolvedLevel = levelRank ?? tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
+  if (compareRanks(previousPlay.mainRank, "9", resolvedLevel) > 0) return false;
+  const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
+  return resolvedHand.length >= 15;
+}
+
 /** 须压对手常规牌型且手牌仍多：不宜拆顺子/同花顺/四炸等同型压牌 */
 export function shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank = null) {
   if (tableContext.isOpening || tableContext.partnerOwnsTrick || tableContext.isFinishingPlay) return false;

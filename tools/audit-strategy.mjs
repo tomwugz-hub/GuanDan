@@ -12,7 +12,7 @@ import { createInitialGameState, isGameOver } from "../engine/game-state.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { runAutoGame } from "../coach/auto-game.mjs";
 import { playRecommendedTurn } from "../coach/robot-player.mjs";
-import { resolveActionableRegularWinner, trimCandidatesForScoring } from "../strategy/recommend.mjs";
+import { resolveActionableRegularWinner, trimCandidatesForScoring, hasActionableRegularBeater } from "../strategy/recommend.mjs";
 import { classifyPlay } from "../engine/classify-play.mjs";
 import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
 import { buildStrategicGroups } from "../strategy/strategic-groups.mjs";
@@ -82,7 +82,7 @@ function buildLiteAuditCandidates(hand, levelRank) {
   return candidates;
 }
 
-function buildAuditContext(state, hand, { liteAudit = false } = {}) {
+function buildAuditContext(state, hand, { liteAudit = false, doctrineAwareRegular = false } = {}) {
   const previousPlay = state.lastActivePlay;
   const preferredGroups = liteAudit
     ? []
@@ -110,7 +110,9 @@ function buildAuditContext(state, hand, { liteAudit = false } = {}) {
     preferredGroups,
   }, candidates, hand, state.levelRank);
   tableContext._candidates = candidates;
-  const hasActionableRegularWinner = liteAudit
+  const hasActionableRegularWinner = doctrineAwareRegular
+    ? hasActionableRegularBeater(candidates, hand, state.levelRank, tableContext)
+    : liteAudit
     ? candidates.some((candidate) => candidate.type !== PLAY_TYPES.pass
       && !BOMB_TYPES.has(candidate.type)
       && (!previousPlay || previousPlay.type === PLAY_TYPES.pass || canBeat(candidate, previousPlay)))
@@ -242,7 +244,10 @@ function runAuditedGame({ seed, levelRank, maxTurns, mlFusionMode, mode = "full"
     const before = state;
     const hand = before.players[before.currentPlayerIndex].hand;
     const diagnosticAudit = mode === "lite" || mode === "perf";
-    const auditCtx = buildAuditContext(before, hand, { liteAudit: diagnosticAudit });
+    const auditCtx = buildAuditContext(before, hand, {
+      liteAudit: mode === "lite",
+      doctrineAwareRegular: mode === "perf",
+    });
     let recommendation;
     try {
       const turnStarted = performance.now();

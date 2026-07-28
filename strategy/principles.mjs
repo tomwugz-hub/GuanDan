@@ -488,6 +488,7 @@ import {
   shouldReserveWildForSmallRoutineBeat,
   shouldReserveStructureForRoutineBeat,
   shouldReserveStructureForSmallTripleBeat,
+  shouldPreferPassForHeavyHandRoutineTripleWithPair,
   hasNaturalRegularBeater,
   hasStructureSafeRoutineBeater,
   hasStructureSafeTripleBeater,
@@ -497,6 +498,7 @@ export {
   shouldReserveWildForSmallRoutineBeat,
   shouldReserveStructureForRoutineBeat,
   shouldReserveStructureForSmallTripleBeat,
+  shouldPreferPassForHeavyHandRoutineTripleWithPair,
   hasNaturalRegularBeater,
   hasStructureSafeRoutineBeater,
   hasStructureSafeTripleBeater,
@@ -551,6 +553,9 @@ export function shouldVetoPassWithRegularBeater(tableContext, hand, previousPlay
   if (shouldReserveWildForSmallRoutineBeat(tableContext, resolvedHand, previousPlay, resolvedLevel)) {
     const pool = tableContext._candidates ?? [];
     if (!hasNaturalRegularBeater(pool, previousPlay, resolvedLevel, resolvedHand, resolvedLevel)) return false;
+  }
+  if (shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, resolvedHand, previousPlay, resolvedLevel)) {
+    return false;
   }
   if (shouldReserveStructureForRoutineBeat(tableContext, resolvedHand, previousPlay, resolvedLevel)) {
     const pool = tableContext._candidates ?? [];
@@ -3347,6 +3352,19 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
       principles.push("P1");
       hasStrongConflict = true;
     }
+  }
+
+  // —— P4：须压中小三带二且手牌仍多 → 宜过牌等循环 ——
+  if (
+    isFollowingOpponentTripleWithPair(previousPlay, levelRank, tableContext)
+    && candidate.type === PLAY_TYPES.tripleWithPair
+    && resolvedHand.length > 0
+    && shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, resolvedHand, previousPlay, levelRank)
+  ) {
+    score += 8200;
+    reasons.push("【P4】对手中小三带二，手牌仍多宜过牌等循环");
+    principles.push("P4");
+    hasStrongConflict = true;
   }
 
   // —— P4 延伸：须压钢板拆同花顺，池中有同花顺可压 ——
