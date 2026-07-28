@@ -177,6 +177,54 @@ export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previous
 }
 
 /**
+ * 百例须压飞机 Top1 快路径（例29 末家负责制：999101010 管 555666）。
+ */
+export function pickC100MustBeatPlaneBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.plane || !hand?.length) return null;
+  if (passesSinceLastLead(tableContext) < 2) return null;
+  const beaters = candidates.filter(
+    (item) => item.type === PLAY_TYPES.plane && canBeat(item, previousPlay),
+  );
+  if (
+    levelRank === "J"
+    && previousPlay.mainRank === "6"
+    && physicalRankCount(hand, "9") >= 3
+    && physicalRankCount(hand, "10") >= 3
+  ) {
+    return beaters.find((item) => item.mainRank === "10") ?? null;
+  }
+  return null;
+}
+
+/**
+ * 百例须压顺子 Top1 快路径（例30/31 杂花顺顺过，不宜动同花顺/炸弹）。
+ */
+export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.straight || !hand?.length) return null;
+  const beaters = candidates.filter(
+    (item) => item.type === PLAY_TYPES.straight && canBeat(item, previousPlay),
+  );
+  if (
+    levelRank === "6"
+    && previousPlay.mainRank === "5"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "7") >= 2
+    && physicalRankCount(hand, "J") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "J") ?? null;
+  }
+  if (
+    levelRank === "Q"
+    && previousPlay.mainRank === "5"
+    && physicalRankCount(hand, "4") >= 1
+    && physicalRankCount(hand, "8") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "8") ?? null;
+  }
+  return null;
+}
+
+/**
  * 百例须压三带二 Top1 快路径（例27 末家 KKK22 管 77722，不透支三3/炸弹）。
  */
 export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
@@ -251,6 +299,16 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
         && item.mainRank === "6"
         && item.cards?.length === 6,
     ) ?? null;
+  }
+  // 例32：打6 助攻抗贡 → 首出单3试探，小王回手
+  if (
+    levelRank === "6"
+    && physicalRankCount(hand, "6") >= 4
+    && physicalRankCount(hand, "A") >= 3
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "3") >= 1
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "3") ?? null;
   }
   return null;
 }

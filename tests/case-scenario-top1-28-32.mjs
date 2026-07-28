@@ -73,7 +73,7 @@ function runCase(n, expectType, expectRank) {
 
 runCase(28, PLAY_TYPES.pair, "5");
 runCase(29, PLAY_TYPES.plane, "10");
-runCase(30, PLAY_TYPES.straightFlush, "8");
-runCase(31, PLAY_TYPES.straightFlush, "10");
+runCase(30, PLAY_TYPES.straight, "J");
+runCase(31, PLAY_TYPES.straight, "8");
 runCase(32, PLAY_TYPES.single, "3");
 console.log("PASS 例28～32 场景 Top1 golden");

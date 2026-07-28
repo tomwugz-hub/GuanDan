@@ -104,7 +104,7 @@ import {
 } from "./lead-mode.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
-import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100OpeningLead } from "./guandan-100cases-principles.mjs";
+import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100OpeningLead } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -2169,6 +2169,34 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     }
   }
 
+  if (previousPlay.type === PLAY_TYPES.plane) {
+    const c100Plane = pickC100MustBeatPlaneBeater(
+      hand, levelRank, previousPlay, candidates, beatCtx,
+    );
+    if (c100Plane) {
+      return {
+        top: { candidate: c100Plane, score: -850, reasons: ["【C100-M1】百例飞机管牌，拆炸重组同花顺"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
+  if (previousPlay.type === PLAY_TYPES.straight) {
+    const c100Straight = pickC100MustBeatStraightBeater(
+      hand, levelRank, previousPlay, candidates, beatCtx,
+    );
+    if (c100Straight) {
+      return {
+        top: { candidate: c100Straight, score: -850, reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   return null;
 }
 
@@ -2522,6 +2550,15 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         beatCtx.opponentActive
         && !beatCtx.partnerOwnsTrick
       ) {
+        const c100Pair = pickC100MustBeatPairBeater(hand, levelRank, previousPlay, candidates, beatCtx);
+        if (c100Pair) {
+          return {
+            top: { candidate: c100Pair, score: -850, reasons: ["【C100-B1】顺过对5管小对，不宜拆四4/大炸"] },
+            pool: [],
+            scoringContext: beatCtx,
+            blockedCandidates: [],
+          };
+        }
         const pairCtx = analyzeMustBeatPairContext(hand, levelRank, previousPlay, beatCtx);
         const reserveStructure = shouldReserveStructureForRoutineBeat(beatCtx, hand, previousPlay, levelRank);
         const minPair = pickMinWholePairBeater(pairCtx, { reserveStructure, hand, levelRank, tableContext: beatCtx });
@@ -2588,6 +2625,41 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
               blockedCandidates: [],
             };
           }
+        }
+      }
+    }
+    if (
+      !robotFast
+      && (previousPlay.type === PLAY_TYPES.plane || previousPlay.type === PLAY_TYPES.straight)
+    ) {
+      const beatCtx = enrichScoringContext(
+        { ...ctx, previousPlay, _candidates: candidates },
+        candidates,
+        hand,
+        levelRank,
+      );
+      if (beatCtx.opponentActive && !beatCtx.partnerOwnsTrick) {
+        const c100Plane = previousPlay.type === PLAY_TYPES.plane
+          ? pickC100MustBeatPlaneBeater(hand, levelRank, previousPlay, candidates, beatCtx)
+          : null;
+        if (c100Plane) {
+          return {
+            top: { candidate: c100Plane, score: -850, reasons: ["【C100-M1】百例飞机管牌，拆炸重组同花顺"] },
+            pool: [],
+            scoringContext: beatCtx,
+            blockedCandidates: [],
+          };
+        }
+        const c100Straight = previousPlay.type === PLAY_TYPES.straight
+          ? pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, candidates, beatCtx)
+          : null;
+        if (c100Straight) {
+          return {
+            top: { candidate: c100Straight, score: -850, reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"] },
+            pool: [],
+            scoringContext: beatCtx,
+            blockedCandidates: [],
+          };
         }
       }
     }
