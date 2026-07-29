@@ -142,6 +142,22 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
   ) {
     return beaters.find((item) => item.mainRank === "J") ?? null;
   }
+  // 例41：拆对10扫单8（打A），不宜回A/上9
+  if (
+    levelRank === "A"
+    && previousPlay.mainRank === "8"
+    && physicalRankCount(hand, "10") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "10") ?? null;
+  }
+  // 例39：上家单2 → 立即顺过单3（打4）
+  if (
+    levelRank === "4"
+    && previousPlay.mainRank === "2"
+    && physicalRankCount(hand, "3") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "3") ?? null;
+  }
   return null;
 }
 
