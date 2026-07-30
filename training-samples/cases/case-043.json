@@ -1,0 +1,380 @@
+{
+  "$schema": "guandan-100case/v0-draft",
+  "id": "case-043",
+  "caseNumber": 43,
+  "title": "此牌打2。可重组",
+  "source": {
+    "pdf": "training-samples/掼蛋实战100例.pdf",
+    "pdfPage": 82,
+    "assets": {
+      "pagePng": "assets/guandan-100cases/case-043-page82.png",
+      "handCropPng": "assets/guandan-100cases/case-043-hand-crop.png"
+    }
+  },
+  "game": {
+    "levelRank": "2",
+    "wildCard": {
+      "rank": "2",
+      "suit": "H",
+      "label": "红桃2（逢人配）"
+    }
+  },
+  "needsUserVerify": false,
+  "userVerified": true,
+  "verify": {
+    "revision": "v1-final",
+    "confidence": "high",
+    "userAnchors": [
+      {
+        "index": 1,
+        "label": "黑桃7"
+      },
+      {
+        "index": 2,
+        "label": "黑桃Q"
+      },
+      {
+        "index": 3,
+        "label": "梅花Q"
+      },
+      {
+        "index": 4,
+        "label": "黑桃2"
+      },
+      {
+        "index": 5,
+        "label": "黑桃2（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 6,
+        "label": "小王",
+        "role": "SJ"
+      },
+      {
+        "index": 7,
+        "label": "大王",
+        "role": "BJ"
+      },
+      {
+        "index": 8,
+        "label": "大王",
+        "deckIndex": 1,
+        "role": "BJ"
+      },
+      {
+        "index": 9,
+        "label": "梅花6"
+      },
+      {
+        "index": 10,
+        "label": "梅花6（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 11,
+        "label": "黑桃6"
+      },
+      {
+        "index": 12,
+        "label": "红桃6"
+      },
+      {
+        "index": 13,
+        "label": "方片6"
+      },
+      {
+        "index": 14,
+        "label": "方片10"
+      },
+      {
+        "index": 15,
+        "label": "黑桃10"
+      },
+      {
+        "index": 16,
+        "label": "方片10（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 17,
+        "label": "梅花10"
+      },
+      {
+        "index": 18,
+        "label": "方片J"
+      },
+      {
+        "index": 19,
+        "label": "梅花10（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 20,
+        "label": "黑桃9"
+      },
+      {
+        "index": 21,
+        "label": "红桃8"
+      },
+      {
+        "index": 22,
+        "label": "红桃7"
+      },
+      {
+        "index": 23,
+        "label": "红桃5"
+      },
+      {
+        "index": 24,
+        "label": "黑桃4"
+      },
+      {
+        "index": 25,
+        "label": "红桃3"
+      },
+      {
+        "index": 26,
+        "label": "方片2"
+      },
+      {
+        "index": 27,
+        "label": "方片A"
+      }
+    ],
+    "userPrompt": "v1-final 全部27张已用户确认"
+  },
+  "hand": {
+    "expectedCount": 27,
+    "cards": [
+      {
+        "index": 1,
+        "rank": "7",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃7",
+        "anchor": true
+      },
+      {
+        "index": 2,
+        "rank": "Q",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃Q",
+        "anchor": true
+      },
+      {
+        "index": 3,
+        "rank": "Q",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花Q",
+        "anchor": true
+      },
+      {
+        "index": 4,
+        "rank": "2",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃2",
+        "anchor": true
+      },
+      {
+        "index": 5,
+        "rank": "2",
+        "suit": "spades",
+        "deckIndex": 1,
+        "label": "黑桃2（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 6,
+        "rank": "SJ",
+        "suit": "joker",
+        "deckIndex": 0,
+        "label": "小王",
+        "anchor": true
+      },
+      {
+        "index": 7,
+        "rank": "BJ",
+        "suit": "joker",
+        "deckIndex": 0,
+        "label": "大王",
+        "anchor": true
+      },
+      {
+        "index": 8,
+        "rank": "BJ",
+        "suit": "joker",
+        "deckIndex": 1,
+        "label": "大王",
+        "anchor": true
+      },
+      {
+        "index": 9,
+        "rank": "6",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花6",
+        "anchor": true
+      },
+      {
+        "index": 10,
+        "rank": "6",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花6（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 11,
+        "rank": "6",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃6",
+        "anchor": true
+      },
+      {
+        "index": 12,
+        "rank": "6",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃6",
+        "anchor": true
+      },
+      {
+        "index": 13,
+        "rank": "6",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片6",
+        "anchor": true
+      },
+      {
+        "index": 14,
+        "rank": "10",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片10",
+        "anchor": true
+      },
+      {
+        "index": 15,
+        "rank": "10",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃10",
+        "anchor": true
+      },
+      {
+        "index": 16,
+        "rank": "10",
+        "suit": "diamonds",
+        "deckIndex": 1,
+        "label": "方片10（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 17,
+        "rank": "10",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花10",
+        "anchor": true
+      },
+      {
+        "index": 18,
+        "rank": "J",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片J",
+        "anchor": true
+      },
+      {
+        "index": 19,
+        "rank": "10",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花10（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 20,
+        "rank": "9",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃9",
+        "anchor": true
+      },
+      {
+        "index": 21,
+        "rank": "8",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃8",
+        "anchor": true
+      },
+      {
+        "index": 22,
+        "rank": "7",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃7",
+        "anchor": true
+      },
+      {
+        "index": 23,
+        "rank": "5",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃5",
+        "anchor": true
+      },
+      {
+        "index": 24,
+        "rank": "4",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃4",
+        "anchor": true
+      },
+      {
+        "index": 25,
+        "rank": "3",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃3",
+        "anchor": true
+      },
+      {
+        "index": 26,
+        "rank": "2",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片2",
+        "anchor": true
+      },
+      {
+        "index": 27,
+        "rank": "A",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片A",
+        "anchor": true
+      }
+    ]
+  },
+  "narrative": {
+    "summary": "此牌打2。可重组 出34567 78910J 两套杂花顺 , 预留222QQ。 虹然炸弹变小了 , 但解决了单张7的问题 , 保 证了 “ 牌型多元化 “。还有一个小技巧 : 若上家 单牌过10了 , 直接上小王而不顺过 A, 免得对 手方上小王 , 自己被迫上大王而形成一大一小 鸳鸭王。"
+  },
+  "doctrineRefs": [
+    {
+      "id": "C100-G1"
+    }
+  ],
+  "goldenCaseNote": "tests/golden-case-100cases.mjs #7-043 已同步 v1-final 手牌（C100-G1）",
+  "authorPlan": {
+    "summary": "此牌打2。可重组 出34567 78910J 两套杂花顺 , 预留222QQ。 虹然炸弹变小了 , 但解决了单张7的问题 , 保 证了 “ 牌型多元化 “。还有一个小技巧 : 若上家 单牌过10了 , 直接上小王而不顺过 A, 免得对 手方上小王 , 自己被迫上大王而形成一大一小 鸳鸭王。"
+  }
+}

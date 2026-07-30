@@ -55,16 +55,26 @@ const CASE_TAIL_BLEED = [
   /^要齐心协力/, // 例41 → 二打一讲义
   /^在搭档顺过或管封/, // 例42 → 弱牌配合讲义
   /^掼蛋很能体现一个人的风格/, // 例42 → 风格泛论
+  /^蛋的初期/, // 例43 → 风格判断讲义
+  /^想想\s*,\s*出牌的目的是抢先走/, // 例44 → 弱牌配合讲义
+  /^2\.\s*中性牌/, // 例44 → 首发讲义
+  /^3\.\s*牌弱首友/, // 例45 → 弱牌首发讲义
+  /^甚至炸弹立牌后再出对子/, // 例46 → 对子示强讲义
+  /^补充强调一下/, // 例46 → 累赘牌讲义
+  /^需要说明一下/, // 例47 → 报牌残局讲义
+  /^比如\s*,\s*上家出个小单牌/, // 例47 → 第二家讲义
 ];
 
 /** 跨页战例中的页脚 OCR 噪声（非正文） */
 function isPageFooterNoise(line) {
   const t = String(line ?? "").trim();
-  return /掼蛋实战100例技巧分析\s*\|/.test(t) || /^cy Ea/.test(t);
+  return /掼蛋实战100例技巧分析\s*\|/.test(t)
+    || /例技巧分析\s*\|\s*\d+/.test(t)
+    || /^cy Ea/.test(t);
 }
 
 /** 战例正文跨页续写（页眉不截断） */
-const CROSS_PAGE_CASES = new Set([26, 34]);
+const CROSS_PAGE_CASES = new Set([26, 34, 47]);
 
 /** 是否进入「第一讲入门」等通用讲义行（非本例战例正文） */
 export function isTeachingBoundaryLine(line) {

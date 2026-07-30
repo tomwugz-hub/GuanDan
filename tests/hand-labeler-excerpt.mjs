@@ -1,5 +1,5 @@
 /**
- * 书摘截取：例 1～42 不得混入通用讲义
+ * 书摘截取：例 1～47 不得混入通用讲义
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -69,6 +69,14 @@ const TEACHING_BLEED = [
   /^要齐心协力/,
   /^在搭档顺过或管封/,
   /^掼蛋很能体现一个人的风格/,
+  /^蛋的初期/,
+  /^想想\s*,\s*出牌的目的是抢先走/,
+  /^2\.\s*中性牌/,
+  /^3\.\s*牌弱首友/,
+  /^甚至炸弹立牌后再出对子/,
+  /^补充强调一下/,
+  /^需要说明一下/,
+  /^比如\s*,\s*上家出个小单牌/,
   /掼蛋实战100例技巧分析\s*\|/,
 ];
 
@@ -115,10 +123,15 @@ const EXPECTED_START = {
   40: "此牌打10",
   41: "此牌打 A",
   42: "此牌打3",
+  43: "此牌打2",
+  44: "此牌打6",
+  45: "此牌打3",
+  46: "此牌打2",
+  47: "此牌打4",
 };
 
 let failed = 0;
-for (let n = 1; n <= 42; n += 1) {
+for (let n = 1; n <= 47; n += 1) {
   const excerpt = extractCaseExcerpt(cleaned, n);
   if (!excerpt.startsWith(EXPECTED_START[n])) {
     console.error(`FAIL 例${n}: 书摘应以「${EXPECTED_START[n]}」开头，得：`, excerpt.slice(0, 60));
@@ -135,9 +148,9 @@ for (let n = 1; n <= 42; n += 1) {
 }
 
 if (failed > 0) process.exit(1);
-console.log("hand-labeler-excerpt: 例1～42 书摘边界全部通过");
+console.log("hand-labeler-excerpt: 例1～47 书摘边界全部通过");
 
-for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]) {
+for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47]) {
   const id = `case-${String(n).padStart(3, "0")}.json`;
   const data = JSON.parse(fs.readFileSync(path.join(root, "training-samples", "cases", id), "utf8"));
   const expected = extractCaseExcerpt(cleaned, n);

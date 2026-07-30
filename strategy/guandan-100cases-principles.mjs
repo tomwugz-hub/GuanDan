@@ -158,6 +158,14 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
   ) {
     return beaters.find((item) => item.mainRank === "3") ?? null;
   }
+  // 例44：顺J管单7（打6，上家进贡后首发单7）
+  if (
+    levelRank === "6"
+    && previousPlay.mainRank === "7"
+    && physicalRankCount(hand, "J") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "J") ?? null;
+  }
   return null;
 }
 
@@ -196,6 +204,16 @@ export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previous
     && physicalRankCount(hand, "6") >= 4
   ) {
     return beaters.find((item) => item.mainRank === "8") ?? null;
+  }
+  // 例46：末家 QQKKAA 管 445566（打2）
+  if (
+    levelRank === "2"
+    && previousPlay.mainRank === "6"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "Q") >= 2
+    && physicalRankCount(hand, "K") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "A") ?? null;
   }
   return null;
 }
@@ -254,6 +272,15 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
     && physicalRankCount(hand, "10") >= 1
   ) {
     return beaters.find((item) => item.mainRank === "10") ?? null;
+  }
+  // 例45：8910JQ杂花顺管45678（打3，末家负责制）
+  if (
+    levelRank === "3"
+    && previousPlay.mainRank === "8"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "Q") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "Q") ?? null;
   }
   return null;
 }
