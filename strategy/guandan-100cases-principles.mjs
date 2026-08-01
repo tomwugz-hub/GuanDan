@@ -282,6 +282,24 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
   ) {
     return beaters.find((item) => item.mainRank === "Q") ?? null;
   }
+  // 例50：10JQKA 管 678910杂花顺（打3，末家负责制）
+  if (
+    levelRank === "3"
+    && previousPlay.mainRank === "10"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "A") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "A") ?? null;
+  }
+  // 例52：678910 管 23456，不宜开8炸（打Q）
+  if (
+    levelRank === "Q"
+    && previousPlay.mainRank === "6"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "8") >= 4
+  ) {
+    return beaters.find((item) => item.mainRank === "10") ?? null;
+  }
   return null;
 }
 
@@ -309,6 +327,16 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
     && physicalRankCount(hand, "K") >= 3
   ) {
     return beaters.find((item) => item.mainRank === "K") ?? null;
+  }
+  // 例49：末家 AAA66 管 666带对（打8）
+  if (
+    levelRank === "8"
+    && previousPlay.mainRank === "6"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "A") >= 3
+    && physicalRankCount(hand, "6") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "A") ?? null;
   }
   return null;
 }
@@ -882,7 +910,7 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     reasons.push("【C100-B1】小跟牌有常规管法，不宜轻易大炸浪费牌力");
   }
 
-  // —— C100-B1 结构可组同花顺时勿裸炸占路（例13/42/48 structure） ——
+  // —— C100-B1 结构可组同花顺时勿裸炸占路（例13/42/48/51 structure） ——
   if (
     tableContext.isOpening
     && candidate.type === PLAY_TYPES.bomb
@@ -890,6 +918,32 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
   ) {
     score += 3800;
     reasons.push("【C100-B1】有顺组/同花顺路线，炸弹宜保留");
+  }
+  // 例51：56789(红配)梅花同花顺优于保8炸（打4）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "4"
+    && candidate.type === PLAY_TYPES.straightFlush
+    && candidate.mainRank === "9"
+    && physicalRankCount(hand, "8") >= 5
+  ) {
+    score -= 12_000;
+    reasons.push("【C100-G1】56789同花顺减单优于保8炸");
+  }
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "4"
+    && candidate.type === PLAY_TYPES.bomb
+    && candidate.mainRank === "8"
+    && physicalRankCount(hand, "8") >= 5
+    && (tableContext._candidates ?? []).some(
+      (item) => item.type === PLAY_TYPES.straightFlush && item.mainRank === "9",
+    )
+  ) {
+    score += 8000;
+    reasons.push("【C100-G1】有56789同花顺路线不宜裸保8炸");
   }
 
   // —— C100-M1 末家负责制：两家不要末家须管（例6/45/62） ——

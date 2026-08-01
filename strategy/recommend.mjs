@@ -2373,7 +2373,7 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
   }
   let precomputedSafeTripleWithPair = null;
   let precomputedTwpBeatCtx = null;
-  if (litePath && previousPlay?.type === PLAY_TYPES.tripleWithPair && !robotFast) {
+  if (previousPlay?.type === PLAY_TYPES.tripleWithPair && !robotFast) {
     precomputedTwpBeatCtx = enrichScoringContext(
       { ...ctx, previousPlay, _candidates: [] },
       [],
@@ -2407,6 +2407,7 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         blockedCandidates: [],
       };
     }
+    if (litePath) {
     precomputedSafeTripleWithPair = pickMinStructureSafeTripleWithPairBeater(
         {
           beaters: [],
@@ -2440,6 +2441,40 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         },
         pool: [],
         scoringContext: precomputedTwpBeatCtx,
+        blockedCandidates: [],
+      };
+    }
+    }
+  }
+
+  if (previousPlay?.type === PLAY_TYPES.straight && !robotFast) {
+    const straightBeatCtx = enrichScoringContext(
+      { ...ctx, previousPlay, _candidates: [] },
+      [],
+      hand,
+      levelRank,
+    );
+    const straightPool = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true });
+    const c100StraightEarly = pickC100MustBeatStraightBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      straightPool,
+      straightBeatCtx,
+    );
+    if (
+      c100StraightEarly
+      && straightBeatCtx.opponentActive
+      && !straightBeatCtx.partnerOwnsTrick
+    ) {
+      return {
+        top: {
+          candidate: c100StraightEarly,
+          score: -850,
+          reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"],
+        },
+        pool: [],
+        scoringContext: straightBeatCtx,
         blockedCandidates: [],
       };
     }
