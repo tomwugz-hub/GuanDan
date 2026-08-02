@@ -26,7 +26,7 @@ node tests/smoke.mjs
 | 54 | 106 | 4 | structure | Pair/A > Straight/A |
 | 55 | 108 | 2 | follow 34567 | Straight/Q（8910JQ，非 SF） |
 | 56 | 109 | 6 | follow 55522 | TWP/Q（带对9） |
-| 57 | 111 | A | open | Straight/5（A2345） |
+| 57 | 112 | A | open | Straight/5（A2345） |
 
 ## 书摘边界（重点）
 
