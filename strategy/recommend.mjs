@@ -104,7 +104,7 @@ import {
 } from "./lead-mode.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
-import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100OpeningLead } from "./guandan-100cases-principles.mjs";
+import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -1996,6 +1996,52 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     }
   }
 
+  // C100 顺子可无候选池直建：例52/60 先于 generateBasicCandidates
+  if (
+    previousPlay.type === PLAY_TYPES.straight
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100StraightEarly = pickC100MustBeatStraightBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      [],
+      yieldCtx,
+    );
+    if (c100StraightEarly) {
+      return {
+        top: { candidate: c100StraightEarly, score: -850, reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
+  // C100 裸三张可无候选池直建：例58 先于 generateBasicCandidates
+  if (
+    previousPlay.type === PLAY_TYPES.triple
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100TripleEarly = pickC100MustBeatTripleBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      [],
+      yieldCtx,
+    );
+    if (c100TripleEarly) {
+      return {
+        top: { candidate: c100TripleEarly, score: -850, reasons: ["【C100-G1】百例裸三张管牌重组"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   const candidates = generateBasicCandidates(hand, levelRank, previousPlay, {
     lite: true,
     abortCheck: () => isPastDeadline(tableContext),
@@ -2157,6 +2203,32 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     }
   }
 
+  if (previousPlay.type === PLAY_TYPES.triple) {
+    const c100Triple = pickC100MustBeatTripleBeater(
+      hand, levelRank, previousPlay, candidates, beatCtx,
+    );
+    if (c100Triple) {
+      return {
+        top: { candidate: c100Triple, score: -850, reasons: ["【C100-G1】百例裸三张管牌重组"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+    const tripleBeaters = candidates.filter(
+      (item) => item.type === PLAY_TYPES.triple && canBeat(item, previousPlay),
+    );
+    const minTriple = pickMin(tripleBeaters);
+    if (minTriple) {
+      return {
+        top: { candidate: minTriple, score: -800, reasons: ["三张管牌"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   if (previousPlay.type === PLAY_TYPES.tripleWithPair) {
     const c100Twp = pickC100MustBeatTripleWithPairBeater(
       hand, levelRank, previousPlay, candidates, beatCtx,
@@ -2246,6 +2318,21 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
   if (robotFast) {
     const robotQuick = tryRobotQuickRecommendations(hand, levelRank, previousPlay, ctx);
     if (robotQuick) return robotQuick;
+  }
+  if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) {
+    const c100OpenDirect = pickC100OpeningLeadDirect(hand, levelRank);
+    if (c100OpenDirect) {
+      return {
+        top: {
+          candidate: c100OpenDirect,
+          score: -900,
+          reasons: ["【C100-G1】百例首发直建快路径"],
+        },
+        pool: [],
+        scoringContext: { ...ctx, isOpening: true, leadMode: "fresh-open" },
+        blockedCandidates: [],
+      };
+    }
   }
   if ((!previousPlay || previousPlay.type === PLAY_TYPES.pass) && isPureFullBombHand(hand, levelRank)) {
     const bomb = classifyPlay(hand, levelRank);
@@ -2682,7 +2769,9 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
     }
     if (
       !robotFast
-      && (previousPlay.type === PLAY_TYPES.plane || previousPlay.type === PLAY_TYPES.straight)
+      && (previousPlay.type === PLAY_TYPES.plane
+        || previousPlay.type === PLAY_TYPES.straight
+        || previousPlay.type === PLAY_TYPES.triple)
     ) {
       const beatCtx = enrichScoringContext(
         { ...ctx, previousPlay, _candidates: candidates },
@@ -2691,6 +2780,17 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         levelRank,
       );
       if (beatCtx.opponentActive && !beatCtx.partnerOwnsTrick) {
+        const c100Triple = previousPlay.type === PLAY_TYPES.triple
+          ? pickC100MustBeatTripleBeater(hand, levelRank, previousPlay, candidates, beatCtx)
+          : null;
+        if (c100Triple) {
+          return {
+            top: { candidate: c100Triple, score: -850, reasons: ["【C100-G1】百例裸三张管牌重组"] },
+            pool: [],
+            scoringContext: beatCtx,
+            blockedCandidates: [],
+          };
+        }
         const c100Plane = previousPlay.type === PLAY_TYPES.plane
           ? pickC100MustBeatPlaneBeater(hand, levelRank, previousPlay, candidates, beatCtx)
           : null;

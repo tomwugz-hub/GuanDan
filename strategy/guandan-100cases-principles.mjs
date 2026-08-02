@@ -44,6 +44,38 @@ function buildTripleWithPairFromHand(hand, tripleRank, pairRank, levelRank) {
   return play?.type === PLAY_TYPES.tripleWithPair ? play : null;
 }
 
+/** 从手牌直组裸三张，避免 lite 候选池遗漏 */
+function buildTripleFromHand(hand, tripleRank, levelRank) {
+  const triple = hand.filter((card) => card.rank === tripleRank).slice(0, 3);
+  if (triple.length < 3) return null;
+  const play = classifyPlay(triple, levelRank);
+  return play?.type === PLAY_TYPES.triple ? play : null;
+}
+
+/** 从手牌直组对子，避免 lite 冷启全量枚举 */
+function buildPairFromHand(hand, pairRank, levelRank) {
+  const pair = hand.filter((card) => card.rank === pairRank).slice(0, 2);
+  if (pair.length < 2) return null;
+  const play = classifyPlay(pair, levelRank);
+  return play?.type === PLAY_TYPES.pair ? play : null;
+}
+
+/** 从手牌直组杂花顺（mainRank 为顺子最高牌点） */
+function buildStraightFromHandByMainRank(hand, mainRank, levelRank) {
+  const order = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const idx = order.indexOf(mainRank);
+  if (idx < 4) return null;
+  const ranks = order.slice(idx - 4, idx + 1);
+  const picked = [];
+  for (const rank of ranks) {
+    const card = hand.find((item) => item.rank === rank && !picked.includes(item));
+    if (!card) return null;
+    picked.push(card);
+  }
+  const play = classifyPlay(picked, levelRank);
+  return play?.type === PLAY_TYPES.straight ? play : null;
+}
+
 function routeDiversity(hand, levelRank) {
   const groups = buildStrategicGroups(hand, levelRank);
   const types = new Set(groups.map((g) => g.play?.type).filter(Boolean));
@@ -203,6 +235,31 @@ export function pickC100MustBeatPairBeater(hand, levelRank, previousPlay, candid
 }
 
 /**
+ * 百例须压裸三张 Top1 快路径（例58：三个A管三个K，拆炸立牌重组）。
+ */
+export function pickC100MustBeatTripleBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
+  if (!previousPlay || previousPlay.type !== PLAY_TYPES.triple || !hand?.length) return null;
+  const beaters = candidates.filter(
+    (item) => item.type === PLAY_TYPES.triple && canBeat(item, previousPlay),
+  );
+  const pickOrBuild = (mainRank) => {
+    const fromPool = beaters.find((item) => item.mainRank === mainRank) ?? null;
+    if (fromPool) return fromPool;
+    const built = buildTripleFromHand(hand, mainRank, levelRank);
+    return built && canBeat(built, previousPlay) ? built : null;
+  };
+  // 例58：上家三个K → 三个A（打9，拆四A炸弹立牌）
+  if (
+    levelRank === "9"
+    && previousPlay.mainRank === "K"
+    && physicalRankCount(hand, "A") >= 3
+  ) {
+    return pickOrBuild("A");
+  }
+  return null;
+}
+
+/**
  * 百例须压连对 Top1 快路径（例6/17 末家负责制：连对管连对，不拆四炸）。
  */
 export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previousPlay, candidates = [], tableContext = {}) {
@@ -314,14 +371,17 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
   ) {
     return beaters.find((item) => item.mainRank === "A") ?? null;
   }
-  // 例52：678910 管 23456，不宜开8炸（打Q）
+  // 例52/60：678910 管 23456，不宜开8炸（打Q；含非末家跟压）
   if (
     levelRank === "Q"
     && previousPlay.mainRank === "6"
-    && passesSinceLastLead(tableContext) >= 2
     && physicalRankCount(hand, "8") >= 4
   ) {
-    return beaters.find((item) => item.mainRank === "10") ?? null;
+    return beaters.find((item) => item.mainRank === "10")
+      ?? (() => {
+        const built = buildStraightFromHandByMainRank(hand, "10", levelRank);
+        return built && canBeat(built, previousPlay) ? built : null;
+      })();
   }
   return null;
 }
@@ -473,6 +533,32 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
         && item.mainRank === "6"
         && item.cards?.length === 6,
     ) ?? null;
+  }
+  // 例61：打4弱牌双红配 → 首出对2试探（C100-O1）
+  if (
+    levelRank === "4"
+    && physicalRankCount(hand, "2") >= 2
+    && physicalRankCount(hand, "10") >= 5
+    && physicalRankCount(hand, "4") >= 2
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.pair && item.mainRank === "2") ?? null;
+  }
+  return null;
+}
+
+/**
+ * 百例首发直建快路径（无候选池）：避免 lite 冷启 generateBasicCandidates 超时。
+ */
+export function pickC100OpeningLeadDirect(hand, levelRank) {
+  if (!hand?.length) return null;
+  // 例61：打4弱牌双红配 → 首出对2试探（C100-O1）
+  if (
+    levelRank === "4"
+    && physicalRankCount(hand, "2") >= 2
+    && physicalRankCount(hand, "10") >= 5
+    && physicalRankCount(hand, "4") >= 2
+  ) {
+    return buildPairFromHand(hand, "2", levelRank);
   }
   return null;
 }
@@ -984,6 +1070,39 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
   ) {
     score -= 12_000;
     reasons.push("【C100-G1】56789同花顺减单优于保8炸");
+  }
+  // 例59：45678杂花顺发挥红配，优于裸保四9炸（打2）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "2"
+    && physicalRankCount(hand, "9") >= 4
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "8") {
+      score -= 5800;
+      reasons.push("【C100-G1】45678杂花顺发挥红配");
+    }
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "9") {
+      score += 5800;
+      reasons.push("【C100-G1】有顺组路线不宜裸保9炸");
+    }
+  }
+  // 例62：炸弹归位四8/四9，宜四8优于四9（打6）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "6"
+    && physicalRankCount(hand, "8") >= 4
+    && physicalRankCount(hand, "9") >= 4
+    && candidate.type === PLAY_TYPES.bomb
+  ) {
+    if (candidate.mainRank === "8") {
+      score -= 1200;
+      reasons.push("【C100-B1】炸弹归位宜四8优于四9");
+    } else if (candidate.mainRank === "9") {
+      score += 1200;
+      reasons.push("【C100-B1】炸弹归位宜四8优于四9");
+    }
   }
   // 例54：关键时刻拆10JQKA，保对A送搭档（打4）
   if (
