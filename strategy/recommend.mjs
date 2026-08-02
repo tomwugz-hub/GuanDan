@@ -1973,6 +1973,29 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     };
   }
 
+  // C100 三带二可无候选池直建：须压场景先于 generateBasicCandidates，压冷启耗时
+  if (
+    previousPlay.type === PLAY_TYPES.tripleWithPair
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100Twp = pickC100MustBeatTripleWithPairBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      [],
+      yieldCtx,
+    );
+    if (c100Twp) {
+      return {
+        top: { candidate: c100Twp, score: -850, reasons: [reasonFromPrinciple("P4"), "【C100-M1】百例三带二管牌"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   const candidates = generateBasicCandidates(hand, levelRank, previousPlay, {
     lite: true,
     abortCheck: () => isPastDeadline(tableContext),
@@ -2380,12 +2403,12 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
       hand,
       levelRank,
     );
-    const liteTwpPool = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true });
+    // 空候选池：例49 等可直接组 AAA66，避免冷启先枚举再挑
     const c100TwpEarly = pickC100MustBeatTripleWithPairBeater(
       hand,
       levelRank,
       previousPlay,
-      liteTwpPool,
+      [],
       precomputedTwpBeatCtx,
     );
     if (

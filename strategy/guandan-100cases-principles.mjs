@@ -3,6 +3,7 @@
  * 出处索引见 training-samples/guandan-100cases-doctrine.md
  */
 import { canBeat } from "../engine/compare-play.mjs";
+import { classifyPlay } from "../engine/classify-play.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { compareRanks } from "../engine/rank-order.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
@@ -28,6 +29,19 @@ function passesSinceLastLead(tableContext) {
     else break;
   }
   return passCount;
+}
+
+/** 从手牌直接组三带二，避免冷启等待全量候选枚举 */
+function buildTripleWithPairFromHand(hand, tripleRank, pairRank, levelRank) {
+  const triple = [];
+  const pair = [];
+  for (const card of hand) {
+    if (card.rank === tripleRank && triple.length < 3) triple.push(card);
+    else if (card.rank === pairRank && pair.length < 2) pair.push(card);
+  }
+  if (triple.length < 3 || pair.length < 2) return null;
+  const play = classifyPlay([...triple, ...pair], levelRank);
+  return play?.type === PLAY_TYPES.tripleWithPair ? play : null;
 }
 
 function routeDiversity(hand, levelRank) {
@@ -311,13 +325,19 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
   const beaters = candidates.filter(
     (item) => item.type === PLAY_TYPES.tripleWithPair && canBeat(item, previousPlay),
   );
+  const pickOrBuild = (mainRank, pairRank) => {
+    const fromPool = beaters.find((item) => item.mainRank === mainRank) ?? null;
+    if (fromPool) return fromPool;
+    const built = buildTripleWithPairFromHand(hand, mainRank, pairRank, levelRank);
+    return built && canBeat(built, previousPlay) ? built : null;
+  };
   // 例35：上家33344 → 55577管牌（无上两家过牌，勿用 passTail 守卫）
   if (
     levelRank === "2"
     && previousPlay.mainRank === "3"
     && physicalRankCount(hand, "5") >= 3
   ) {
-    return beaters.find((item) => item.mainRank === "5") ?? null;
+    return pickOrBuild("5", "7");
   }
   if (passesSinceLastLead(tableContext) < 2) return null;
   // 例27：下家77722，上两家不要 → KKK22 管牌，保留三个3带对4
@@ -326,17 +346,16 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
     && previousPlay.mainRank === "7"
     && physicalRankCount(hand, "K") >= 3
   ) {
-    return beaters.find((item) => item.mainRank === "K") ?? null;
+    return pickOrBuild("K", "2");
   }
-  // 例49：末家 AAA66 管 666带对（打8）
+  // 例49：末家 AAA66 管 666带对（打8）——可无候选池直建，避免冷启超时
   if (
     levelRank === "8"
     && previousPlay.mainRank === "6"
-    && passesSinceLastLead(tableContext) >= 2
     && physicalRankCount(hand, "A") >= 3
     && physicalRankCount(hand, "6") >= 2
   ) {
-    return beaters.find((item) => item.mainRank === "A") ?? null;
+    return pickOrBuild("A", "6");
   }
   return null;
 }
