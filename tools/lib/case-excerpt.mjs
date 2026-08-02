@@ -68,6 +68,13 @@ const CASE_TAIL_BLEED = [
   /^惜力\s*,\s*却是太浪费/, // 例50 → 第二家讲义
   /^二家和第三家没表态/, // 例51 → 表态讲义
   /^什么是\s*[“"]\s*牌弱打上家/, // 例52 → 牌弱打上家讲义
+  /^注意\s*,\s*掼蛋抢头游/, // 例53 → 抢头游讲义
+  /^同样\s*,\s*还是要分析牌力/, // 例54 → 抢头游讲义
+  /^他所需要的牌型/, // 例55 → 送牌讲义
+  /^比如\s*,\s*对家首发出了一张3/, // 例55 → 单牌配合讲义
+  /^让给对家上/, // 例56 → 让过讲义
+  /^还有很多牌友的错误打法/, // 例56 → 错误打法讲义
+  /^怨\s*,\s*我没有对子呀/, // 例57 → 拆三头讲义
 ];
 
 /** 跨页战例中的页脚 OCR 噪声（非正文） */
@@ -75,11 +82,15 @@ function isPageFooterNoise(line) {
   const t = String(line ?? "").trim();
   return /掼蛋实战100例技巧分析\s*\|/.test(t)
     || /例技巧分析\s*\|\s*\d+/.test(t)
+    || /例技\d*分析\s*\|/.test(t)
+    || /^ofa\)/.test(t)
+    || /^\d{3}\s/.test(t)
+    || t.includes("第六讲")
     || /^cy Ea/.test(t);
 }
 
 /** 战例正文跨页续写（页眉不截断） */
-const CROSS_PAGE_CASES = new Set([26, 34, 47, 48, 51]);
+const CROSS_PAGE_CASES = new Set([26, 34, 47, 48, 51, 53, 54]);
 
 /** 是否进入「第一讲入门」等通用讲义行（非本例战例正文） */
 export function isTeachingBoundaryLine(line) {
@@ -112,7 +123,8 @@ export function extractCaseExcerpt(text, caseNum) {
       break;
     }
     if (isPageFooterNoise(line)) continue;
-    if (line.trim()) parts.push(line.trim());
+    const cleaned = line.trim().replace(/^xt\s+/i, "");
+    if (cleaned) parts.push(cleaned);
   }
 
   return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 500);

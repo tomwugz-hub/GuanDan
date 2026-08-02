@@ -296,6 +296,15 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
   ) {
     return beaters.find((item) => item.mainRank === "Q") ?? null;
   }
+  // 例55：上家34567 → 8910JQ杂花顺立牌，不宜留K炸（打2）
+  if (
+    levelRank === "2"
+    && previousPlay.mainRank === "7"
+    && physicalRankCount(hand, "8") >= 1
+    && physicalRankCount(hand, "Q") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "Q") ?? null;
+  }
   // 例50：10JQKA 管 678910杂花顺（打3，末家负责制）
   if (
     levelRank === "3"
@@ -339,6 +348,24 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
   ) {
     return pickOrBuild("5", "7");
   }
+  // 例53：上家三个10带对 → AAA22（打8；搭档已过、非末家两过）
+  if (
+    levelRank === "8"
+    && previousPlay.mainRank === "10"
+    && physicalRankCount(hand, "A") >= 3
+    && physicalRankCount(hand, "2") >= 2
+  ) {
+    return pickOrBuild("A", "2");
+  }
+  // 例56：上家55522 → QQQ带对9（打6）
+  if (
+    levelRank === "6"
+    && previousPlay.mainRank === "5"
+    && physicalRankCount(hand, "Q") >= 3
+    && physicalRankCount(hand, "9") >= 2
+  ) {
+    return pickOrBuild("Q", "9");
+  }
   if (passesSinceLastLead(tableContext) < 2) return null;
   // 例27：下家77722，上两家不要 → KKK22 管牌，保留三个3带对4
   if (
@@ -378,6 +405,14 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
     && physicalRankCount(hand, "Q") >= 4
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "6") ?? null;
+  }
+  // 例57：打 A → 首出 A2345 杂花顺减手
+  if (
+    levelRank === "A"
+    && physicalRankCount(hand, "2") >= 1
+    && physicalRankCount(hand, "5") >= 1
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "5") ?? null;
   }
   // 例19：打 A 强牌 → 首出单2
   if (
@@ -949,6 +984,22 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
   ) {
     score -= 12_000;
     reasons.push("【C100-G1】56789同花顺减单优于保8炸");
+  }
+  // 例54：关键时刻拆10JQKA，保对A送搭档（打4）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "4"
+    && physicalRankCount(hand, "A") >= 2
+  ) {
+    if (candidate.type === PLAY_TYPES.pair && candidate.mainRank === "A") {
+      score -= 8000;
+      reasons.push("【C100-O1】关键时刻保对A送搭档");
+    }
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "A") {
+      score += 6000;
+      reasons.push("【C100-O1】关键时刻宜拆10JQKA保对A，不宜整出顶A顺");
+    }
   }
   if (
     tableContext.isOpening

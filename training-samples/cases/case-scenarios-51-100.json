@@ -1,0 +1,1357 @@
+[
+  {
+    "caseNumber": 51,
+    "levelRank": "4",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "note": "56789(红配)梅花同花顺优于保8炸"
+  },
+  {
+    "caseNumber": 51,
+    "levelRank": "4",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "45678杂花顺管34567",
+    "previousCards": [
+      [
+        "3",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 52,
+    "levelRank": "Q",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "10"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "note": "678910顺管23456优于开8炸",
+    "previousCards": [
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "H",
+        0
+      ],
+      [
+        "4",
+        "C",
+        0
+      ],
+      [
+        "5",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 53,
+    "levelRank": "8",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "TripleWithPair",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "AAA22管1010+对",
+    "previousCards": [
+      [
+        "10",
+        "S",
+        0
+      ],
+      [
+        "10",
+        "H",
+        0
+      ],
+      [
+        "10",
+        "C",
+        0
+      ],
+      [
+        "K",
+        "S",
+        0
+      ],
+      [
+        "K",
+        "H",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 54,
+    "levelRank": "4",
+    "doctrine": "C100-O1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Pair",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Straight",
+      "mainRank": "A"
+    },
+    "note": "关键时刻拆10JQKA保对A送搭档"
+  },
+  {
+    "caseNumber": 55,
+    "levelRank": "2",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "Q"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "K"
+    },
+    "note": "8910JQ杂花顺立牌优于留K炸",
+    "previousCards": [
+      [
+        "3",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 56,
+    "levelRank": "6",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "TripleWithPair",
+      "mainRank": "Q"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "过55522宜QQQ带对9",
+    "previousCards": [
+      [
+        "5",
+        "S",
+        0
+      ],
+      [
+        "5",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "2",
+        "H",
+        1
+      ],
+      [
+        "2",
+        "C",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 57,
+    "levelRank": "A",
+    "doctrine": "C100-G1",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "5"
+    },
+    "over": {
+      "type": "Pair",
+      "mainRank": "K"
+    },
+    "note": "A2345杂花顺减手"
+  },
+  {
+    "caseNumber": 58,
+    "levelRank": "9",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Triple",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "三个A管三个K",
+    "previousCards": [
+      [
+        "K",
+        "S",
+        0
+      ],
+      [
+        "K",
+        "H",
+        0
+      ],
+      [
+        "K",
+        "C",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 59,
+    "levelRank": "2",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "9"
+    },
+    "note": "45678杂花顺发挥红配"
+  },
+  {
+    "caseNumber": 60,
+    "levelRank": "Q",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "10"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "678910管23456",
+    "previousCards": [
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "H",
+        0
+      ],
+      [
+        "4",
+        "C",
+        0
+      ],
+      [
+        "5",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 61,
+    "levelRank": "4",
+    "doctrine": "C100-O1",
+    "kind": "open",
+    "profile": {
+      "role": "support",
+      "score": 4
+    },
+    "prefer": {
+      "type": "Pair",
+      "mainRank": "2"
+    },
+    "over": {
+      "type": "TripleWithPair",
+      "mainRank": "A"
+    },
+    "note": "牌力不强宜对2试探"
+  },
+  {
+    "caseNumber": 62,
+    "levelRank": "6",
+    "doctrine": "C100-B1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "9"
+    },
+    "note": "四个8/9炸弹归位"
+  },
+  {
+    "caseNumber": 63,
+    "levelRank": "2",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "5"
+    },
+    "over": {
+      "type": "Straight",
+      "mainRank": "5"
+    },
+    "note": "A2(红配)345同花顺多元化"
+  },
+  {
+    "caseNumber": 64,
+    "levelRank": "6",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "7"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "同花顺/顺子管A2345",
+    "previousCards": [
+      [
+        "A",
+        "S",
+        0
+      ],
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "S",
+        0
+      ],
+      [
+        "5",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 65,
+    "levelRank": "9",
+    "doctrine": "C100-O2",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 12
+    },
+    "prefer": {
+      "type": "Single",
+      "mainRank": "3"
+    },
+    "over": {
+      "type": "TripleWithPair",
+      "mainRank": "8"
+    },
+    "note": "88822结构下宜单3试探"
+  },
+  {
+    "caseNumber": 66,
+    "levelRank": "6",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Triple",
+      "mainRank": "2"
+    },
+    "over": {
+      "type": "Straight",
+      "mainRank": "7"
+    },
+    "note": "先出三个2再三A回手"
+  },
+  {
+    "caseNumber": 67,
+    "levelRank": "A",
+    "doctrine": "C100-B1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "5"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "note": "拆8炸组A234(红配)5减单"
+  },
+  {
+    "caseNumber": 68,
+    "levelRank": "4",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "ConsecutivePairs",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "778899管556677",
+    "previousCards": [
+      [
+        "5",
+        "S",
+        0
+      ],
+      [
+        "5",
+        "H",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ],
+      [
+        "7",
+        "C",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 69,
+    "levelRank": "A",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "10"
+    },
+    "note": "大黑桃同花顺优于4个10炸"
+  },
+  {
+    "caseNumber": 70,
+    "levelRank": "J",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "J"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "4"
+    },
+    "note": "8910JQ杂花顺路线"
+  },
+  {
+    "caseNumber": 71,
+    "levelRank": "10",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺子管34567",
+    "previousCards": [
+      [
+        "3",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 72,
+    "levelRank": "A",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺子管23456",
+    "previousCards": [
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "H",
+        0
+      ],
+      [
+        "4",
+        "C",
+        0
+      ],
+      [
+        "5",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 73,
+    "levelRank": "6",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Single",
+      "mainRank": "6"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺6管单5",
+    "previousCards": [
+      [
+        "5",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 74,
+    "levelRank": "K",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "6"
+    },
+    "note": "杂花顺路线"
+  },
+  {
+    "caseNumber": 75,
+    "levelRank": "A",
+    "doctrine": "C100-O1",
+    "kind": "open",
+    "profile": {
+      "role": "support",
+      "score": 4
+    },
+    "prefer": {
+      "type": "ConsecutivePairs",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Single",
+      "mainRank": "2"
+    },
+    "note": "弱牌宜连对探路"
+  },
+  {
+    "caseNumber": 76,
+    "levelRank": "3",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "K"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺子管678910",
+    "previousCards": [
+      [
+        "6",
+        "H",
+        0
+      ],
+      [
+        "7",
+        "D",
+        0
+      ],
+      [
+        "8",
+        "H",
+        0
+      ],
+      [
+        "9",
+        "S",
+        0
+      ],
+      [
+        "10",
+        "C",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 77,
+    "levelRank": "8",
+    "doctrine": "C100-O2",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Single",
+      "mainRank": "3"
+    },
+    "over": {
+      "type": "Pair",
+      "mainRank": "4"
+    },
+    "note": "首发单张试探"
+  },
+  {
+    "caseNumber": 78,
+    "levelRank": "4",
+    "doctrine": "C100-G1",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "7"
+    },
+    "over": {
+      "type": "Single",
+      "mainRank": "3"
+    },
+    "note": "23456减手首发"
+  },
+  {
+    "caseNumber": 79,
+    "levelRank": "2",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Bomb",
+      "mainRank": "3"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "用3炸管222",
+    "previousCards": [
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "2",
+        "H",
+        0
+      ],
+      [
+        "2",
+        "C",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 80,
+    "levelRank": "5",
+    "doctrine": "C100-G1",
+    "kind": "open",
+    "profile": {
+      "role": "neutral",
+      "score": 10
+    },
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "5"
+    },
+    "over": {
+      "type": "Single",
+      "mainRank": "A"
+    },
+    "note": "A2345有打有收"
+  },
+  {
+    "caseNumber": 81,
+    "levelRank": "A",
+    "doctrine": "C100-O2",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Single",
+      "mainRank": "3"
+    },
+    "over": {
+      "type": "Pair",
+      "mainRank": "3"
+    },
+    "note": "强牌宜小单探路"
+  },
+  {
+    "caseNumber": 82,
+    "levelRank": "A",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺子管23456",
+    "previousCards": [
+      [
+        "2",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "H",
+        0
+      ],
+      [
+        "4",
+        "C",
+        0
+      ],
+      [
+        "5",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 83,
+    "levelRank": "Q",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "Q"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "2"
+    },
+    "note": "同花顺优于小炸"
+  },
+  {
+    "caseNumber": 84,
+    "levelRank": "9",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Bomb",
+      "mainRank": "5"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "末家须管778899连对",
+    "previousCards": [
+      [
+        "7",
+        "S",
+        0
+      ],
+      [
+        "7",
+        "H",
+        0
+      ],
+      [
+        "8",
+        "C",
+        0
+      ],
+      [
+        "8",
+        "D",
+        0
+      ],
+      [
+        "9",
+        "S",
+        0
+      ],
+      [
+        "9",
+        "H",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 86,
+    "levelRank": "2",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "TripleWithPair",
+      "mainRank": "K"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "KKK带对管666带对",
+    "previousCards": [
+      [
+        "6",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "6",
+        "S",
+        0
+      ],
+      [
+        "3",
+        "H",
+        0
+      ],
+      [
+        "3",
+        "D",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 87,
+    "levelRank": "3",
+    "doctrine": "C100-G1",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "6"
+    },
+    "over": {
+      "type": "TripleWithPair",
+      "mainRank": "3"
+    },
+    "note": "23456减手"
+  },
+  {
+    "caseNumber": 89,
+    "levelRank": "6",
+    "doctrine": "C100-O1",
+    "kind": "open",
+    "profile": {
+      "role": "support",
+      "score": 4
+    },
+    "prefer": {
+      "type": "Pair",
+      "mainRank": "3"
+    },
+    "over": {
+      "type": "Single",
+      "mainRank": "3"
+    },
+    "note": "弱牌宜对子探路"
+  },
+  {
+    "caseNumber": 90,
+    "levelRank": "7",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "8炸管对7",
+    "previousCards": [
+      [
+        "7",
+        "H",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 91,
+    "levelRank": "2",
+    "doctrine": "C100-G1",
+    "kind": "open",
+    "profile": {
+      "role": "main-attack",
+      "score": 14
+    },
+    "prefer": {
+      "type": "Triple",
+      "mainRank": "2"
+    },
+    "over": {
+      "type": "Straight",
+      "mainRank": "7"
+    },
+    "note": "222逼封首发"
+  },
+  {
+    "caseNumber": 92,
+    "levelRank": "J",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Single",
+      "mainRank": "6"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺6管单5",
+    "previousCards": [
+      [
+        "5",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 93,
+    "levelRank": "9",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "9"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "note": "红配组同花顺"
+  },
+  {
+    "caseNumber": 94,
+    "levelRank": "2",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "7"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "7"
+    },
+    "note": "34567杂花顺"
+  },
+  {
+    "caseNumber": 95,
+    "levelRank": "8",
+    "doctrine": "C100-G1",
+    "kind": "follow",
+    "lastActive": 1,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "K"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "顺子顺过34567",
+    "previousCards": [
+      [
+        "3",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "D",
+        0
+      ],
+      [
+        "7",
+        "S",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 96,
+    "levelRank": "2",
+    "doctrine": "C100-B1",
+    "kind": "structure",
+    "prefer": {
+      "type": "Bomb",
+      "mainRank": "8"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "2"
+    },
+    "note": "多炸路线"
+  },
+  {
+    "caseNumber": 97,
+    "levelRank": "2",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "ConsecutivePairs",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "QQKKAA管445566",
+    "previousCards": [
+      [
+        "4",
+        "S",
+        0
+      ],
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "D",
+        0
+      ],
+      [
+        "5",
+        "C",
+        0
+      ],
+      [
+        "6",
+        "H",
+        0
+      ],
+      [
+        "6",
+        "H",
+        1
+      ]
+    ]
+  },
+  {
+    "caseNumber": 98,
+    "levelRank": "A",
+    "doctrine": "C100-G1",
+    "kind": "structure",
+    "prefer": {
+      "type": "StraightFlush",
+      "mainRank": "J"
+    },
+    "over": {
+      "type": "Bomb",
+      "mainRank": "K"
+    },
+    "note": "同花顺减单"
+  },
+  {
+    "caseNumber": 99,
+    "levelRank": "A",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "Q"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "8910JQ管45678",
+    "previousCards": [
+      [
+        "4",
+        "H",
+        0
+      ],
+      [
+        "5",
+        "S",
+        0
+      ],
+      [
+        "6",
+        "C",
+        0
+      ],
+      [
+        "7",
+        "D",
+        0
+      ],
+      [
+        "8",
+        "H",
+        0
+      ]
+    ]
+  },
+  {
+    "caseNumber": 100,
+    "levelRank": "9",
+    "doctrine": "C100-M1",
+    "kind": "follow",
+    "lastActive": 1,
+    "passTail": 2,
+    "prefer": {
+      "type": "Straight",
+      "mainRank": "A"
+    },
+    "over": {
+      "type": "Pass"
+    },
+    "note": "10JQKA管678910",
+    "previousCards": [
+      [
+        "6",
+        "H",
+        0
+      ],
+      [
+        "7",
+        "D",
+        0
+      ],
+      [
+        "8",
+        "H",
+        0
+      ],
+      [
+        "9",
+        "S",
+        0
+      ],
+      [
+        "10",
+        "C",
+        0
+      ]
+    ]
+  }
+]
