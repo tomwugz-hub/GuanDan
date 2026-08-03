@@ -2019,7 +2019,7 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     }
   }
 
-  // C100 顺子可无候选池直建：例52/60 先于 generateBasicCandidates
+  // C100 顺子可无候选池直建：例52/60/71/72 先于 generateBasicCandidates
   if (
     previousPlay.type === PLAY_TYPES.straight
     && yieldCtx.opponentActive
@@ -2029,12 +2029,35 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
       hand,
       levelRank,
       previousPlay,
-      [],
+      generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, maxCandidates: 12 }),
       yieldCtx,
     );
     if (c100StraightEarly) {
       return {
         top: { candidate: c100StraightEarly, score: -850, reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
+  // C100 连对可无候选池直建：例68 先于 generateBasicCandidates（末家负责制，避免 SF 跑道误拦）
+  if (
+    previousPlay.type === PLAY_TYPES.consecutivePairs
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100CpEarly = pickC100MustBeatConsecutivePairsBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, maxCandidates: 12 }),
+      yieldCtx,
+    );
+    if (c100CpEarly) {
+      return {
+        top: { candidate: c100CpEarly, score: -850, reasons: ["【C100-M1】百例连对管牌，末家负责制"] },
         pool: [],
         scoringContext: yieldCtx,
         blockedCandidates: [],

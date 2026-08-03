@@ -286,6 +286,16 @@ export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previous
   ) {
     return beaters.find((item) => item.mainRank === "A") ?? null;
   }
+  // 例68：778899 管 556677（打4，末家负责制）
+  if (
+    levelRank === "4"
+    && previousPlay.mainRank === "7"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "8") >= 2
+    && physicalRankCount(hand, "9") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "9") ?? null;
+  }
   return null;
 }
 
@@ -380,6 +390,33 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
     return beaters.find((item) => item.mainRank === "10")
       ?? (() => {
         const built = buildStraightFromHandByMainRank(hand, "10", levelRank);
+        return built && canBeat(built, previousPlay) ? built : null;
+      })();
+  }
+  // 例71：56789 管 34567（打10，末家负责制）
+  if (
+    levelRank === "10"
+    && previousPlay.mainRank === "7"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "9") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "9")
+      ?? (() => {
+        const built = buildStraightFromHandByMainRank(hand, "9", levelRank);
+        return built && canBeat(built, previousPlay) ? built : null;
+      })();
+  }
+  // 例72：56789 管 23456（打A，末家负责制；逢人配可代9）
+  if (
+    levelRank === "A"
+    && previousPlay.mainRank === "6"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "8") >= 1
+    && physicalRankCount(hand, "7") >= 1
+  ) {
+    return beaters.find((item) => item.mainRank === "9")
+      ?? (() => {
+        const built = buildStraightFromHandByMainRank(hand, "9", levelRank);
         return built && canBeat(built, previousPlay) ? built : null;
       })();
   }
@@ -1181,6 +1218,40 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
       reasons.push("【C100-B1】有小单宜拆8炸组顺减手");
     }
   }
+  // 例69：10JQKA大黑桃同花顺优于四10炸（打A）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "A"
+    && physicalRankCount(hand, "10") >= 4
+    && physicalRankCount(hand, "2") >= 1
+  ) {
+    if (candidate.type === PLAY_TYPES.straightFlush && candidate.mainRank === "A") {
+      score -= 14_000;
+      reasons.push("【C100-G1】大黑桃同花顺减单优于裸保10炸");
+    }
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "10") {
+      score += 14_000;
+      reasons.push("【C100-G1】有小单2/5宜组大SF而非裸10炸");
+    }
+  }
+  // 例70：8910JQ杂花顺减单优于裸保4炸（打J）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "J"
+    && physicalRankCount(hand, "4") >= 4
+    && physicalRankCount(hand, "8") >= 1
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "J") {
+      score -= 12_000;
+      reasons.push("【C100-G1】8910JQ杂花顺减单优于裸保4炸");
+    }
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "4") {
+      score += 12_000;
+      reasons.push("【C100-G1】单4/5难出宜杂花顺路线");
+    }
+  }
   // 例54：关键时刻拆10JQKA，保对A送搭档（打4）
   if (
     tableContext.isOpening
@@ -1248,6 +1319,73 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     ) {
       score -= 18_000;
       reasons.push("【C100-O1】助攻连对管牌，667788 优于开炸");
+    }
+    // 例68：778899 管 556677（打4，末家负责制）
+    if (
+      previousPlay.type === PLAY_TYPES.consecutivePairs
+      && candidate.type === PLAY_TYPES.consecutivePairs
+      && canBeat(candidate, previousPlay)
+      && levelRank === "4"
+      && previousPlay.mainRank === "7"
+      && candidate.mainRank === "9"
+    ) {
+      score -= 18_000;
+      reasons.push("【C100-M1】末家778899管556677");
+    }
+    if (
+      previousPlay.type === PLAY_TYPES.consecutivePairs
+      && candidate.type === PLAY_TYPES.pass
+      && levelRank === "4"
+      && previousPlay.mainRank === "7"
+      && hasRegularBeater(hand, levelRank, previousPlay, tableContext._candidates)
+    ) {
+      score += 18_000;
+      reasons.push("【C100-M1】末家负责制：778899须管");
+    }
+    // 例71/72：56789 管顺子，不宜过高顺/过低顺
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "10"
+      && previousPlay.mainRank === "7"
+      && candidate.mainRank === "9"
+    ) {
+      score -= 16_000;
+      reasons.push("【C100-M1】56789管34567，预留8910JQ路线");
+    }
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "10"
+      && previousPlay.mainRank === "7"
+      && candidate.mainRank === "10"
+    ) {
+      score += 12_000;
+      reasons.push("【C100-M1】56789管34567，不宜678910");
+    }
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "A"
+      && previousPlay.mainRank === "6"
+      && candidate.mainRank === "9"
+    ) {
+      score -= 16_000;
+      reasons.push("【C100-M1】56789管23456，带走单8");
+    }
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "A"
+      && previousPlay.mainRank === "6"
+      && candidate.mainRank === "7"
+    ) {
+      score += 12_000;
+      reasons.push("【C100-M1】56789管23456，不宜34567");
     }
     if (
       previousPlay.type === PLAY_TYPES.consecutivePairs
