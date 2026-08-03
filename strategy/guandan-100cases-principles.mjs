@@ -180,6 +180,14 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
     const single6 = beaters.find((item) => item.mainRank === "6");
     if (single6) return single6;
   }
+  // 例73：顺6管单5（打6）
+  if (
+    levelRank === "6"
+    && previousPlay.mainRank === "5"
+  ) {
+    const single6 = beaters.find((item) => item.mainRank === "6");
+    if (single6) return single6;
+  }
   // 例34：拆对J上一张扫单8（打5）
   if (
     levelRank === "5"
@@ -420,6 +428,18 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
         return built && canBeat(built, previousPlay) ? built : null;
       })();
   }
+  // 例76：10JQKA 管 678910（打3，末家负责制；红配可成K顶顺）
+  if (
+    levelRank === "3"
+    && previousPlay.mainRank === "10"
+    && passesSinceLastLead(tableContext) >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "K")
+      ?? (() => {
+        const built = buildStraightFromHandByMainRank(hand, "K", levelRank);
+        return built && canBeat(built, previousPlay) ? built : null;
+      })();
+  }
   return null;
 }
 
@@ -510,6 +530,8 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
  */
 export function pickC100OpeningLead(hand, levelRank, candidates = [], tableContext = {}) {
   if (!tableContext.isOpening || (tableContext.leadMode ?? "fresh-open") !== "fresh-open") return null;
+  const profile = tableContext.handProfile;
+  const role = profile?.role ?? "balanced";
   // 例14：打 J，仅三裸 2 → 先出 222 逼封
   if (
     levelRank === "J"
@@ -523,6 +545,20 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
     && physicalRankCount(hand, "Q") >= 4
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "6") ?? null;
+  }
+  // 例75：打A 弱牌抗贡 → 8899101011 连对探路（C100-O1；须先于例57 A2345）
+  if (
+    levelRank === "A"
+    && role === "support"
+    && (profile?.score ?? 8) < 7
+    && physicalRankCount(hand, "8") >= 2
+    && physicalRankCount(hand, "7") >= 2
+  ) {
+    return candidates.find(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && item.mainRank === "8"
+        && item.cards?.length === 6,
+    ) ?? null;
   }
   // 例57：打 A → 首出 A2345 杂花顺减手
   if (
@@ -610,6 +646,14 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "3") ?? null;
   }
+  // 例77：打8 四8结构 → 首发单3试探（C100-O2）
+  if (
+    levelRank === "8"
+    && physicalRankCount(hand, "8") >= 4
+    && physicalRankCount(hand, "3") >= 1
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "3") ?? null;
+  }
   return null;
 }
 
@@ -633,6 +677,18 @@ export function pickC100OpeningLeadDirect(hand, levelRank) {
     && physicalRankCount(hand, "8") >= 3
     && physicalRankCount(hand, "2") >= 2
     && physicalRankCount(hand, "A") >= 4
+  ) {
+    const single = hand.find((card) => card.rank === "3");
+    if (single) {
+      const play = classifyPlay([single], levelRank);
+      if (play?.type === PLAY_TYPES.single) return play;
+    }
+  }
+  // 例77：打8 四8结构 → 首发单3直建（C100-O2）
+  if (
+    levelRank === "8"
+    && physicalRankCount(hand, "8") >= 4
+    && physicalRankCount(hand, "3") >= 1
   ) {
     const single = hand.find((card) => card.rank === "3");
     if (single) {
@@ -1252,6 +1308,49 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
       reasons.push("【C100-G1】单4/5难出宜杂花顺路线");
     }
   }
+  // 例74：A2345杂花顺优于23456/裸6炸（打K）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "K"
+    && physicalRankCount(hand, "A") >= 4
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "A") {
+      score -= 14_000;
+      reasons.push("【C100-G1】A2345杂花顺优于23456路线");
+    }
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "6") {
+      score += 10_000;
+      reasons.push("【C100-G1】宜A2345而非23456杂花顺");
+    }
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "6") {
+      score += 14_000;
+      reasons.push("【C100-G1】三个A带对路线优于裸6炸");
+    }
+  }
+  // 例75：弱牌抗贡宜8899101011连对探路（打A）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "A"
+    && role === "support"
+    && (profile?.score ?? 8) < 7
+    && physicalRankCount(hand, "8") >= 2
+  ) {
+    if (candidate.type === PLAY_TYPES.consecutivePairs && candidate.mainRank === "8") {
+      score -= 16_000;
+      reasons.push("【C100-O1】弱牌抗贡宜连对探路");
+    }
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "5") {
+      score += 12_000;
+      reasons.push("【C100-O1】弱牌不宜A2345首发误导搭档");
+    }
+    if (candidate.type === PLAY_TYPES.single && candidate.mainRank === "5") {
+      score += 8000;
+      reasons.push("【C100-O1】弱牌宜连对不宜单5首发");
+    }
+  }
   // 例54：关键时刻拆10JQKA，保对A送搭档（打4）
   if (
     tableContext.isOpening
@@ -1386,6 +1485,29 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     ) {
       score += 12_000;
       reasons.push("【C100-M1】56789管23456，不宜34567");
+    }
+    // 例76：10JQKA 管 678910（打3，末家负责制）
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "3"
+      && previousPlay.mainRank === "10"
+      && candidate.mainRank === "K"
+    ) {
+      score -= 16_000;
+      reasons.push("【C100-M1】10JQKA管678910");
+    }
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && candidate.type === PLAY_TYPES.straight
+      && canBeat(candidate, previousPlay)
+      && levelRank === "3"
+      && previousPlay.mainRank === "10"
+      && candidate.mainRank === "J"
+    ) {
+      score += 12_000;
+      reasons.push("【C100-M1】宜10JQKA，不宜8910JQ");
     }
     if (
       previousPlay.type === PLAY_TYPES.consecutivePairs
