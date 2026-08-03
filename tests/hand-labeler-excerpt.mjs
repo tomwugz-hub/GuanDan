@@ -1,5 +1,5 @@
 /**
- * 书摘截取：例 1～62 不得混入通用讲义
+ * 书摘截取：例 1～67 不得混入通用讲义
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -91,6 +91,12 @@ const TEACHING_BLEED = [
   /^乱你反正/,
   /^\( 牌都输了/,
   /^10以上的对子/,
+  /^3\.\s*FARE/,
+  /^还有一种牌也是要炸的/,
+  /^于白炸/,
+  /^5\.\s*留牌/,
+  /^6\.\s*扼牌/,
+  /^比如\s*,\s*末家两手牌/,
   /掼蛋实战100例技巧分析\s*\|/,
 ];
 
@@ -157,10 +163,15 @@ const EXPECTED_START = {
   60: "此牌打 Q",
   61: "此牌打4",
   62: "此牌打6",
+  63: "此牌打2",
+  64: "此牌打6",
+  65: "此牌打9",
+  66: "此牌打6",
+  67: "此牌打 A",
 };
 
 let failed = 0;
-for (let n = 1; n <= 62; n += 1) {
+for (let n = 1; n <= 67; n += 1) {
   const excerpt = extractCaseExcerpt(cleaned, n);
   if (!excerpt.startsWith(EXPECTED_START[n])) {
     console.error(`FAIL 例${n}: 书摘应以「${EXPECTED_START[n]}」开头，得：`, excerpt.slice(0, 60));
@@ -177,9 +188,9 @@ for (let n = 1; n <= 62; n += 1) {
 }
 
 if (failed > 0) process.exit(1);
-console.log("hand-labeler-excerpt: 例1～62 书摘边界全部通过");
+console.log("hand-labeler-excerpt: 例1～67 书摘边界全部通过");
 
-for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62]) {
+for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67]) {
   const id = `case-${String(n).padStart(3, "0")}.json`;
   const data = JSON.parse(fs.readFileSync(path.join(root, "training-samples", "cases", id), "utf8"));
   const expected = extractCaseExcerpt(cleaned, n);

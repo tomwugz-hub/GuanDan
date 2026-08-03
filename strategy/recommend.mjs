@@ -104,7 +104,7 @@ import {
 } from "./lead-mode.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
-import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
+import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100MustBeatStraightFlushBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -1973,6 +1973,29 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     };
   }
 
+  // C100 同花顺可无候选池直建：例64 先于 generateBasicCandidates / P7 炸弹快路径
+  if (
+    previousPlay.type === PLAY_TYPES.straightFlush
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100SfEarly = pickC100MustBeatStraightFlushBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, maxCandidates: 12 }),
+      yieldCtx,
+    );
+    if (c100SfEarly) {
+      return {
+        top: { candidate: c100SfEarly, score: -880, reasons: ["【C100-M1】百例同花顺管牌，不宜裸炸"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   // C100 三带二可无候选池直建：须压场景先于 generateBasicCandidates，压冷启耗时
   if (
     previousPlay.type === PLAY_TYPES.tripleWithPair
@@ -2352,6 +2375,42 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
   if (litePath && !robotFast && previousPlay && previousPlay.type !== PLAY_TYPES.pass) {
     const humanLiteQuick = tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, ctx);
     if (humanLiteQuick) return humanLiteQuick;
+  }
+  if (
+    previousPlay
+    && previousPlay.type === PLAY_TYPES.straightFlush
+    && !robotFast
+    && hand.length >= 20
+  ) {
+    const sfCtx = enrichScoringContext(
+      { ...ctx, previousPlay, _candidates: [] },
+      [],
+      hand,
+      levelRank,
+    );
+    const sfPool = generateBasicCandidates(hand, levelRank, previousPlay, {
+      lite: true,
+      maxCandidates: 12,
+    });
+    const c100Sf = pickC100MustBeatStraightFlushBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      sfPool,
+      sfCtx,
+    );
+    if (c100Sf) {
+      return {
+        top: {
+          candidate: c100Sf,
+          score: -880,
+          reasons: ["【C100-M1】百例同花顺管牌，不宜裸炸"],
+        },
+        pool: [],
+        scoringContext: sfCtx,
+        blockedCandidates: [],
+      };
+    }
   }
   if (hand.length >= 20 && previousPlay && BOMB_TYPES.has(previousPlay.type)) {
     const fastCandidates = generateBasicCandidates(hand, levelRank, previousPlay, { lite: litePath });

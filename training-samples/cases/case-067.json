@@ -1,0 +1,385 @@
+{
+  "$schema": "guandan-100case/v0-draft",
+  "id": "case-067",
+  "caseNumber": 67,
+  "title": "此牌打 A。此牌蛇",
+  "source": {
+    "pdf": "training-samples/掼蛋实战100例.pdf",
+    "pdfPage": 129,
+    "assets": {
+      "pagePng": "assets/guandan-100cases/case-067-page129.png",
+      "handCropPng": "assets/guandan-100cases/case-067-hand-crop.png"
+    }
+  },
+  "game": {
+    "levelRank": "A",
+    "wildCard": {
+      "rank": "A",
+      "suit": "H",
+      "label": "红桃A（逢人配）"
+    }
+  },
+  "needsUserVerify": false,
+  "userVerified": true,
+  "verify": {
+    "revision": "v1-final",
+    "confidence": "high",
+    "userAnchors": [
+      {
+        "index": 1,
+        "label": "黑桃3"
+      },
+      {
+        "index": 2,
+        "label": "红桃2"
+      },
+      {
+        "index": 3,
+        "label": "方片5"
+      },
+      {
+        "index": 4,
+        "label": "方片A"
+      },
+      {
+        "index": 5,
+        "label": "黑桃A"
+      },
+      {
+        "index": 6,
+        "label": "小王",
+        "role": "SJ"
+      },
+      {
+        "index": 7,
+        "label": "梅花9"
+      },
+      {
+        "index": 8,
+        "label": "梅花8"
+      },
+      {
+        "index": 9,
+        "label": "梅花7"
+      },
+      {
+        "index": 10,
+        "label": "梅花6"
+      },
+      {
+        "index": 11,
+        "label": "梅花5"
+      },
+      {
+        "index": 12,
+        "label": "方片Q"
+      },
+      {
+        "index": 13,
+        "label": "梅花Q"
+      },
+      {
+        "index": 14,
+        "label": "红桃A（逢人配）",
+        "role": "逢人配（打A）"
+      },
+      {
+        "index": 15,
+        "label": "红桃Q"
+      },
+      {
+        "index": 16,
+        "label": "梅花10"
+      },
+      {
+        "index": 17,
+        "label": "黑桃10"
+      },
+      {
+        "index": 18,
+        "label": "梅花10（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 19,
+        "label": "红桃10"
+      },
+      {
+        "index": 20,
+        "label": "红桃8"
+      },
+      {
+        "index": 21,
+        "label": "方片8"
+      },
+      {
+        "index": 22,
+        "label": "红桃A（逢人配）",
+        "deckIndex": 1,
+        "role": "逢人配（打A）"
+      },
+      {
+        "index": 23,
+        "label": "梅花8（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 24,
+        "label": "红桃J"
+      },
+      {
+        "index": 25,
+        "label": "红桃J（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 26,
+        "label": "黑桃7"
+      },
+      {
+        "index": 27,
+        "label": "红桃7"
+      }
+    ],
+    "userPrompt": "v1-final 全部27张已用户确认（labeler）"
+  },
+  "hand": {
+    "expectedCount": 27,
+    "cards": [
+      {
+        "index": 1,
+        "rank": "3",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃3",
+        "anchor": true
+      },
+      {
+        "index": 2,
+        "rank": "2",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃2",
+        "anchor": true
+      },
+      {
+        "index": 3,
+        "rank": "5",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片5",
+        "anchor": true
+      },
+      {
+        "index": 4,
+        "rank": "A",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片A",
+        "anchor": true
+      },
+      {
+        "index": 5,
+        "rank": "A",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃A",
+        "anchor": true
+      },
+      {
+        "index": 6,
+        "rank": "SJ",
+        "suit": "joker",
+        "deckIndex": 0,
+        "label": "小王",
+        "anchor": true
+      },
+      {
+        "index": 7,
+        "rank": "9",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花9",
+        "anchor": true
+      },
+      {
+        "index": 8,
+        "rank": "8",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花8",
+        "anchor": true
+      },
+      {
+        "index": 9,
+        "rank": "7",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花7",
+        "anchor": true
+      },
+      {
+        "index": 10,
+        "rank": "6",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花6",
+        "anchor": true
+      },
+      {
+        "index": 11,
+        "rank": "5",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花5",
+        "anchor": true
+      },
+      {
+        "index": 12,
+        "rank": "Q",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片Q",
+        "anchor": true
+      },
+      {
+        "index": 13,
+        "rank": "Q",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花Q",
+        "anchor": true
+      },
+      {
+        "index": 14,
+        "rank": "A",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃A（逢人配）",
+        "anchor": true
+      },
+      {
+        "index": 15,
+        "rank": "Q",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃Q",
+        "anchor": true
+      },
+      {
+        "index": 16,
+        "rank": "10",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花10",
+        "anchor": true
+      },
+      {
+        "index": 17,
+        "rank": "10",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃10",
+        "anchor": true
+      },
+      {
+        "index": 18,
+        "rank": "10",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花10（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 19,
+        "rank": "10",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃10",
+        "anchor": true
+      },
+      {
+        "index": 20,
+        "rank": "8",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃8",
+        "anchor": true
+      },
+      {
+        "index": 21,
+        "rank": "8",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片8",
+        "anchor": true
+      },
+      {
+        "index": 22,
+        "rank": "A",
+        "suit": "hearts",
+        "deckIndex": 1,
+        "label": "红桃A（逢人配）",
+        "anchor": true
+      },
+      {
+        "index": 23,
+        "rank": "8",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花8（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 24,
+        "rank": "J",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃J",
+        "anchor": true
+      },
+      {
+        "index": 25,
+        "rank": "J",
+        "suit": "hearts",
+        "deckIndex": 1,
+        "label": "红桃J（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 26,
+        "rank": "7",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃7",
+        "anchor": true
+      },
+      {
+        "index": 27,
+        "rank": "7",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃7",
+        "anchor": true
+      }
+    ]
+  },
+  "narrative": {
+    "summary": "此牌打 A。此牌蛇 有四个炸弹 , 但有三张小单牌 , 因此要拆掉一 个炸弹 , 组 A234( 红配 )5杂花顺 , 预留三个 Q 带对牌型。同时 , 若用四个8炸弹 , 有个隐藏 牌的信息小技巧 : 让梅花8归位组四个8、 组 5678( 红配 )9梅花同花顺。"
+  },
+  "doctrineRefs": [
+    {
+      "id": "C100-G1"
+    }
+  ],
+  "goldenCaseNote": "tests/golden-case-100cases.mjs #8-067 已同步 labeler 手牌（C100-G1）",
+  "authorPlan": {
+    "summary": "此牌打 A。此牌蛇 有四个炸弹 , 但有三张小单牌 , 因此要拆掉一 个炸弹 , 组 A234( 红配 )5杂花顺 , 预留三个 Q 带对牌型。同时 , 若用四个8炸弹 , 有个隐藏 牌的信息小技巧 : 让梅花8归位组四个8、 组 5678( 红配 )9梅花同花顺。 比如 , 末家两手牌 , 黑桃同花顺 LOTQK A"
+  },
+  "coachUse": {
+    "ready": true,
+    "golden": "#8-067",
+    "scenariosPending": false,
+    "scenariosReady": true
+  }
+}
