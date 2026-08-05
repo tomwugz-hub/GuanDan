@@ -104,7 +104,7 @@ import {
 } from "./lead-mode.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
-import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100MustBeatStraightFlushBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
+import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatBombBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100MustBeatStraightFlushBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
@@ -2086,6 +2086,15 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
         blockedCandidates: [],
       };
     }
+    const c100BombEarly = pickC100MustBeatBombBeater(hand, levelRank, previousPlay, [], yieldCtx);
+    if (c100BombEarly) {
+      return {
+        top: { candidate: c100BombEarly, score: -850, reasons: ["【C100-M1】百例须炸管牌，不宜过牌"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
   }
 
   const candidates = generateBasicCandidates(hand, levelRank, previousPlay, {
@@ -2256,6 +2265,15 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     if (c100Triple) {
       return {
         top: { candidate: c100Triple, score: -850, reasons: ["【C100-G1】百例裸三张管牌重组"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+    const c100Bomb = pickC100MustBeatBombBeater(hand, levelRank, previousPlay, candidates, beatCtx);
+    if (c100Bomb) {
+      return {
+        top: { candidate: c100Bomb, score: -850, reasons: ["【C100-M1】百例须炸管牌，不宜过牌"] },
         pool: [],
         scoringContext: beatCtx,
         blockedCandidates: [],
@@ -2868,6 +2886,15 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         if (c100Triple) {
           return {
             top: { candidate: c100Triple, score: -850, reasons: ["【C100-G1】百例裸三张管牌重组"] },
+            pool: [],
+            scoringContext: beatCtx,
+            blockedCandidates: [],
+          };
+        }
+        const c100Bomb = pickC100MustBeatBombBeater(hand, levelRank, previousPlay, candidates, beatCtx);
+        if (c100Bomb) {
+          return {
+            top: { candidate: c100Bomb, score: -850, reasons: ["【C100-M1】百例须炸管牌，不宜过牌"] },
             pool: [],
             scoringContext: beatCtx,
             blockedCandidates: [],
