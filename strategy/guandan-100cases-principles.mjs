@@ -209,6 +209,14 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
     const single6 = beaters.find((item) => item.mainRank === "6");
     if (single6) return single6;
   }
+  // 例92：顺6管单5（打J）
+  if (
+    levelRank === "J"
+    && previousPlay.mainRank === "5"
+  ) {
+    const single6 = beaters.find((item) => item.mainRank === "6");
+    if (single6) return single6;
+  }
   // 例34：拆对J上一张扫单8（打5）
   if (
     levelRank === "5"
@@ -743,6 +751,26 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "6") ?? null;
   }
+  // 例89：打6 弱牌 → 对3探路（C100-O1）
+  if (
+    levelRank === "6"
+    && role === "support"
+    && (profile?.score ?? 8) < 7
+    && physicalRankCount(hand, "3") >= 2
+    && physicalRankCount(hand, "Q") >= 4
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.pair && item.mainRank === "3") ?? null;
+  }
+  // 例91：打2 三2逼封首发（C100-G1）
+  if (
+    levelRank === "2"
+    && physicalRankCount(hand, "2") === 3
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "7") >= 3
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.triple && item.mainRank === "2") ?? null;
+  }
   return null;
 }
 
@@ -788,6 +816,24 @@ export function pickC100OpeningLeadDirect(hand, levelRank) {
     && physicalRankCount(hand, "K") >= 4
   ) {
     return buildStraightFromHandByMainRank(hand, "6", levelRank);
+  }
+  // 例89：打6 弱牌 → 对3直建（C100-O1）
+  if (
+    levelRank === "6"
+    && physicalRankCount(hand, "3") >= 2
+    && physicalRankCount(hand, "Q") >= 4
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    return buildPairFromHand(hand, "3", levelRank);
+  }
+  // 例91：打2 三2直建（C100-G1）
+  if (
+    levelRank === "2"
+    && physicalRankCount(hand, "2") === 3
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "7") >= 3
+  ) {
+    return buildTripleFromHand(hand, "2", levelRank);
   }
   // 例61：打4弱牌双红配 → 首出对2试探（C100-O1）
   if (
@@ -1490,6 +1536,49 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "7") {
       score += 22_000;
       reasons.push("【C100-G1】抗贡后不宜先出顺子，宜三2探路");
+    }
+  }
+  // 例89：打6 弱牌宜对3探路（C100-O1）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "6"
+    && role === "support"
+    && (profile?.score ?? 8) < 7
+    && physicalRankCount(hand, "3") >= 2
+    && physicalRankCount(hand, "Q") >= 4
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    if (candidate.type === PLAY_TYPES.pair && candidate.mainRank === "3") {
+      score -= 18_000;
+      reasons.push("【C100-O1】弱牌宜对3示弱，不宜三带二/小单");
+    } else if (candidate.type === PLAY_TYPES.tripleWithPair) {
+      score += 16_000;
+      reasons.push("【C100-O1】弱牌不宜首发三带二");
+    } else if (candidate.type === PLAY_TYPES.single && compareRanks(candidate.mainRank, "9", levelRank) <= 0) {
+      score += 14_000;
+      reasons.push("【C100-O1】弱牌不宜首发小单");
+    }
+  }
+  // 例91：打2 三2逼封首发（C100-G1）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "2"
+    && physicalRankCount(hand, "2") === 3
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "7") >= 3
+    && (role === "main-attack" || role === "neutral")
+  ) {
+    if (candidate.type === PLAY_TYPES.triple && candidate.mainRank === "2") {
+      score -= 26_000;
+      reasons.push("【C100-G1】222逼封首发，宜优于顺子/散对");
+    } else if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "7") {
+      score += 10_000;
+      reasons.push("【C100-G1】222逼封首发，不宜先出23456");
+    } else if (candidate.type === PLAY_TYPES.pair && compareRanks(candidate.mainRank, "9", levelRank) <= 0) {
+      score += 14_000;
+      reasons.push("【C100-G1】222逼封首发，不宜裸散对探路");
     }
   }
   // 例67：拆8炸组A2345减单优于裸保8炸（打A）

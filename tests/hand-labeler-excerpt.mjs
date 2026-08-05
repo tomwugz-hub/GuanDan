@@ -1,5 +1,5 @@
 /**
- * 书摘截取：例 1～87 不得混入通用讲义
+ * 书摘截取：例 1～92 不得混入通用讲义
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -201,11 +201,15 @@ const EXPECTED_START = {
   84: "此牌打9",
   86: "此牌打2",
   87: "此牌打3",
+  89: "此牌打6",
+  90: "此牌打7",
+  91: "此牌打2",
+  92: "此牌打 J,",
 };
 
 let failed = 0;
-for (let n = 1; n <= 87; n += 1) {
-  if (n === 85) continue; // 书中无例85
+for (let n = 1; n <= 92; n += 1) {
+  if (n === 85 || n === 88) continue; // 书中无例85/88
   if (!EXPECTED_START[n]) continue;
   const excerpt = extractCaseExcerpt(cleaned, n);
   if (!excerpt.startsWith(EXPECTED_START[n])) {
@@ -223,9 +227,9 @@ for (let n = 1; n <= 87; n += 1) {
 }
 
 if (failed > 0) process.exit(1);
-console.log("hand-labeler-excerpt: 例1～87 书摘边界全部通过");
+console.log("hand-labeler-excerpt: 例1～92 书摘边界全部通过");
 
-for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 86, 87]) {
+for (const n of [1, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 86, 87, 89, 90, 91, 92]) {
   const id = `case-${String(n).padStart(3, "0")}.json`;
   const data = JSON.parse(fs.readFileSync(path.join(root, "training-samples", "cases", id), "utf8"));
   const expected = extractCaseExcerpt(cleaned, n);
