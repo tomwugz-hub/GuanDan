@@ -735,6 +735,14 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "3") ?? null;
   }
+  // 例87：打3 四3/四K强牌 → 23456减手首发（C100-G1）
+  if (
+    levelRank === "3"
+    && physicalRankCount(hand, "3") >= 4
+    && physicalRankCount(hand, "K") >= 4
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "6") ?? null;
+  }
   return null;
 }
 
@@ -772,6 +780,14 @@ export function pickC100OpeningLeadDirect(hand, levelRank) {
       const play = classifyPlay([single], levelRank);
       if (play?.type === PLAY_TYPES.single) return play;
     }
+  }
+  // 例87：打3 四3/四K → 23456直建（C100-G1）
+  if (
+    levelRank === "3"
+    && physicalRankCount(hand, "3") >= 4
+    && physicalRankCount(hand, "K") >= 4
+  ) {
+    return buildStraightFromHandByMainRank(hand, "6", levelRank);
   }
   // 例61：打4弱牌双红配 → 首出对2试探（C100-O1）
   if (
@@ -1036,6 +1052,48 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     } else if (candidate.type === PLAY_TYPES.pair && compareRanks(candidate.mainRank, "9", levelRank) <= 0) {
       score += 12_000;
       reasons.push("【C100-O2】强牌宜单3探路，不宜小对");
+    }
+  }
+
+  // —— C100-G1 23456减手首发（例87，打3 四3/四K） ——
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "3"
+    && physicalRankCount(hand, "3") >= 4
+    && physicalRankCount(hand, "K") >= 4
+    && (role === "main-attack" || role === "neutral")
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "6") {
+      score -= 18_000;
+      reasons.push("【C100-G1】23456减手首发，优于小三带/散对");
+    } else if (candidate.type === PLAY_TYPES.tripleWithPair && compareRanks(candidate.mainRank, "5", levelRank) <= 0) {
+      score += 14_000;
+      reasons.push("【C100-G1】23456首发，不宜先出小三带二");
+    } else if (candidate.type === PLAY_TYPES.straight && compareRanks(candidate.mainRank, "7", levelRank) >= 0) {
+      score += 10_000;
+      reasons.push("【C100-G1】23456首发，不宜先出更高顺");
+    } else if (candidate.type === PLAY_TYPES.pair && compareRanks(candidate.mainRank, "9", levelRank) <= 0) {
+      score += 12_000;
+      reasons.push("【C100-G1】23456首发，不宜裸散对探路");
+    }
+  }
+
+  // —— C100-G1 同花顺优于小炸（例83，打Q 四K结构） ——
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "Q"
+    && physicalRankCount(hand, "K") >= 4
+    && (role === "main-attack" || role === "neutral")
+  ) {
+    if (candidate.type === PLAY_TYPES.straightFlush && candidate.mainRank === "Q") {
+      score -= 16_000;
+      reasons.push("【C100-G1】10JQKA同花顺路线优于裸小炸");
+    }
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "2") {
+      score += 14_000;
+      reasons.push("【C100-G1】宜保同花顺路线，不宜裸2炸首发");
     }
   }
 
