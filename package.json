@@ -5,12 +5,18 @@
   "type": "module",
   "description": "掼蛋 AI 教练 Pro：规则引擎 + 可解释策略 + 复盘",
   "scripts": {
-    "test": "node tests/doctrine-regression.mjs && node tests/acceptance-user.mjs && node tests/smoke.mjs && node tests/principles-smoke.mjs && node tests/feedback-smoke.mjs && node tests/divergence-smoke.mjs && node tests/coach-fix-request-smoke.mjs && node tests/user-dispute-smoke.mjs && node tests/game-insight-smoke.mjs && node tests/pipeline-smoke.mjs && node tests/ml-integration-smoke.mjs && node tests/import-smoke.mjs && node tests/merge-smoke.mjs && node tests/audit-strategy-smoke.mjs",
+    "test": "node tests/doctrine-regression.mjs && node tests/acceptance-user.mjs && node tests/smoke.mjs && node tests/principles-smoke.mjs && node tests/strategy-self-check.mjs && node tests/feedback-smoke.mjs && node tests/divergence-smoke.mjs && node tests/coach-fix-request-smoke.mjs && node tests/user-dispute-smoke.mjs && node tests/game-insight-smoke.mjs && node tests/pipeline-smoke.mjs && node tests/ml-integration-smoke.mjs && node tests/import-smoke.mjs && node tests/merge-smoke.mjs && node tests/audit-strategy-smoke.mjs",
     "test:gate": "node tools/pre-release-gate.mjs",
+    "test:doctrine": "node tests/doctrine-regression.mjs",
+    "test:doctrine:gate": "node tests/doctrine-gate.mjs",
+    "promote:engine": "node tools/promote-training-to-engine.mjs",
     "test:golden": "node tests/golden-scenarios.mjs",
+    "test:100cases:1-50": "node tests/case-scenario-top1-1-50.mjs",
     "ingest-review": "node tools/ingest-game-review.mjs",
     "test:align": "node tests/recommend-alignment.mjs",
     "test:audit": "node tools/audit-strategy.mjs 100",
+    "discover:robot": "node tools/auto-discover-robot-issues.mjs",
+    "discover:robot:fix": "node tools/auto-discover-robot-issues.mjs --promote",
     "build": "node tools/pre-release-gate.mjs && node tools/build-standalone.mjs",
     "dev": "node dev-server.mjs",
     "start": "node tools/open-coach.mjs",
@@ -28,6 +34,9 @@
     "data:douyin:run": "node tools/douyin/process-account.mjs",
     "data:douyin:report": "node tools/douyin/report.mjs",
     "data:douyin:refine": "node tools/douyin/refine-candidate.mjs",
-    "test:douyin": "node tests/douyin-manifest-smoke.mjs && node tests/douyin-transcriber-contract.mjs && node tests/douyin-knowledge-smoke.mjs && node tests/douyin-pipeline-smoke.mjs && node tests/douyin-candidate-strategy-smoke.mjs && node tests/douyin-candidate-cli-smoke.mjs && node tests/douyin-candidate-pilot-smoke.mjs"
+    "test:douyin": "node tests/douyin-manifest-smoke.mjs && node tests/douyin-transcriber-contract.mjs && node tests/douyin-knowledge-smoke.mjs && node tests/douyin-pipeline-smoke.mjs && node tests/douyin-candidate-strategy-smoke.mjs && node tests/douyin-candidate-cli-smoke.mjs"
+  },
+  "devDependencies": {
+    "pngjs": "^7.0.0"
   }
 }
