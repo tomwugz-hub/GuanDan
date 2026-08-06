@@ -17,7 +17,7 @@ import { enumerateStraightFlushCandidates } from "./straight-flush-arrange.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 
 /** 策略修订号：与 app/main.mjs 校验一致，用于识别浏览器是否仍缓存旧模块 */
-export const COACH_STRATEGY_REVISION = 49;
+export const COACH_STRATEGY_REVISION = 50;
 
 const SHAPE_LABELS = {
   [PLAY_TYPES.straight]: "杂顺",

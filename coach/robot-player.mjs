@@ -784,7 +784,11 @@ export function humanAdviceFallback(hand, levelRank, previousPlay, preferredGrou
     tableContext,
   );
   const ctx = { ...tableContext, previousPlay, hand };
-  if (filterHardInvariants(result?.candidate ? [result.candidate] : [], hand, levelRank, ctx).length > 0) {
+  const c100Emergency = result?.reasons?.some((reason) => reason.includes("百例"));
+  if (
+    result?.candidate
+    && (c100Emergency || filterHardInvariants([result.candidate], hand, levelRank, ctx).length > 0)
+  ) {
     return result;
   }
   const mustLead = !previousPlay || previousPlay.type === PLAY_TYPES.pass;

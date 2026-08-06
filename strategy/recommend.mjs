@@ -2042,6 +2042,28 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     }
   }
 
+  // C100 单张可无候选池直建：例10/11 先于 generateBasicCandidates（避免 full 冷启超时）
+  if (
+    previousPlay.type === PLAY_TYPES.single
+    && yieldCtx.opponentActive
+    && !yieldCtx.partnerOwnsTrick
+  ) {
+    const c100SingleEarly = pickC100MustBeatSingleBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, maxCandidates: 12 }),
+    );
+    if (c100SingleEarly) {
+      return {
+        top: { candidate: c100SingleEarly, score: -850, reasons: ["【C100-G1】百例顺压单张"] },
+        pool: [],
+        scoringContext: yieldCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   // C100 连对可无候选池直建：例68 先于 generateBasicCandidates（末家负责制，避免 SF 跑道误拦）
   if (
     previousPlay.type === PLAY_TYPES.consecutivePairs
@@ -2654,6 +2676,38 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         blockedCandidates: [],
       };
     }
+    }
+  }
+
+  if (previousPlay?.type === PLAY_TYPES.single && !robotFast) {
+    const singleBeatCtx = enrichScoringContext(
+      { ...ctx, previousPlay, _candidates: [] },
+      [],
+      hand,
+      levelRank,
+    );
+    const singlePool = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, maxCandidates: 12 });
+    const c100SingleEarly = pickC100MustBeatSingleBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      singlePool,
+    );
+    if (
+      c100SingleEarly
+      && singleBeatCtx.opponentActive
+      && !singleBeatCtx.partnerOwnsTrick
+    ) {
+      return {
+        top: {
+          candidate: c100SingleEarly,
+          score: -850,
+          reasons: ["【C100-G1】百例顺压单张"],
+        },
+        pool: [],
+        scoringContext: singleBeatCtx,
+        blockedCandidates: [],
+      };
     }
   }
 

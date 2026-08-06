@@ -61,6 +61,39 @@ function buildPairFromHand(hand, pairRank, levelRank) {
   return play?.type === PLAY_TYPES.pair ? play : null;
 }
 
+/** 从手牌直组三连对（mainRank 为最高对子牌点；allowWild 时逢人配可补缺对） */
+function buildConsecutivePairsFromHand(hand, mainRank, levelRank, allowWild = true) {
+  const order = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+  const idx = order.indexOf(mainRank);
+  if (idx < 2) return null;
+  const ranks = order.slice(idx - 2, idx + 1);
+  const picked = [];
+  const used = new Set();
+  const wilds = hand.filter((card) => isWildCard(card, levelRank));
+  let wildUsed = 0;
+  for (const rank of ranks) {
+    let need = 2;
+    for (const card of hand) {
+      if (used.has(card)) continue;
+      if (card.rank === rank) {
+        picked.push(card);
+        used.add(card);
+        need -= 1;
+        if (need === 0) break;
+      }
+    }
+    while (need > 0 && allowWild && wildUsed < wilds.length) {
+      picked.push(wilds[wildUsed]);
+      used.add(wilds[wildUsed]);
+      wildUsed += 1;
+      need -= 1;
+    }
+    if (need > 0) return null;
+  }
+  const play = classifyPlay(picked, levelRank);
+  return play?.type === PLAY_TYPES.consecutivePairs ? play : null;
+}
+
 /** 从手牌直组杂花顺（mainRank 为顺子最高牌点；allowWild 时逢人配可补缺张） */
 function buildStraightFromHandByMainRank(hand, mainRank, levelRank, allowWild = false) {
   const order = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
@@ -178,9 +211,10 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
     );
     if (single10) return single10;
   }
-  // 例11：顺9管单4，四张9拆一张重组同花顺
+  // 例11：顺9管单4，四张9拆一张重组同花顺（打2）
   if (
-    previousPlay.mainRank === "4"
+    levelRank === "2"
+    && previousPlay.mainRank === "4"
     && physicalRankCount(hand, "9") >= 4
   ) {
     const single9 = beaters.find((item) => item.mainRank === "9");
@@ -342,13 +376,28 @@ export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previous
   const beaters = candidates.filter(
     (item) => item.type === PLAY_TYPES.consecutivePairs && canBeat(item, previousPlay),
   );
+  const pickOrBuildCp = (mainRank) => {
+    const fromPool = beaters.find((item) => item.mainRank === mainRank) ?? null;
+    if (fromPool) return fromPool;
+    const built = buildConsecutivePairsFromHand(hand, mainRank, levelRank);
+    return built && canBeat(built, previousPlay) ? built : null;
+  };
   // 例17：对手334455，上两家不要 → 667788 管牌
   if (
     levelRank === "5"
     && previousPlay.mainRank === "5"
     && physicalRankCount(hand, "6") >= 4
   ) {
-    return beaters.find((item) => item.mainRank === "8") ?? null;
+    return pickOrBuildCp("8");
+  }
+  // 例25：556677管445566（打8，末家负责制）
+  if (
+    levelRank === "8"
+    && previousPlay.mainRank === "6"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "7") >= 6
+  ) {
+    return pickOrBuildCp("7");
   }
   // 例46：末家 QQKKAA 管 445566（打2）
   if (
@@ -728,6 +777,29 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "7") ?? null;
   }
+  // 例19：打 A 强牌四K → 首出单2（须先于例57 A2345）
+  if (
+    levelRank === "A"
+    && role === "main-attack"
+    && physicalRankCount(hand, "K") >= 4
+    && physicalRankCount(hand, "2") >= 2
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "2") ?? null;
+  }
+  // 例23：打 A 弱牌 → 445566（须先于例75 8899101011）
+  if (
+    levelRank === "A"
+    && role === "support"
+    && (profile?.score ?? 8) < 7
+    && physicalRankCount(hand, "7") >= 4
+    && physicalRankCount(hand, "2") >= 2
+  ) {
+    return candidates.find(
+      (item) => item.type === PLAY_TYPES.consecutivePairs
+        && item.mainRank === "4"
+        && item.cards?.length === 6,
+    ) ?? null;
+  }
   // 例75：打A 弱牌抗贡 → 8899101011 连对探路（C100-O1；须先于例57 A2345）
   if (
     levelRank === "A"
@@ -759,13 +831,6 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "5") ?? null;
   }
-  // 例19：打 A 强牌 → 首出单2
-  if (
-    levelRank === "A"
-    && physicalRankCount(hand, "K") >= 4
-  ) {
-    return candidates.find((item) => item.type === PLAY_TYPES.single && item.mainRank === "2") ?? null;
-  }
   // 例80：打5 五J结构 → 有打有收首出 A2345（C100-G1）
   if (
     levelRank === "5"
@@ -782,17 +847,6 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
     && physicalRankCount(hand, "8") === 3
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "5") ?? null;
-  }
-  // 例23：打 A 弱牌 → 首出 445566（mainRank=4），有回手 AA2233
-  if (
-    levelRank === "A"
-    && physicalRankCount(hand, "7") >= 4
-  ) {
-    return candidates.find(
-      (item) => item.type === PLAY_TYPES.consecutivePairs
-        && item.mainRank === "4"
-        && item.cards?.length === 6,
-    ) ?? null;
   }
   // 例24：打9 进贡后 → 重组同花顺，首发 445566（mainRank=6）
   if (
@@ -1591,6 +1645,26 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
         score += 9500;
         reasons.push("【C100-G1】有顺组/多路线时不宜固定高三带二，宜保牌型多元化");
       }
+    }
+  }
+
+  // —— C100-G1 进贡后445566减手首发（例24，打9 三2） ——
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "9"
+    && physicalRankCount(hand, "2") === 3
+  ) {
+    if (
+      candidate.type === PLAY_TYPES.consecutivePairs
+      && candidate.mainRank === "6"
+      && candidate.cards?.length === 6
+    ) {
+      score -= 14_000;
+      reasons.push("【C100-G1】进贡后445566减手首发，保同花顺重组");
+    } else if (candidate.type === PLAY_TYPES.single && candidate.mainRank === "8") {
+      score += 11_000;
+      reasons.push("【C100-G1】进贡后宜连对减手，不宜单8探路");
     }
   }
 

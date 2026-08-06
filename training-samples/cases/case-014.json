@@ -1,0 +1,378 @@
+{
+  "$schema": "guandan-100case/v0-draft",
+  "id": "case-014",
+  "caseNumber": 14,
+  "title": "此牌打了 , 对手方抗",
+  "source": {
+    "pdf": "training-samples/掼蛋实战100例.pdf",
+    "pdfPage": 34,
+    "assets": {
+      "pagePng": "assets/guandan-100cases/case-014-page34.png",
+      "handCropPng": "assets/guandan-100cases/case-014-hand-crop.png"
+    }
+  },
+  "game": {
+    "levelRank": "J",
+    "wildCard": {
+      "rank": "J",
+      "suit": "H",
+      "label": "红桃J（逢人配）"
+    }
+  },
+  "needsUserVerify": false,
+  "userVerified": true,
+  "verify": {
+    "revision": "v1-final",
+    "confidence": "high",
+    "userAnchors": [
+      {
+        "index": 1,
+        "label": "梅花J"
+      },
+      {
+        "index": 2,
+        "label": "黑桃J"
+      },
+      {
+        "index": 3,
+        "label": "方片A"
+      },
+      {
+        "index": 4,
+        "label": "梅花A"
+      },
+      {
+        "index": 5,
+        "label": "黑桃A"
+      },
+      {
+        "index": 6,
+        "label": "梅花A（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 7,
+        "label": "梅花9"
+      },
+      {
+        "index": 8,
+        "label": "方片9"
+      },
+      {
+        "index": 9,
+        "label": "红桃9"
+      },
+      {
+        "index": 10,
+        "label": "黑桃9"
+      },
+      {
+        "index": 11,
+        "label": "红桃8"
+      },
+      {
+        "index": 12,
+        "label": "方片8"
+      },
+      {
+        "index": 13,
+        "label": "梅花8"
+      },
+      {
+        "index": 14,
+        "label": "梅花8（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 15,
+        "label": "梅花7"
+      },
+      {
+        "index": 16,
+        "label": "梅花6"
+      },
+      {
+        "index": 17,
+        "label": "梅花6（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 18,
+        "label": "梅花5"
+      },
+      {
+        "index": 19,
+        "label": "红桃4"
+      },
+      {
+        "index": 20,
+        "label": "黑桃3"
+      },
+      {
+        "index": 21,
+        "label": "方片3"
+      },
+      {
+        "index": 22,
+        "label": "方片3（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 23,
+        "label": "黑桃3（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 24,
+        "label": "梅花3"
+      },
+      {
+        "index": 25,
+        "label": "红桃2"
+      },
+      {
+        "index": 26,
+        "label": "红桃2（第二副）",
+        "deckIndex": 1
+      },
+      {
+        "index": 27,
+        "label": "方片2"
+      }
+    ],
+    "userPrompt": "v1-final 全部27张已用户确认"
+  },
+  "hand": {
+    "expectedCount": 27,
+    "cards": [
+      {
+        "index": 1,
+        "rank": "J",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花J",
+        "anchor": true
+      },
+      {
+        "index": 2,
+        "rank": "J",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃J",
+        "anchor": true
+      },
+      {
+        "index": 3,
+        "rank": "A",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片A",
+        "anchor": true
+      },
+      {
+        "index": 4,
+        "rank": "A",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花A",
+        "anchor": true
+      },
+      {
+        "index": 5,
+        "rank": "A",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃A",
+        "anchor": true
+      },
+      {
+        "index": 6,
+        "rank": "A",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花A（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 7,
+        "rank": "9",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花9",
+        "anchor": true
+      },
+      {
+        "index": 8,
+        "rank": "9",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片9",
+        "anchor": true
+      },
+      {
+        "index": 9,
+        "rank": "9",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃9",
+        "anchor": true
+      },
+      {
+        "index": 10,
+        "rank": "9",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃9",
+        "anchor": true
+      },
+      {
+        "index": 11,
+        "rank": "8",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃8",
+        "anchor": true
+      },
+      {
+        "index": 12,
+        "rank": "8",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片8",
+        "anchor": true
+      },
+      {
+        "index": 13,
+        "rank": "8",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花8",
+        "anchor": true
+      },
+      {
+        "index": 14,
+        "rank": "8",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花8（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 15,
+        "rank": "7",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花7",
+        "anchor": true
+      },
+      {
+        "index": 16,
+        "rank": "6",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花6",
+        "anchor": true
+      },
+      {
+        "index": 17,
+        "rank": "6",
+        "suit": "clubs",
+        "deckIndex": 1,
+        "label": "梅花6（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 18,
+        "rank": "5",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花5",
+        "anchor": true
+      },
+      {
+        "index": 19,
+        "rank": "4",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃4",
+        "anchor": true
+      },
+      {
+        "index": 20,
+        "rank": "3",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃3",
+        "anchor": true
+      },
+      {
+        "index": 21,
+        "rank": "3",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片3",
+        "anchor": true
+      },
+      {
+        "index": 22,
+        "rank": "3",
+        "suit": "diamonds",
+        "deckIndex": 1,
+        "label": "方片3（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 23,
+        "rank": "3",
+        "suit": "spades",
+        "deckIndex": 1,
+        "label": "黑桃3（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 24,
+        "rank": "3",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花3",
+        "anchor": true
+      },
+      {
+        "index": 25,
+        "rank": "2",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃2",
+        "anchor": true
+      },
+      {
+        "index": 26,
+        "rank": "2",
+        "suit": "hearts",
+        "deckIndex": 1,
+        "label": "红桃2（第二副）",
+        "anchor": true
+      },
+      {
+        "index": 27,
+        "rank": "2",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片2",
+        "anchor": true
+      }
+    ]
+  },
+  "narrative": {
+    "summary": "此牌打了 , 对手方抗 贡。先出222逼上家封牌换对 , 转一圈后出对 丁立牌后打单张6观望 , 而不要先出34567固 定牌型。若出炸弹先出4个 A, 若立牌出 34567; 若不立牌再观望一下 , 而不要立即追打 56789梅花同花顺。"
+  },
+  "doctrineRefs": [
+    {
+      "id": "C100-G1"
+    }
+  ],
+  "goldenCaseNote": "tests/golden-case-100cases.mjs #7h 已同步 v1-final 手牌（C100-G1）",
+  "authorPlan": {
+    "summary": "此牌打了 , 对手方抗 贡。先出222逼上家封牌换对 , 转一圈后出对 丁立牌后打单张6观望 , 而不要先出34567固 定牌型。若出炸弹先出4个 A, 若立牌出 34567; 若不立牌再观望一下 , 而不要立即追打 56789梅花同花顺。"
+  }
+}
