@@ -173,7 +173,8 @@ export function pickC100MustBeatSingleBeater(hand, levelRank, previousPlay, cand
   ) {
     const single10 = beaters.find(
       (item) => item.mainRank === "10"
-        && isSafeNonStraightBreakSingleRank("10", hand, levelRank),
+        && (levelRank === "5" && physicalRankCount(hand, "9") >= 4
+          || isSafeNonStraightBreakSingleRank("10", hand, levelRank)),
     );
     if (single10) return single10;
   }
@@ -368,6 +369,16 @@ export function pickC100MustBeatConsecutivePairsBeater(hand, levelRank, previous
     && physicalRankCount(hand, "9") >= 2
   ) {
     return beaters.find((item) => item.mainRank === "9") ?? null;
+  }
+  // 例6：8899101011管778899（打7，末家负责制）
+  if (
+    levelRank === "7"
+    && previousPlay.mainRank === "9"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "10") >= 4
+    && physicalRankCount(hand, "9") >= 4
+  ) {
+    return beaters.find((item) => item.mainRank === "10") ?? null;
   }
   return null;
 }
@@ -624,6 +635,15 @@ export function pickC100MustBeatTripleWithPairBeater(hand, levelRank, previousPl
   ) {
     return pickOrBuild("Q", "9");
   }
+  // 例8：末家88822管55533（打9，末家负责制）
+  if (
+    levelRank === "9"
+    && previousPlay.mainRank === "5"
+    && physicalRankCount(hand, "8") >= 3
+    && physicalRankCount(hand, "2") >= 2
+  ) {
+    return pickOrBuild("8", "2");
+  }
   if (passesSinceLastLead(tableContext) < 2) return null;
   // 例27：下家77722，上两家不要 → KKK22 管牌，保留三个3带对4
   if (
@@ -676,6 +696,15 @@ export function pickC100OpeningLead(hand, levelRank, candidates = [], tableConte
     && physicalRankCount(hand, "3") >= 3
   ) {
     return candidates.find((item) => item.type === PLAY_TYPES.tripleWithPair && item.mainRank === "3") ?? null;
+  }
+  // 例7：打4 A2345减手首发（C100-G1）
+  if (
+    levelRank === "4"
+    && physicalRankCount(hand, "7") >= 5
+    && physicalRankCount(hand, "10") >= 5
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    return candidates.find((item) => item.type === PLAY_TYPES.straight && item.mainRank === "5") ?? null;
   }
   // 例14：打 J，仅三裸 2 → 先出 222 逼封
   if (
@@ -889,6 +918,15 @@ export function pickC100OpeningLeadDirect(hand, levelRank) {
     && physicalRankCount(hand, "3") >= 3
   ) {
     return buildTripleWithPairFromHand(hand, "3", "4", levelRank);
+  }
+  // 例7：打4 → A2345直建（C100-G1）
+  if (
+    levelRank === "4"
+    && physicalRankCount(hand, "7") >= 5
+    && physicalRankCount(hand, "10") >= 5
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    return buildStraightFromHandByMainRank(hand, "5", levelRank, true);
   }
   // 例78：打4 四2/四7 → 34567直建（C100-G1）
   if (
@@ -1504,6 +1542,23 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
   if (
     tableContext.isOpening
     && leadMode === "fresh-open"
+    && levelRank === "4"
+    && physicalRankCount(hand, "7") >= 5
+    && physicalRankCount(hand, "10") >= 5
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "5") {
+      score -= 16_000;
+      reasons.push("【C100-G1】A2345减手首发");
+    }
+    if (candidate.type === PLAY_TYPES.single && candidate.mainRank === "A") {
+      score += 12_000;
+      reasons.push("【C100-G1】宜A2345，不宜单A浪费结构");
+    }
+  }
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
     && levelRank === "6"
     && physicalRankCount(hand, "7") >= 4
     && physicalRankCount(hand, "3") >= 3
@@ -1922,6 +1977,19 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
       score -= 18_000;
       reasons.push("【C100-O1】助攻连对管牌，667788 优于开炸");
     }
+    // 例6：8899101011管778899（打7，末家负责制）
+    if (
+      previousPlay.type === PLAY_TYPES.consecutivePairs
+      && candidate.type === PLAY_TYPES.consecutivePairs
+      && canBeat(candidate, previousPlay)
+      && levelRank === "7"
+      && previousPlay.mainRank === "9"
+      && passTail >= 2
+      && candidate.mainRank === "10"
+    ) {
+      score -= 18_000;
+      reasons.push("【C100-M1】8899101011管778899");
+    }
     // 例68：778899 管 556677（打4，末家负责制）
     if (
       previousPlay.type === PLAY_TYPES.consecutivePairs
@@ -2128,6 +2196,24 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     ) {
       score += 12_000;
       reasons.push("【C100-M1】末家宜KKK22，不宜透支Q三带二");
+    }
+    // 例10：过10管单8，不拆四9炸弹（打5）
+    if (
+      previousPlay.type === PLAY_TYPES.single
+      && levelRank === "5"
+      && previousPlay.mainRank === "8"
+      && physicalRankCount(hand, "9") >= 4
+    ) {
+      if (candidate.type === PLAY_TYPES.single && candidate.mainRank === "10") {
+        score -= 16_000;
+        reasons.push("【C100-G1】过10管8，留四9炸弹");
+      } else if (candidate.type === PLAY_TYPES.bomb) {
+        score += 14_000;
+        reasons.push("【C100-G1】有单10管牌不宜动炸");
+      } else if (candidate.type === PLAY_TYPES.single && candidate.mainRank === "9") {
+        score += 10_000;
+        reasons.push("【C100-G1】宜过10，不宜顺过9");
+      }
     }
     // 例8：末家三带二宜用最小对子附件（88822），不得拆四 A 炸弹
     if (
