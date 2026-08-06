@@ -8,6 +8,17 @@ import { classifyPlay } from "../engine/classify-play.mjs";
 import { createGameStateFromHands } from "../engine/game-state.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { getTurnAdvice } from "../coach/turn-advice.mjs";
+import { scoreCandidate } from "../strategy/recommend.mjs";
+import { generateBasicCandidates } from "../engine/generate-candidates.mjs";
+import { buildStrategicGroups } from "../strategy/strategic-groups.mjs";
+import { enrichScoringContext } from "../strategy/table-context.mjs";
+
+const TYPE_MAP = {
+  Pass: PLAY_TYPES.pass, Single: PLAY_TYPES.single, Pair: PLAY_TYPES.pair,
+  Triple: PLAY_TYPES.triple, TripleWithPair: PLAY_TYPES.tripleWithPair,
+  Straight: PLAY_TYPES.straight, ConsecutivePairs: PLAY_TYPES.consecutivePairs,
+  StraightFlush: PLAY_TYPES.straightFlush, Bomb: PLAY_TYPES.bomb,
+};
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -73,8 +84,31 @@ function runCase(n, expectType, expectRank) {
   }
 }
 
+function runStructure(n) {
+  const spec = scenario(n);
+  const hand = handFromCase(n);
+  const level = spec.levelRank;
+  const pool = generateBasicCandidates(hand, level, null, { lite: false, maxStraightVariants: 24 });
+  const pType = TYPE_MAP[spec.prefer.type];
+  const oType = TYPE_MAP[spec.over.type];
+  const prefer = pool.find((c) => c.type === pType && c.mainRank === spec.prefer.mainRank);
+  const over = pool.find((c) => c.type === oType && c.mainRank === spec.over.mainRank);
+  assert(prefer, `例${n} 缺 prefer`);
+  assert(over, `例${n} 缺 over`);
+  const groups = buildStrategicGroups(hand, level);
+  const ctx = enrichScoringContext(
+    { isOpening: true, leadMode: "fresh-open", preferredGroups: groups, _candidates: pool },
+    pool, hand, level,
+  );
+  const sp = scoreCandidate(prefer, hand, level, null, ctx).score;
+  const so = scoreCandidate(over, hand, level, null, ctx).score;
+  assert(sp < so, `例${n} structure ${sp} vs ${so}`);
+  console.log(`PASS 例${n} structure: ${spec.prefer.type}/${spec.prefer.mainRank} 优于 ${spec.over.type}/${spec.over.mainRank}`);
+}
+
 runCase(23, PLAY_TYPES.consecutivePairs, "4");
 runCase(24, PLAY_TYPES.consecutivePairs, "6");
 runCase(25, PLAY_TYPES.consecutivePairs, "7");
+runStructure(26);
 runCase(27, PLAY_TYPES.tripleWithPair, "K");
-console.log("PASS 例26 structure 跳过 Top1");
+console.log("PASS 例23～27 场景 Top1 golden");
