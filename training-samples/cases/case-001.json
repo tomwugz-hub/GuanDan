@@ -1,0 +1,243 @@
+{
+  "$schema": "guandan-100case/v0-draft",
+  "id": "case-001",
+  "caseNumber": 1,
+  "title": "此牌打2",
+  "source": {
+    "pdf": "training-samples/掼蛋实战100例.pdf",
+    "pdfPage": 13,
+    "assets": {
+      "pagePng": "assets/guandan-100cases/case-001-page13.png"
+    }
+  },
+  "game": {
+    "levelRank": "2",
+    "wildCard": {
+      "rank": "2",
+      "suit": "H",
+      "label": "红桃2（逢人配）"
+    }
+  },
+  "needsUserVerify": false,
+  "userVerified": true,
+  "verify": {
+    "revision": "v1-final",
+    "userAnchors": "用户确认 #1-27 全部27张",
+    "confidence": "high",
+    "userPrompt": "v1-final 全部27张已用户确认"
+  },
+  "narrative": {
+    "summary": "此牌打2。根据 “ 牌 型多元化 “ 原则 , 组出678910杂花顺 , 从而形 成三带对有回手 , 红配机动组炸弹。"
+  },
+  "doctrineRefs": [
+    {
+      "id": "C100-G1"
+    }
+  ],
+  "hand": {
+    "expectedCount": 27,
+    "cards": [
+      {
+        "index": 1,
+        "rank": "10",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃10"
+      },
+      {
+        "index": 2,
+        "rank": "J",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花J"
+      },
+      {
+        "index": 3,
+        "rank": "A",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃A"
+      },
+      {
+        "index": 4,
+        "rank": "Q",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃Q"
+      },
+      {
+        "index": 5,
+        "rank": "J",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃J"
+      },
+      {
+        "index": 6,
+        "rank": "10",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃10"
+      },
+      {
+        "index": 7,
+        "rank": "9",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃9"
+      },
+      {
+        "index": 8,
+        "rank": "8",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃8"
+      },
+      {
+        "index": 9,
+        "rank": "K",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃K"
+      },
+      {
+        "index": 10,
+        "rank": "K",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片K"
+      },
+      {
+        "index": 11,
+        "rank": "2",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃2（逢人配）"
+      },
+      {
+        "index": 12,
+        "rank": "K",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花K"
+      },
+      {
+        "index": 13,
+        "rank": "9",
+        "suit": "spades",
+        "deckIndex": 1,
+        "label": "黑桃9"
+      },
+      {
+        "index": 14,
+        "rank": "9",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片9"
+      },
+      {
+        "index": 15,
+        "rank": "10",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片10"
+      },
+      {
+        "index": 16,
+        "rank": "9",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花9"
+      },
+      {
+        "index": 17,
+        "rank": "8",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花8"
+      },
+      {
+        "index": 18,
+        "rank": "7",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃7"
+      },
+      {
+        "index": 19,
+        "rank": "6",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃6"
+      },
+      {
+        "index": 20,
+        "rank": "5",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片5"
+      },
+      {
+        "index": 21,
+        "rank": "5",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃5"
+      },
+      {
+        "index": 22,
+        "rank": "5",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花5"
+      },
+      {
+        "index": 23,
+        "rank": "3",
+        "suit": "clubs",
+        "deckIndex": 0,
+        "label": "梅花3"
+      },
+      {
+        "index": 24,
+        "rank": "3",
+        "suit": "spades",
+        "deckIndex": 0,
+        "label": "黑桃3"
+      },
+      {
+        "index": 25,
+        "rank": "3",
+        "suit": "spades",
+        "deckIndex": 1,
+        "label": "黑桃3"
+      },
+      {
+        "index": 26,
+        "rank": "4",
+        "suit": "hearts",
+        "deckIndex": 0,
+        "label": "红桃4"
+      },
+      {
+        "index": 27,
+        "rank": "4",
+        "suit": "diamonds",
+        "deckIndex": 0,
+        "label": "方片4"
+      }
+    ],
+    "structureCheck": {
+      "fourNines": "9♠×2 + 9♦ + 9♣",
+      "threeKings": "K♥ + K♦ + K♣",
+      "threeFives": "5♦ + 5♥ + 5♣",
+      "threeThrees": "3♣ + 3♠×2",
+      "pairFours": "4♥ + 4♦",
+      "doubleDeckValid": true
+    }
+  },
+  "goldenCaseNote": "tests/golden-case-100cases.mjs #4 已同步 v1-final 手牌（C100-G1）",
+  "authorPlan": {
+    "summary": "此牌打2。根据 “ 牌 型多元化 “ 原则 , 组出678910杂花顺 , 从而形 成三带对有回手 , 红配机动组炸弹。"
+  }
+}
