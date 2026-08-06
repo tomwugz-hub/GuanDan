@@ -2690,6 +2690,39 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
     }
   }
 
+  if (previousPlay?.type === PLAY_TYPES.consecutivePairs && !robotFast) {
+    const cpBeatCtx = enrichScoringContext(
+      { ...ctx, previousPlay, _candidates: [] },
+      [],
+      hand,
+      levelRank,
+    );
+    const cpPool = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true });
+    const c100CpEarly = pickC100MustBeatConsecutivePairsBeater(
+      hand,
+      levelRank,
+      previousPlay,
+      cpPool,
+      cpBeatCtx,
+    );
+    if (
+      c100CpEarly
+      && cpBeatCtx.opponentActive
+      && !cpBeatCtx.partnerOwnsTrick
+    ) {
+      return {
+        top: {
+          candidate: c100CpEarly,
+          score: -850,
+          reasons: ["【C100-M1】百例连对管牌，末家负责制"],
+        },
+        pool: [],
+        scoringContext: cpBeatCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
   let candidates = generateBasicCandidates(hand, levelRank, previousPlay, {
     lite: litePath,
     robotFast,

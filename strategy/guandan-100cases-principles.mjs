@@ -503,6 +503,16 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
         return built && canBeat(built, previousPlay) ? built : null;
       })();
   }
+  // 例95：9TJQK管34567（打8，顺过留大牌）
+  if (
+    levelRank === "8"
+    && previousPlay.mainRank === "7"
+    && physicalRankCount(hand, "K") >= 4
+    && physicalRankCount(hand, "J") >= 3
+  ) {
+    return beaters.find((item) => item.mainRank === "K")
+      ?? buildStraightFromHandByMainRank(hand, "K", levelRank, true);
+  }
   return null;
 }
 
@@ -1579,6 +1589,42 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     } else if (candidate.type === PLAY_TYPES.pair && compareRanks(candidate.mainRank, "9", levelRank) <= 0) {
       score += 14_000;
       reasons.push("【C100-G1】222逼封首发，不宜裸散对探路");
+    }
+  }
+  // 例94：34567杂花顺优于裸保四7炸（打2）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "2"
+    && physicalRankCount(hand, "7") >= 4
+    && physicalRankCount(hand, "K") >= 5
+    && hand.some((card) => card.rank === "BJ")
+    && physicalRankCount(hand, "3") >= 1
+    && physicalRankCount(hand, "4") >= 1
+  ) {
+    if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "7") {
+      score -= 12_000;
+      reasons.push("【C100-G1】34567杂花顺减单优于裸保7炸");
+    } else if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "7") {
+      score += 12_000;
+      reasons.push("【C100-G1】有34567路线不宜裸保7炸");
+    }
+  }
+  // 例96：四8炸优于四2炸（打2，多炸路线 C100-B1）
+  if (
+    tableContext.isOpening
+    && leadMode === "fresh-open"
+    && levelRank === "2"
+    && physicalRankCount(hand, "2") === 4
+    && physicalRankCount(hand, "8") === 3
+    && physicalRankCount(hand, "J") === 3
+  ) {
+    if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "8") {
+      score -= 4000;
+      reasons.push("【C100-B1】炸弹归位宜四8优于四2");
+    } else if (candidate.type === PLAY_TYPES.bomb && candidate.mainRank === "2") {
+      score += 4000;
+      reasons.push("【C100-B1】多炸路线宜四8优于四2");
     }
   }
   // 例67：拆8炸组A2345减单优于裸保8炸（打A）
