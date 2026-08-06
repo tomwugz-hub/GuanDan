@@ -513,6 +513,31 @@ export function pickC100MustBeatStraightBeater(hand, levelRank, previousPlay, ca
     return beaters.find((item) => item.mainRank === "K")
       ?? buildStraightFromHandByMainRank(hand, "K", levelRank, true);
   }
+  // 例99：8910JQ管45678（打A，末家负责制；宜杂花顺不宜同花顺）
+  if (
+    levelRank === "A"
+    && previousPlay.mainRank === "8"
+    && passesSinceLastLead(tableContext) >= 2
+    && hand.some((card) => card.rank === "BJ")
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "Q") >= 2
+  ) {
+    return beaters.find((item) => item.mainRank === "Q")
+      ?? buildStraightFromHandByMainRank(hand, "Q", levelRank, true);
+  }
+  // 例100：10JQKA管678910（打9，末家负责制）
+  if (
+    levelRank === "9"
+    && previousPlay.mainRank === "10"
+    && passesSinceLastLead(tableContext) >= 2
+    && physicalRankCount(hand, "K") >= 2
+    && hand.some((card) => card.rank === "BJ")
+    && hand.some((card) => card.rank === "SJ")
+    && physicalRankCount(hand, "6") >= 4
+  ) {
+    return beaters.find((item) => item.mainRank === "A")
+      ?? buildStraightFromHandByMainRank(hand, "A", levelRank, true);
+  }
   return null;
 }
 
@@ -1905,6 +1930,46 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     ) {
       score += 12_000;
       reasons.push("【C100-M1】宜10JQKA，不宜8910JQ");
+    }
+    // 例99：8910JQ管45678（打A，末家负责制；宜杂花顺不宜同花顺）
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && levelRank === "A"
+      && previousPlay.mainRank === "8"
+      && passTail >= 2
+      && hand.some((card) => card.rank === "BJ")
+      && hand.some((card) => card.rank === "SJ")
+      && physicalRankCount(hand, "Q") >= 2
+    ) {
+      if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "Q") {
+        score -= 16_000;
+        reasons.push("【C100-M1】8910JQ管45678，宜杂花顺");
+      } else if (candidate.type === PLAY_TYPES.straightFlush && candidate.mainRank === "Q") {
+        score += 14_000;
+        reasons.push("【C100-M1】8910JQ管45678，不宜动同花顺");
+      } else if (candidate.type === PLAY_TYPES.straight && compareRanks(candidate.mainRank, "J", levelRank) <= 0) {
+        score += 10_000;
+        reasons.push("【C100-M1】8910JQ管45678，不宜过低顺");
+      }
+    }
+    // 例100：10JQKA管678910（打9，末家负责制）
+    if (
+      previousPlay.type === PLAY_TYPES.straight
+      && levelRank === "9"
+      && previousPlay.mainRank === "10"
+      && passTail >= 2
+      && physicalRankCount(hand, "K") >= 2
+      && hand.some((card) => card.rank === "BJ")
+      && hand.some((card) => card.rank === "SJ")
+      && physicalRankCount(hand, "6") >= 4
+    ) {
+      if (candidate.type === PLAY_TYPES.straight && candidate.mainRank === "A") {
+        score -= 16_000;
+        reasons.push("【C100-M1】10JQKA管678910");
+      } else if (candidate.type === PLAY_TYPES.straight && compareRanks(candidate.mainRank, "K", levelRank) <= 0) {
+        score += 12_000;
+        reasons.push("【C100-M1】宜10JQKA，不宜8910JQ");
+      }
     }
     if (
       previousPlay.type === PLAY_TYPES.consecutivePairs
