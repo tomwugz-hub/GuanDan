@@ -583,6 +583,26 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     }
   }
 
+  // —— P5：接风有对可配时不宜裸三张 ——
+  if (
+    tableContext.leadMode === "catch-wind"
+    && isLeadTurn(tableContext)
+    && candidate.type === PLAY_TYPES.triple
+  ) {
+    const solePair = solePairForTripleRank(resolvedHand, levelRank, candidate.mainRank);
+    const tripleAnalysis = analyzeRankAvailability(resolvedHand, candidate.mainRank, levelRank);
+    const lockedInPlate = (tripleAnalysis.lockedEntries ?? []).some((e) => e.structure === "钢板");
+    const physicalHeld = physicalRankCount(resolvedHand, candidate.mainRank);
+    if (solePair && !lockedInPlate && physicalHeld < 4) {
+      violations.push({
+        code: "P5",
+        summary: `接风有对${solePair}可配，不宜裸三张${candidate.mainRank}`,
+        blockTop1: true,
+        blockTop3: false,
+      });
+    }
+  }
+
   if (
     BOMB_TYPES.has(candidate.type)
     && previousPlay

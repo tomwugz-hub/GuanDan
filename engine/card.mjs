@@ -64,3 +64,31 @@ export function cardLabel(card) {
 export function cardsLabel(cards) {
   return cards.map(cardLabel).join(" ");
 }
+
+/** 出牌所用牌必须来自手牌（按 cardId），逢人配也算手牌中的真牌 */
+export function playUsesOnlyHandCards(hand, play) {
+  if (!play) return false;
+  const cards = play.cards ?? [];
+  if (play.isPass || cards.length === 0) return true;
+  const handIds = new Set(hand.map(cardId));
+  const usedIds = new Set();
+  for (const card of cards) {
+    const id = cardId(card);
+    if (!handIds.has(id) || usedIds.has(id)) return false;
+    usedIds.add(id);
+  }
+  return true;
+}
+
+/** UI/教练展示：把手牌对象绑回 play.cards，避免 materialized 假牌或反序列化漂移 */
+export function resolvePlayCardsFromHand(hand, play) {
+  if (!play?.cards?.length) return [];
+  const byId = new Map(hand.map((card) => [cardId(card), card]));
+  const resolved = [];
+  for (const card of play.cards) {
+    const bound = byId.get(cardId(card));
+    if (!bound) return [];
+    resolved.push(bound);
+  }
+  return resolved;
+}

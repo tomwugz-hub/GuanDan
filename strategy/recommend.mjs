@@ -59,6 +59,7 @@ import {
   analyzeReservePairForPendingTriple,
   looseLeadSingleRanks,
   reasonFromPrinciple,
+  shouldPreferMidGameJokerOverLevelSingle,
   requiresBombForPairBeat,
   pickMinStructureBombBeater,
   hasStandalonePureBombBeater,
@@ -2171,8 +2172,22 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
       : beaters;
     const min = pickMin(safeBeaters);
     if (min) {
+      const singleCtx = analyzeMustBeatSingleContext(hand, levelRank, previousPlay, beatCtx);
+      const preferJoker = shouldPreferMidGameJokerOverLevelSingle(
+        hand, levelRank, previousPlay, singleCtx, beatCtx,
+      );
+      const jokerBeater = preferJoker
+        ? safeBeaters.find((item) => item.mainRank === "SJ" || item.mainRank === "BJ")
+        : null;
+      const chosen = jokerBeater ?? min;
       return {
-        top: { candidate: min, score: -800, reasons: [reasonFromPrinciple("P4")] },
+        top: {
+          candidate: chosen,
+          score: jokerBeater ? -820 : -800,
+          reasons: jokerBeater
+            ? [reasonFromPrinciple("P1"), "中局宜王压大单夺权"]
+            : [reasonFromPrinciple("P4")],
+        },
         pool: [],
         scoringContext: beatCtx,
         blockedCandidates: [],

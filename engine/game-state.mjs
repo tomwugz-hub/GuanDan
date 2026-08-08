@@ -1,4 +1,4 @@
-import { cardId } from "./card.mjs";
+import { cardId, playSignature } from "./card.mjs";
 import { classifyPlay } from "./classify-play.mjs";
 import { canBeat } from "./compare-play.mjs";
 import { createDoubleDeck, dealFourPlayers, shuffle } from "./deck.mjs";
@@ -13,6 +13,15 @@ const TEAMS = Object.freeze([
 function nextActivePlayerIndex(players, startIndex) {
   for (let offset = 1; offset <= PLAYER_COUNT; offset += 1) {
     const index = (startIndex - offset + PLAYER_COUNT) % PLAYER_COUNT;
+    if (!players[index].finishedOrder) return index;
+  }
+  return startIndex;
+}
+
+/** 顺时针下一家（本墩「其后」玩家须用此方向） */
+function forwardActivePlayerIndex(players, startIndex) {
+  for (let offset = 1; offset <= PLAYER_COUNT; offset += 1) {
+    const index = (startIndex + offset) % PLAYER_COUNT;
     if (!players[index].finishedOrder) return index;
   }
   return startIndex;
@@ -38,13 +47,88 @@ function trailingPassCount(state) {
   return count;
 }
 
+/** 本墩 playHistory 中最后一条非过牌记录 */
+function lastSubstantiveHistoryEntry(state) {
+  const history = state?.playHistory;
+  if (!history?.length) return null;
+  for (let index = history.length - 1; index >= 0; index -= 1) {
+    const entry = history[index];
+    if (entry.play?.type !== PLAY_TYPES.pass) return entry;
+  }
+  return null;
+}
+
 /** 本墩最后一条非过牌记录的玩家（比 lastActivePlayerIndex 更可靠） */
 function lastSubstantivePlayerIndex(state) {
-  for (let index = state.playHistory.length - 1; index >= 0; index -= 1) {
-    const entry = state.playHistory[index];
-    if (entry.play?.type !== PLAY_TYPES.pass) return entry.playerIndex;
+  const entry = lastSubstantiveHistoryEntry(state);
+  if (entry) return entry.playerIndex;
+  return state?.lastActivePlayerIndex ?? null;
+}
+
+/** history 中查找与 targetPlay 同型的出牌者（可选：仅从 afterEntry 之后查） */
+function findPlayOwnerInHistory(state, targetPlay, afterEntry = null) {
+  if (!state?.playHistory?.length || !targetPlay) return null;
+  const targetSig = playSignature(targetPlay);
+  let startIdx = 0;
+  if (afterEntry) {
+    const pos = state.playHistory.indexOf(afterEntry);
+    if (pos >= 0) startIdx = pos + 1;
   }
-  return state.lastActivePlayerIndex;
+  for (let i = state.playHistory.length - 1; i >= startIdx; i -= 1) {
+    const entry = state.playHistory[i];
+    if (entry.play?.type !== PLAY_TYPES.pass && playSignature(entry.play) === targetSig) {
+      return entry.playerIndex;
+    }
+  }
+  return null;
+}
+
+/**
+ * 桌面须压牌已压过队友上一手（如勇哥对5 压 老史对4），占牌者必为对手。
+ */
+export function partnerLeadWasSuperseded(state, playerIndex, currentPlay) {
+  if (!state || playerIndex == null || !currentPlay || currentPlay.type === PLAY_TYPES.pass) {
+    return false;
+  }
+  const histEntry = lastSubstantiveHistoryEntry(state);
+  if (!histEntry) return false;
+  if (playSignature(histEntry.play) === playSignature(currentPlay)) return false;
+  if (!canBeat(currentPlay, histEntry.play)) return false;
+  return teammateIndex(playerIndex) === histEntry.playerIndex;
+}
+
+/**
+ * 本墩占牌者：history 与 lastActive 一致时以 history 修正 stale index；
+ * history 落后时以 lastActive 为准；须压牌压过队友时占牌者必为对手。
+ */
+export function resolveTrickLeaderIndex(state, playerIndex = null) {
+  if (!state) return null;
+  const activePlay = state.lastActivePlay;
+  const activeIdx = state.lastActivePlayerIndex;
+  if (!activePlay || activePlay.type === PLAY_TYPES.pass) {
+    return lastSubstantivePlayerIndex(state) ?? activeIdx ?? null;
+  }
+  const histEntry = lastSubstantiveHistoryEntry(state);
+  if (!histEntry) return activeIdx ?? null;
+
+  if (playerIndex != null && partnerLeadWasSuperseded(state, playerIndex, activePlay)) {
+    const beater = findPlayOwnerInHistory(state, activePlay, histEntry);
+    if (beater != null) return beater;
+    if (activeIdx != null && teammateIndex(playerIndex) !== activeIdx) return activeIdx;
+    return forwardActivePlayerIndex(state.players, histEntry.playerIndex);
+  }
+
+  if (playSignature(histEntry.play) === playSignature(activePlay)) {
+    return histEntry.playerIndex ?? activeIdx ?? null;
+  }
+  // history 已记录更强占牌（如对手单8 压过队友单7），lastActive 滞后时以 history 为准
+  if (canBeat(histEntry.play, activePlay)) {
+    return histEntry.playerIndex ?? activeIdx ?? null;
+  }
+  if (canBeat(activePlay, histEntry.play)) {
+    return activeIdx ?? histEntry.playerIndex ?? null;
+  }
+  return histEntry.playerIndex ?? activeIdx ?? null;
 }
 
 /** 本墩占牌者仍需回应的未出完玩家数 */
@@ -53,6 +137,37 @@ function activeResponseCount(state, leadIndex) {
   return state.players.filter(
     (player, index) => index !== leadIndex && !player.finishedOrder,
   ).length;
+}
+
+/**
+ * lastActivePlay 未清但 playHistory 显示本墩已收（三家过）：接风待领出。
+ * 常见于机器人队列并发导致 passTurn 清空台面失败。
+ */
+export function isCatchWindPending(state) {
+  if (!state?.lastActivePlay || state.lastActivePlay.type === PLAY_TYPES.pass) {
+    return false;
+  }
+  const leadIndex = lastSubstantivePlayerIndex(state) ?? state.lastActivePlayerIndex;
+  if (leadIndex === null || leadIndex === undefined) return false;
+  const opponents = activeResponseCount(state, leadIndex);
+  if (opponents <= 0) return false;
+  return trailingPassCount(state) >= opponents;
+}
+
+/** 接风待领出时返回 null；history 更强占牌时优先 history，避免 stale lastActivePlay 误判队友占牌 */
+export function effectivePreviousPlay(state) {
+  if (!state?.lastActivePlay || state.lastActivePlay.type === PLAY_TYPES.pass) {
+    return null;
+  }
+  if (isCatchWindPending(state)) return null;
+  const active = state.lastActivePlay;
+  const histEntry = lastSubstantiveHistoryEntry(state);
+  if (histEntry?.play && playSignature(histEntry.play) !== playSignature(active)) {
+    if (canBeat(histEntry.play, active)) {
+      return histEntry.play;
+    }
+  }
+  return active;
 }
 
 /** 三家过牌后接风：占牌者未走完则本人接风，已走完则队友接风 */
@@ -164,17 +279,25 @@ export function createInitialGameState({ levelRank = "2", random = Math.random }
   };
 }
 
-export function createGameStateFromHands({ levelRank, hands, currentPlayerIndex = 0 }) {
+export function createGameStateFromHands({
+  levelRank,
+  hands,
+  currentPlayerIndex = 0,
+  lastActivePlay = null,
+  lastActivePlayerIndex = null,
+  playHistory = [],
+  turnNumber = 0,
+} = {}) {
   return {
     levelRank,
     players: createPlayers(hands),
     currentPlayerIndex,
-    lastActivePlay: null,
-    lastActivePlayerIndex: null,
+    lastActivePlay,
+    lastActivePlayerIndex,
     passCount: 0,
-    playHistory: [],
+    playHistory,
     finishedPlayers: [],
-    turnNumber: 0,
+    turnNumber,
   };
 }
 
@@ -285,6 +408,46 @@ export function getCurrentTrickEntries(state) {
   return entries;
 }
 
+/** 本墩占牌后，当前玩家出牌前，其后仍未表态的对手（防低价抢队友牌权） */
+export function opponentsPendingAfterPlayer(state, playerIndex) {
+  if (!state?.lastActivePlay || state.lastActivePlayerIndex == null) return [];
+  const leadIndex = lastSubstantivePlayerIndex(state) ?? state.lastActivePlayerIndex;
+
+  let winPlayIdx = -1;
+  for (let i = state.playHistory.length - 1; i >= 0; i -= 1) {
+    const entry = state.playHistory[i];
+    if (entry.play?.type !== PLAY_TYPES.pass && entry.playerIndex === leadIndex) {
+      winPlayIdx = i;
+      break;
+    }
+  }
+  if (winPlayIdx < 0) return [];
+
+  const respondedAfterWin = new Set();
+  for (let i = winPlayIdx + 1; i < state.playHistory.length; i += 1) {
+    respondedAfterWin.add(state.playHistory[i].playerIndex);
+  }
+
+  const pending = [];
+  let cursor = forwardActivePlayerIndex(state.players, leadIndex);
+  const visited = new Set();
+  while (cursor !== leadIndex) {
+    // 占牌者已走完时 forward 永远到不了 leadIndex，须防无限循环
+    if (visited.has(cursor) || state.players[leadIndex]?.finishedOrder) break;
+    visited.add(cursor);
+    if (
+      cursor !== playerIndex
+      && !respondedAfterWin.has(cursor)
+      && !state.players[cursor]?.finishedOrder
+      && teammateIndex(playerIndex) !== cursor
+    ) {
+      pending.push(cursor);
+    }
+    cursor = forwardActivePlayerIndex(state.players, cursor);
+  }
+  return pending;
+}
+
 function postActionCurrentPlayerIndex(state, actorIndex, play) {
   if (play.type === PLAY_TYPES.pass) {
     const leadIndex = lastSubstantivePlayerIndex(state) ?? state.lastActivePlayerIndex;
@@ -298,10 +461,23 @@ function postActionCurrentPlayerIndex(state, actorIndex, play) {
 /** 检测 currentPlayer 与 playHistory 是否矛盾（常见于机器人队列并发） */
 export function detectTurnStuck(state) {
   if (!state || isGameOver(state)) return false;
+
+  if (isCatchWindPending(state)) return true;
+
   const current = state.currentPlayerIndex;
   const last = state.playHistory[state.playHistory.length - 1];
 
-  if (last?.playerIndex === current) return true;
+  if (last?.playerIndex === current) {
+    // 合法接风：刚过完牌、台面已清空，同一玩家接风领出
+    if (
+      last.play?.type === PLAY_TYPES.pass
+      && !state.lastActivePlay
+      && state.lastActivePlayerIndex === null
+    ) {
+      return false;
+    }
+    return true;
+  }
 
   if (!state.lastActivePlay || state.lastActivePlayerIndex === null) return false;
 
@@ -358,6 +534,32 @@ function repairFromCurrentTrick(state) {
 
 /** 修复矛盾的 currentPlayer，不重复写入 playHistory */
 export function repairTurnStuck(state) {
+  const leader = resolveTrickLeaderIndex(state, state.currentPlayerIndex);
+  if (
+    state.lastActivePlay
+    && leader != null
+    && state.lastActivePlayerIndex != null
+    && leader !== state.lastActivePlayerIndex
+  ) {
+    return {
+      state: { ...state, lastActivePlayerIndex: leader },
+      repaired: true,
+    };
+  }
+
+  if (isCatchWindPending(state)) {
+    return {
+      state: {
+        ...state,
+        currentPlayerIndex: resolveTrickWindPlayerIndex(state),
+        lastActivePlay: null,
+        lastActivePlayerIndex: null,
+        passCount: 0,
+      },
+      repaired: true,
+    };
+  }
+
   if (!detectTurnStuck(state)) return { state, repaired: false };
 
   const current = state.currentPlayerIndex;

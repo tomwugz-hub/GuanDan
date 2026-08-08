@@ -1,4 +1,4 @@
-import { isJoker, isWildCard } from "./card.mjs";
+import { cardId, isJoker, isWildCard } from "./card.mjs";
 import { PLAY_TYPES } from "./play-types.mjs";
 import { rankPower } from "./rank-order.mjs";
 
@@ -215,14 +215,32 @@ function classifyWithWildCards(cards, levelRank) {
   return best ?? invalid(cards, "Wildcard cards could not form a supported play type.");
 }
 
+/** 出牌对象必须引用传入牌张，禁止 materialized 逢人配假牌泄漏到 play.cards */
+function bindPlayCardsToInput(play, inputCards) {
+  if (!play || play.type === PLAY_TYPES.invalid || play.type === PLAY_TYPES.pass) return play;
+  const inputById = new Map(inputCards.map((card) => [cardId(card), card]));
+  const bound = [];
+  const usedIds = new Set();
+  for (const card of play.cards ?? []) {
+    const id = cardId(card);
+    const resolved = inputById.get(id);
+    if (!resolved || usedIds.has(id)) {
+      return invalid(inputCards, "Play cards are not a subset of input cards.");
+    }
+    usedIds.add(id);
+    bound.push(resolved);
+  }
+  return { ...play, cards: bound };
+}
+
 export function classifyPlay(cards, levelRank) {
   if (cards.length === 1) {
-    return classifyNaturalPlay(cards, levelRank);
+    return bindPlayCardsToInput(classifyNaturalPlay(cards, levelRank), cards);
   }
 
   if (cards.some((card) => isWildCard(card, levelRank))) {
-    return classifyWithWildCards(cards, levelRank);
+    return bindPlayCardsToInput(classifyWithWildCards(cards, levelRank), cards);
   }
 
-  return classifyNaturalPlay(cards, levelRank);
+  return bindPlayCardsToInput(classifyNaturalPlay(cards, levelRank), cards);
 }
