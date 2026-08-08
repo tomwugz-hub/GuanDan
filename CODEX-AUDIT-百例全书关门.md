@@ -1,6 +1,6 @@
-# 百例全书关门 · 本地自动化审计（rev53）
+# 百例全书关门 · 本地自动化审计（rev56）
 
-- **基线：** `origin/main` + 本地提交（接风/引擎修复）
+- **基线：** `origin/main` @ rev56
 - **日期：** 2026-08-08
 - **模式：** 自动化回归（无浏览器抽验）
 
@@ -14,20 +14,20 @@
 | 候选校验 | 99 | `npm run test:100cases:validate` | PASS |
 | 教纲冒烟 | 203 | `npm run test:100cases:smoke` | PASS |
 | 主冒烟 | — | `node tests/smoke.mjs` | PASS |
-| 策略修订 | — | `COACH_STRATEGY_REVISION = 53` | — |
+| 策略修订 | — | `COACH_STRATEGY_REVISION = 56` | — |
 
-## 本轮策略修复（rev51→53）
+## 本轮策略修复（rev53→56）
 
-1. **例27 / P4**：末家负责制（`passCount≥2`）不适用「小三带二宜过牌」
-2. **例77**：场景批跑对齐百例首发直建快路径
-3. **接风裸三张**：`doctrine-enforce` 接风有对可配时 block 裸三张 Top1
-4. **引擎**：`game-state` 补齐 `isCatchWindPending` / `resolveTrickLeaderIndex` 等导出（修复 main 导入断裂）
-5. **中局 lite**：须压单 A 时 human-lite 快路径宜王夺权
+1. **P10 防抢权**：队友占圈 + 下家未表态 → 首推最小散单（修复 `hasOnlyAntiSinglePenaltyReasons` 误判 pro-single 理由）
+2. **C100-G1**：搭档占圈宜过在 `opponentsPendingAfterPlayer>0` 时不适用
+3. **hard-invariants**：人类路径 `mustYieldToPartner` 改用 `shouldYieldPassToPartner`（非 robot 版）
+4. **human-lite**：须压三张结构安全过滤；三带二 UI 列跑道 + 逢人配拆跑道门禁
+5. **wild-doctrine**：有结构安全三带二够压时不盲过
 
 ## 待办
 
-- [ ] 浏览器抽验：游戏页页脚 rev53 + 随机 3 例目视 Top1
-- [ ] `strategy-self-check` · `opening-defer-triple-with-pair-to-consecutive-pairs.mjs`（本地 WIP，非百例范围）
+- [ ] 浏览器抽验：游戏页页脚 rev56 + 随机 3 例目视 Top1
+- [ ] `must-beat-twp-no-break-sf-game-path.mjs`（游戏 UI 无列组时 AAA 路径，仍 Pass）
 
 ## 结论
 
