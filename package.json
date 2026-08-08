@@ -14,6 +14,8 @@
     "test:100cases:1-50": "node tests/case-scenario-top1-1-50.mjs",
     "test:100cases:51-100": "node tests/case-scenario-top1-51-100.mjs",
     "test:100cases:1-100": "node tests/case-scenario-top1-1-100.mjs",
+    "test:100cases:validate": "node tools/validate-100cases-scenarios.mjs",
+    "test:100cases:smoke": "node tests/100cases-smoke.mjs",
     "ingest-review": "node tools/ingest-game-review.mjs",
     "test:align": "node tests/recommend-alignment.mjs",
     "test:audit": "node tools/audit-strategy.mjs 100",
