@@ -5,6 +5,7 @@
 import { canBeat } from "../engine/compare-play.mjs";
 import { classifyPlay } from "../engine/classify-play.mjs";
 import { isWildCard } from "../engine/card.mjs";
+import { opponentsPendingAfterPlayer } from "../engine/game-state.mjs";
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { compareRanks } from "../engine/rank-order.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
@@ -1706,7 +1707,7 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     reasons.push("【C100-G1】同型管牌重组，保路线不丢");
   }
 
-  // —— C100-G1 搭档占牌宜让（例12）：搭档小单占权，保留炸弹/同花顺，即使下家对手未表态 ——
+  // —— C100-G1 搭档占牌宜让（例12）：搭档小单占权，保留炸弹/同花顺；下家对手未表态时不适用 ——
   if (
     previousPlay
     && lastActive != null
@@ -1715,6 +1716,7 @@ export function cases100Adjustment(candidate, hand, levelRank, tableContext) {
     && previousPlay.type === PLAY_TYPES.single
     && compareRanks(previousPlay.mainRank, "6", levelRank) <= 0
     && (tableContext.danger ?? 0) < 2
+    && opponentsPendingAfterPlayer(tableContext.state, playerIndex ?? 0).length === 0
   ) {
     if (candidate.type === PLAY_TYPES.pass) {
       score -= 14_000;

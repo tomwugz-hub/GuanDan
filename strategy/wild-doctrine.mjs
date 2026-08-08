@@ -68,7 +68,12 @@ export function shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, 
   const resolvedLevel = levelRank ?? tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
   if (compareRanks(previousPlay.mainRank, "9", resolvedLevel) > 0) return false;
   const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
-  return resolvedHand.length >= 15;
+  if (resolvedHand.length < 15) return false;
+  const pool = tableContext._candidates ?? [];
+  if (hasStructureSafeRoutineBeater(pool, previousPlay, resolvedHand, resolvedLevel, tableContext.preferredGroups)) {
+    return false;
+  }
+  return true;
 }
 
 /** 须压对手常规牌型且手牌仍多：不宜拆顺子/同花顺/四炸等同型压牌 */

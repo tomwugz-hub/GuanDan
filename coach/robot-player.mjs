@@ -30,6 +30,30 @@ import {
   mustBeatPairSfRunwayPrinciplesPenalty,
 } from "../strategy/sf-runway-guard.mjs";
 import { filterHardInvariants } from "../strategy/hard-invariants.mjs";
+import { detectDoctrineViolations } from "../strategy/doctrine-enforce.mjs";
+
+/** 应急兜底：教纲 blockTop1 候选不可用（如 7788 非合法连对时不应 333+55） */
+function isDoctrineBlockedLead(candidate, hand, levelRank, previousPlay, tableContext = {}) {
+  if (!candidate || candidate.type === PLAY_TYPES.pass) return false;
+  const pool = generateBasicCandidates(hand, levelRank, previousPlay, { lite: true, emergency: true });
+  const mustLead = !previousPlay || previousPlay.type === PLAY_TYPES.pass;
+  const ctx = enrichScoringContext(
+    {
+      ...tableContext,
+      previousPlay,
+      hand,
+      isOpening: mustLead,
+      leadMode: mustLead
+        ? "fresh-open"
+        : (tableContext.leadMode ?? inferLeadMode(tableContext.state, tableContext.playerIndex ?? 0)),
+    },
+    pool,
+    hand,
+    levelRank,
+  );
+  ctx._candidates = pool;
+  return detectDoctrineViolations(candidate, hand, levelRank, ctx).some((v) => v.blockTop1);
+}
 
 /** 机器人 lite 候选池上限（须压炸弹等复杂局面仍须快） */
 export const ROBOT_LITE_MAX_CANDIDATES = 6;
@@ -787,6 +811,8 @@ export function humanAdviceFallback(hand, levelRank, previousPlay, preferredGrou
   const c100Emergency = result?.reasons?.some((reason) => reason.includes("百例"));
   if (
     result?.candidate
+    && result.candidate.type !== PLAY_TYPES.pass
+    && !isDoctrineBlockedLead(result.candidate, hand, levelRank, previousPlay, tableContext)
     && (c100Emergency || filterHardInvariants([result.candidate], hand, levelRank, ctx).length > 0)
   ) {
     return result;
@@ -798,7 +824,8 @@ export function humanAdviceFallback(hand, levelRank, previousPlay, preferredGrou
       hand,
       levelRank,
       ctx,
-    ).filter((candidate) => candidate.type !== PLAY_TYPES.pass);
+    ).filter((candidate) => candidate.type !== PLAY_TYPES.pass
+      && !isDoctrineBlockedLead(candidate, hand, levelRank, previousPlay, tableContext));
     const candidate = pickOpeningLeadFallback(
       hand,
       levelRank,

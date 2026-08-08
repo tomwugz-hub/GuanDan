@@ -1,6 +1,6 @@
 import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { inferTripleWithPairKickerRank, breaksBombIntegrity } from "./scorers/structure.mjs";
-import { resolveLastActivePlayerIndex, shouldRobotYieldPassToPartner } from "./table-context.mjs";
+import { resolveLastActivePlayerIndex, shouldRobotYieldPassToPartner, shouldYieldPassToPartner } from "./table-context.mjs";
 
 function resolvedCandidate(item) {
   return item?.candidate ?? item;
@@ -34,7 +34,10 @@ function mustYieldToPartner(ctx, hand) {
   if (ctx.allowBeatPartner === true) return false;
   if (typeof ctx.partnerYieldRequired === "boolean") return ctx.partnerYieldRequired;
   if (ctx.state) {
-    return shouldRobotYieldPassToPartner({ ...ctx, hand, partnerOwnsTrick: true });
+    if (ctx.scoringAudience === "robot") {
+      return shouldRobotYieldPassToPartner({ ...ctx, hand, partnerOwnsTrick: true });
+    }
+    return shouldYieldPassToPartner({ ...ctx, hand, partnerOwnsTrick: true });
   }
   // Timeline/audit records do not contain a complete engine state. In that
   // conservative context, overtaking the opposite-seat partner is auditable.

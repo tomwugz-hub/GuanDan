@@ -270,7 +270,11 @@ function regularFallbackReason(play, previousPlay) {
 export function hasOnlyAntiSinglePenaltyReasons(reasons) {
   const list = (reasons ?? []).map((reason) => String(reason ?? "").trim()).filter(Boolean);
   if (list.length === 0) return false;
-  return list.every((reason) => isAntiSingleReason(reason) || /^【P\d+】/.test(reason));
+  // 正向 pro-single（散单够压/防抢权）不得因 【P*】 前缀误判为「仅罚分」
+  if (list.some((reason) => /够压|优先出散单|宜最小散单|防.*抢权|跟住对手单张/.test(reason))) {
+    return false;
+  }
+  return list.every((reason) => isAntiSingleReason(reason) || isAntiStructurePenaltyReason(reason));
 }
 
 /**
