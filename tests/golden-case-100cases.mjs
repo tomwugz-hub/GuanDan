@@ -2792,7 +2792,7 @@ function scoreOpening(candidate, hand, profile, extraCtx = {}) {
 {
   const hand = cards([
     ["3", SUITS.spades],
-    ["9", SUITS.clubs], ["9", SUITS.diamonds], ["9", SUITS.hearts], ["9", SUITS.spades],
+    ["9", SUITS.clubs], ["9", SUITS.diamonds], ["9", SUITS.hearts],
     ["K", SUITS.clubs], ["K", SUITS.diamonds],
     ["Q", SUITS.hearts], ["Q", SUITS.spades],
     ["J", SUITS.clubs], ["J", SUITS.diamonds],

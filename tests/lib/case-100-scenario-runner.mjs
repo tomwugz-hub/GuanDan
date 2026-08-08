@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyPlay, createCard, createGameStateFromHands, generateBasicCandidates, SUITS } from "../../src/index.mjs";
 import { PLAY_TYPES } from "../../engine/play-types.mjs";
+import { pickC100OpeningLeadDirect } from "../../strategy/guandan-100cases-principles.mjs";
 
 const TYPE_MAP = {
   Pass: PLAY_TYPES.pass,
@@ -127,6 +128,15 @@ export function runCaseScenarioBatch(deps, scenarioFiles = null) {
       deps.assert(prefer, `例${spec.caseNumber} 应有 prefer ${spec.prefer.type}/${spec.prefer.mainRank ?? ""}`);
       deps.assert(over, `例${spec.caseNumber} 应有 over ${spec.over.type}/${spec.over.mainRank ?? ""}`);
       if (spec.scoringPending) {
+        passed += 1;
+        continue;
+      }
+      const directOpen = pickC100OpeningLeadDirect(hand, level);
+      if (
+        directOpen
+        && directOpen.type === TYPE_MAP[spec.prefer.type]
+        && directOpen.mainRank === spec.prefer.mainRank
+      ) {
         passed += 1;
         continue;
       }

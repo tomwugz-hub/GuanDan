@@ -55,6 +55,14 @@ export function shouldReserveWildForSmallRoutineBeat(tableContext, hand, previou
 
 /** 须压对手中小三带二且手牌仍多：宜过牌等循环，不宜拆结构/耗逢人配/动大三带二 */
 export function shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, hand, previousPlay, levelRank = null) {
+  const history = tableContext.state?.playHistory ?? [];
+  let passCount = 0;
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].play?.type === PLAY_TYPES.pass) passCount += 1;
+    else break;
+  }
+  // 末家负责制：上两家已不要，须管牌，不适用 P4 宜过牌
+  if (passCount >= 2) return false;
   if (!shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank)) return false;
   if (previousPlay?.type !== PLAY_TYPES.tripleWithPair) return false;
   const resolvedLevel = levelRank ?? tableContext.levelRank ?? tableContext.state?.levelRank ?? "2";
