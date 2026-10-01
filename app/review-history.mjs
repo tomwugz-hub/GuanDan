@@ -30,8 +30,18 @@ export function saveReviewHistoryEntry(entry) {
     top1AlignRate: entry.totalHands > 0
       ? (entry.totalHands - (entry.divergenceCount ?? 0)) / entry.totalHands
       : 0,
+    coachBetterCount: entry.coachBetterCount ?? 0,
+    coachQuestionableCount: entry.coachQuestionableCount ?? 0,
     divergences: (entry.divergences ?? []).slice(0, 24),
     coachAdviceTimeline: entry.coachAdviceTimeline ?? [],
+    playHistory: entry.playHistory ?? entry.recentPlays ?? [],
+    recentPlays: entry.playHistory ?? entry.recentPlays ?? [],
+    endRemainingHands: entry.endRemainingHands ?? [],
+    playHistoryTotal: entry.playHistoryTotal
+      ?? entry.playHistory?.length
+      ?? entry.recentPlays?.length
+      ?? entry.totalHands
+      ?? 0,
   };
   data.games.push(record);
   if (data.games.length > MAX_STORED_GAMES) {

@@ -90,8 +90,9 @@ export function partnerLeadNeedsGuard(tableContext) {
   if (play.type === PLAY_TYPES.single) {
     return compareRanks(play.mainRank, "J", levelRank) < 0;
   }
+  // 队友对子占牌：只能过牌让队友，无法用压队友的对子/炸弹「防抢权」（对J压对A即抢队友牌权）
   if (play.type === PLAY_TYPES.pair) {
-    return compareRanks(play.mainRank, "Q", levelRank) < 0;
+    return false;
   }
   return false;
 }

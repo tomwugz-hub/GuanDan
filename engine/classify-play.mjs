@@ -174,12 +174,12 @@ function classifyNaturalPlay(cards, levelRank, originalCards = cards, wildcardAs
   return invalid(originalCards, "Cards do not match a supported play type.");
 }
 
-function replacementCardsForWildCard(wildCard, levelRank) {
+function replacementCardsForWildCard(wildCard, levelRank, suits = NORMAL_SUITS) {
   return NORMAL_RANKS.map((rank) => {
     if (rank === levelRank) {
-      return NORMAL_SUITS.map((suit) => ({ rank, suit, deckIndex: wildCard.deckIndex }));
+      return suits.map((suit) => ({ rank, suit, deckIndex: wildCard.deckIndex }));
     }
-    return NORMAL_SUITS.map((suit) => ({ rank, suit, deckIndex: wildCard.deckIndex }));
+    return suits.map((suit) => ({ rank, suit, deckIndex: wildCard.deckIndex }));
   }).flat();
 }
 
@@ -190,6 +190,12 @@ function classifyWithWildCards(cards, levelRank) {
 
   let best = null;
 
+  // Suits only affect five-card straight flushes. Otherwise the original
+  // search always keeps its first (spade) assignment for each rank choice.
+  const naturalCards = cards.filter((card) => !isWildCard(card, levelRank));
+  const canBeStraightFlush = cards.length === 5 && isSameSuit(naturalCards);
+  const replacementSuits = canBeStraightFlush ? NORMAL_SUITS : ["S"];
+
   function walk(position, materializedCards, wildcardAssignments) {
     if (position === wildCardIndexes.length) {
       best = betterPlay(best, classifyNaturalPlay(materializedCards, levelRank, cards, wildcardAssignments));
@@ -197,7 +203,7 @@ function classifyWithWildCards(cards, levelRank) {
     }
 
     const { card: wildCard, index } = wildCardIndexes[position];
-    for (const replacement of replacementCardsForWildCard(wildCard, levelRank)) {
+    for (const replacement of replacementCardsForWildCard(wildCard, levelRank, replacementSuits)) {
       const nextCards = [...materializedCards];
       nextCards[index] = replacement;
       walk(position + 1, nextCards, [
@@ -234,6 +240,9 @@ function bindPlayCardsToInput(play, inputCards) {
 }
 
 export function classifyPlay(cards, levelRank) {
+  if (new Set(cards.map(cardId)).size !== cards.length) {
+    return invalid(cards, "Play cards are not a subset of input cards.");
+  }
   if (cards.length === 1) {
     return bindPlayCardsToInput(classifyNaturalPlay(cards, levelRank), cards);
   }

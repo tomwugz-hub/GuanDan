@@ -3,8 +3,8 @@ import { safeGetItem, safeSetItem } from "./storage-safe.mjs";
 
 const FEEDBACK_QUEUE_KEY = "guandan-coach-feedback-queue";
 const DISPUTE_QUEUE_KEY = "guandan-coach-dispute-queue";
-const BRIDGE_URL = "http://127.0.0.1:8787/coach-feedback";
-const DISPUTE_URL = "http://127.0.0.1:8787/coach-dispute";
+const BRIDGE_URL = "";
+const DISPUTE_URL = "";
 
 export function readFeedbackQueue() {
   try {
@@ -28,6 +28,7 @@ export function enqueueFeedback(payload) {
 }
 
 export async function postCoachFeedback(payload) {
+  throw new Error("反馈保存在当前浏览器，暂不提供云端反馈同步");
   const response = await fetch(BRIDGE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -111,6 +112,7 @@ export function enqueueDispute(dispute) {
 }
 
 export async function postUserDispute(dispute) {
+  throw new Error("争议记录保存在当前浏览器，暂不提供云端同步");
   const response = await fetch(DISPUTE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

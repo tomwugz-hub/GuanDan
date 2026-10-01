@@ -13,7 +13,7 @@ import {
 import { safeGetItem, safeRemoveItem, safeSetItem } from "./storage-safe.mjs";
 
 export { SESSION_STORAGE_KEY };
-const SESSION_BRIDGE_URL = "http://127.0.0.1:8787/game-session";
+const SESSION_BRIDGE_URL = "";
 const REMOTE_TIMEOUT_MS = 3000;
 
 export function buildPersistedSession(payload) {
@@ -75,6 +75,7 @@ export function clearPersistedSession() {
 
 /** 写入本机 8787 服务（Cursor 内置浏览器刷新后仍可从磁盘恢复） */
 export async function savePersistedSessionRemote(session) {
+  return { ok: false, online: false };
   if (!session?.state || !isSessionPersistable(session)) {
     return { ok: false, online: false };
   }
@@ -94,6 +95,7 @@ export async function savePersistedSessionRemote(session) {
 }
 
 export async function loadPersistedSessionRemote() {
+  return null;
   try {
     const response = await fetchWithTimeout(SESSION_BRIDGE_URL, { method: "GET" }, REMOTE_TIMEOUT_MS);
     const data = await response.json();
@@ -114,6 +116,7 @@ export async function loadPersistedSessionRemote() {
 }
 
 export async function clearPersistedSessionRemote() {
+  return;
   try {
     await fetchWithTimeout(SESSION_BRIDGE_URL, { method: "DELETE" }, REMOTE_TIMEOUT_MS);
   } catch {

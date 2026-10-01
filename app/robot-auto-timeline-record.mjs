@@ -10,6 +10,8 @@ export function buildRobotAutoTimelineRecord({
   handBefore,
   lastActivePlayerIndex,
   mustBeat,
+  decisionSignature = null,
+  evidence = [],
   recommendation = null,
   actualPlay,
 }) {
@@ -23,6 +25,8 @@ export function buildRobotAutoTimelineRecord({
     handBefore: [...(handBefore ?? [])],
     tableBefore: { lastActivePlayerIndex: lastActivePlayerIndex ?? null },
     mustBeat: mustBeat ?? null,
+    decisionSignature,
+    evidence: [...evidence],
     choices: recommendation ? [{
       index: 1,
       score: Math.round(recommendation.score ?? 0),
@@ -34,4 +38,3 @@ export function buildRobotAutoTimelineRecord({
     actualChoiceMatch: recommendation ? "suggestion-1" : "outside-top-3",
   };
 }
-

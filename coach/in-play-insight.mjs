@@ -2,15 +2,23 @@
 
 import { tryLocalCoachAnswer } from "./local-qa.mjs";
 import {
+  buildTeammateBeatInsightAnalysis,
+  expandVagueObjectionQuestion,
+  findTeammateBeatIncident,
+} from "./partner-trick-insight.mjs";
+import {
   detectAdviceTop1Violations,
   doctrineViolationAckLine,
+  buildTop1MustBeatSfRunwayInsight,
 } from "../strategy/doctrine-enforce.mjs";
+import { partnerHandCount } from "../strategy/table-context.mjs";
 
 /** 与 user-dispute 教纲关键词一致，避免循环依赖 */
 const INSIGHT_DOCTRINE_KEYWORDS = [
   "拆顺子", "拆炸", "拆炸弹", "拆同花顺", "保结构", "保顺子", "保炸",
-  "不应拆", "不该拆", "结构", "教纲", "P1", "P4", "P5", "P6", "P9",
-  "空炸", "过牌", "接风", "队友", "散牌", "逢人配",
+  "不应拆", "不该拆", "结构", "教纲", "P1", "P4", "P5", "P6", "P9", "P10",
+  "空炸", "过牌", "接风", "队友", "散牌", "逢人配", "压队友", "不合理", "大王对", "王对",
+  "送队友", "送老史", "送走", "只剩一张",
 ];
 
 export const INSIGHT_VERDICTS = {
@@ -19,12 +27,12 @@ export const INSIGHT_VERDICTS = {
   REJECTED: "rejected",
 };
 
-const USER_RIGHT_SIGNALS = /你的理解对|你是对的|你说得对|不应.*拆|不宜.*拆|违规|请不要照做|认可|保结构|保顺子|保炸|保对/;
+const USER_RIGHT_SIGNALS = /你的理解对|你是对的|你说得对|不应.*拆|不宜.*拆|违规|请不要照做|认可|保结构|保顺子|保炸|保对|推荐偏了|应出单|请出单|你手里有散单|不该拆结构|不拆结构/;
 const COACH_DEFEND_SIGNALS = /推荐.*更稳|教练.*更对|仍建议|照抄|左侧推荐合理/;
 
 /** 用户向状态标签（局末复盘） */
 export const INSIGHT_STATUS_LABELS = {
-  [INSIGHT_VERDICTS.ADOPTED]: "已优化",
+  [INSIGHT_VERDICTS.ADOPTED]: "教纲相关",
   [INSIGHT_VERDICTS.RECORDED]: "已记录",
   [INSIGHT_VERDICTS.REJECTED]: "已回复",
 };
@@ -72,20 +80,49 @@ function userRightFromQa(text) {
  * @returns {{ analysis: string, verdict: string, qaSource?: string, doctrineViolations?: object[] }}
  */
 export function analyzeInPlayInsight(question, context) {
-  const qa = tryLocalCoachAnswer(question, context);
+  const teammateBeat = findTeammateBeatIncident(
+    context.recentPlayHistory ?? context.playHistory ?? [],
+  );
+  const expandedQuestion = expandVagueObjectionQuestion(question, context);
+  const qa = tryLocalCoachAnswer(expandedQuestion, context);
   const violations = detectAdviceTop1Violations(context) ?? [];
   const blockTop1 = violations.filter((v) => v.blockTop1);
   const qaText = qa?.text ?? "";
-  const doctrineMatch = rationaleMatchesDoctrineKeywords(question);
+  const doctrineMatch = rationaleMatchesDoctrineKeywords(question)
+    || rationaleMatchesDoctrineKeywords(expandedQuestion);
 
   let analysis = extractBriefAnalysis(qaText);
   let verdict = INSIGHT_VERDICTS.REJECTED;
 
-  if (blockTop1.length > 0) {
+  const partnerCardsLeft = context.state
+    ? partnerHandCount({
+      state: context.state,
+      playerIndex: context.humanPlayerIndex ?? context.playerIndex ?? 0,
+    })
+    : 27;
+  const feedPartnerQuery = /送.*走|只剩.*张|送老史|送队友|哪怕拆牌|打小牌/i.test(String(question ?? ""));
+
+  if (teammateBeat && /不合理|不对|压队友|王对|大王|不该压/i.test(String(question ?? ""))) {
     verdict = INSIGHT_VERDICTS.ADOPTED;
-    const ack = doctrineViolationAckLine(blockTop1);
-    if (ack && !analysis.includes("违规")) {
-      analysis = `${ack}${analysis}`;
+    analysis = buildTeammateBeatInsightAnalysis(teammateBeat) ?? analysis;
+  } else if (feedPartnerQuery || (partnerCardsLeft === 1 && /老史|队友|送|一张|拆牌/i.test(String(question ?? "")))) {
+    verdict = INSIGHT_VERDICTS.ADOPTED;
+    if (!/你说得对|送队友走完|不宜三带二|P10/.test(analysis)) {
+      analysis = extractBriefAnalysis(qaText || "队友剩1张冲刺，接风宜小单送队友走完。");
+    }
+  } else if (blockTop1.length > 0) {
+    verdict = INSIGHT_VERDICTS.ADOPTED;
+    const sfInsight = buildTop1MustBeatSfRunwayInsight(context);
+    if (sfInsight) {
+      analysis = extractBriefAnalysis(sfInsight);
+    } else {
+      const ack = doctrineViolationAckLine(blockTop1);
+      const violationText = blockTop1.map((v) => v.summary).filter(Boolean).join("");
+      if (ack && violationText) {
+        analysis = extractBriefAnalysis(`${ack}${violationText}`);
+      } else if (ack && !analysis.includes("违规")) {
+        analysis = `${ack}${analysis}`;
+      }
     }
   } else if (doctrineMatch && userRightFromQa(qaText)) {
     verdict = INSIGHT_VERDICTS.ADOPTED;
@@ -106,10 +143,10 @@ export function formatInPlayInsightReply(analysis, verdict) {
   const body = String(analysis ?? "").trim();
   const prefix = body ? `教练说：${body}` : "教练说：";
   if (verdict === INSIGHT_VERDICTS.ADOPTED) {
-    return `${prefix} 这手你说得对，已记入本局优化`;
+    return `${prefix} 这手你说得对，局末复盘会标注教纲要点`;
   }
   if (verdict === INSIGHT_VERDICTS.RECORDED) {
-    return `${prefix} 意见已记录，局末一并汇总`;
+    return `${prefix} 意见已记录，局末一并汇总供学习`;
   }
   return prefix;
 }
@@ -148,8 +185,8 @@ export function buildGameInsightsMarkdownSection(gameInsights = []) {
   const lines = [
     "## 本局你的意见",
     "",
-    `打牌中即时反馈共 ${items.length} 条：已采纳优化 ${adopted.length} 条、已记录待观察 ${recorded.length} 条。`,
-    "处理器对 verdict=adopted 视同「你更对」改 strategy/；recorded 供积累观察。",
+    `打牌中即时反馈共 ${items.length} 条：教纲相关 ${adopted.length} 条、已记录 ${recorded.length} 条。`,
+    "意见写入复盘归档与数据集，**不会**自动触发改 `strategy/`。",
     "",
   ];
 

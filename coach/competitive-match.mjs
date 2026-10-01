@@ -1,14 +1,20 @@
-import { cardId, isJoker, isWildCard } from "../engine/card.mjs";
+import { cardId } from "../engine/card.mjs";
 import { createInitialGameState, isGameOver } from "../engine/game-state.mjs";
 import { rankPower } from "../engine/rank-order.mjs";
 import { runAutoGame } from "./auto-game.mjs";
+import {
+  canResistTribute,
+  selectReturnCard,
+  selectTributeCard,
+} from "../strategy/tribute-doctrine.mjs";
 
 export const COMPETITIVE_RANKS = Object.freeze(["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]);
+/** 打 A 连续若干把未双上则退回 2（竞技赛常见规则） */
+export const ACE_ATTEMPT_LIMIT = 3;
 const TEAMS = Object.freeze([
   { id: 0, players: [0, 2] },
   { id: 1, players: [1, 3] },
 ]);
-const RETURNABLE_RANKS = new Set(["2", "3", "4", "5", "6", "7", "8", "9", "10"]);
 
 function teamOfPlayer(playerIndex) {
   return playerIndex % 2 === 0 ? 0 : 1;
@@ -27,35 +33,11 @@ function cardStrength(card, levelRank) {
 }
 
 function highestCard(hand, levelRank) {
-  const tributeCandidates = hand.filter((card) => !isWildCard(card, levelRank));
-  return [...tributeCandidates].sort((left, right) => cardStrength(right, levelRank) - cardStrength(left, levelRank))[0] ?? null;
+  return selectTributeCard(hand, levelRank);
 }
 
 function lowestReturnCard(hand, levelRank) {
-  const returnable = hand.filter((card) => RETURNABLE_RANKS.has(card.rank) && card.rank !== levelRank);
-  const source = returnable.length > 0 ? returnable : hand.filter((card) => card.rank !== "SJ" && card.rank !== "BJ");
-  const rankCounts = new Map();
-  for (const card of hand) {
-    if (isJoker(card) || isWildCard(card, levelRank)) continue;
-    rankCounts.set(card.rank, (rankCounts.get(card.rank) ?? 0) + 1);
-  }
-
-  function returnDamage(card) {
-    if (isJoker(card)) return 10_000;
-    if (isWildCard(card, levelRank)) return 9_000;
-    const count = rankCounts.get(card.rank) ?? 0;
-    if (count >= 5) return 6_000 + count * 100;
-    if (count === 4) return 5_000;
-    if (count === 3) return 1_200;
-    if (count === 2) return 420;
-    return 0;
-  }
-
-  return [...source].sort((left, right) => {
-    const damageDiff = returnDamage(left) - returnDamage(right);
-    if (damageDiff !== 0) return damageDiff;
-    return cardStrength(left, levelRank) - cardStrength(right, levelRank);
-  })[0] ?? null;
+  return selectReturnCard(hand, levelRank, { avoidBombHead: true });
 }
 
 function removeCard(hand, target) {
@@ -79,9 +61,7 @@ function moveCard(players, fromIndex, toIndex, card) {
 }
 
 function hasDoubleBigJokers(players, tributePlayerIndexes) {
-  return tributePlayerIndexes
-    .flatMap((playerIndex) => players[playerIndex].hand)
-    .filter((card) => card.rank === "BJ").length >= 2;
+  return canResistTribute(players, tributePlayerIndexes);
 }
 
 function tributePairsForResult(finishedPlayers) {
@@ -169,7 +149,54 @@ export function applyTribute(gameState, previousFinishedPlayers) {
   };
 }
 
-export function settleGame(gameState, currentLevels) {
+/**
+ * 打 A 局：未双上的队伍计一次；连续 ACE_ATTEMPT_LIMIT 把未双上退回 2。
+ * 刚自 K 升到 A 时重置该队计次。
+ */
+export function applyAceAttemptRule({
+  levelRank,
+  currentLevels,
+  nextLevels,
+  winningTeam,
+  sameTeamSecond,
+  aceAttempts = [0, 0],
+}) {
+  const attempts = [...aceAttempts];
+  const demotedTeams = [];
+  const levels = [...nextLevels];
+
+  if (winningTeam != null && currentLevels[winningTeam] !== "A" && levels[winningTeam] === "A") {
+    attempts[winningTeam] = 0;
+  }
+
+  if (levelRank !== "A") {
+    return { nextLevels: levels, aceAttempts: attempts, demotedTeams };
+  }
+
+  for (const team of [0, 1]) {
+    if (currentLevels[team] !== "A") continue;
+    if (winningTeam === team && sameTeamSecond) continue;
+
+    attempts[team] = (attempts[team] ?? 0) + 1;
+    if (attempts[team] >= ACE_ATTEMPT_LIMIT) {
+      levels[team] = "2";
+      attempts[team] = 0;
+      demotedTeams.push(team);
+    }
+  }
+
+  return { nextLevels: levels, aceAttempts: attempts, demotedTeams };
+}
+
+export function normalizeCompetitiveMatch(match) {
+  if (!match) return match;
+  return {
+    ...match,
+    aceAttempts: Array.isArray(match.aceAttempts) ? [...match.aceAttempts] : [0, 0],
+  };
+}
+
+export function settleGame(gameState, currentLevels, aceAttempts = [0, 0]) {
   if (!isGameOver(gameState)) throw new Error("Cannot settle an unfinished game.");
   const [first, second] = gameState.finishedPlayers;
   const winningTeam = teamOfPlayer(first);
@@ -180,12 +207,23 @@ export function settleGame(gameState, currentLevels) {
   const matchComplete = wasAtAce && sameTeamSecond;
   if (!matchComplete) nextLevels[winningTeam] = nextRank(currentLevels[winningTeam], upgradeSteps);
 
+  const aceResult = applyAceAttemptRule({
+    levelRank: gameState.levelRank,
+    currentLevels,
+    nextLevels,
+    winningTeam,
+    sameTeamSecond,
+    aceAttempts,
+  });
+
   return {
     winningTeam,
     upgradeSteps,
     sameTeamSecond,
     matchComplete,
-    nextLevels,
+    nextLevels: aceResult.nextLevels,
+    aceAttempts: aceResult.aceAttempts,
+    demotedTeams: aceResult.demotedTeams,
   };
 }
 
@@ -202,6 +240,7 @@ export function createCompetitiveMatch({ random = Math.random, startingRank = "2
     winnerTeam: null,
     history: [],
     pendingTributeEvents: [],
+    aceAttempts: [0, 0],
   };
 }
 
@@ -224,7 +263,8 @@ export function startNextCompetitiveGame(match, { random = Math.random } = {}) {
 }
 
 export function finishCompetitiveGame(match, completedGame) {
-  const settlement = settleGame(completedGame, match.levels);
+  const normalized = normalizeCompetitiveMatch(match);
+  const settlement = settleGame(completedGame, normalized.levels, normalized.aceAttempts);
   const nextHistory = [
     ...match.history,
     {
@@ -237,9 +277,10 @@ export function finishCompetitiveGame(match, completedGame) {
   ];
   if (settlement.matchComplete) {
     return {
-      ...match,
+      ...normalized,
       currentGame: completedGame,
       levels: settlement.nextLevels,
+      aceAttempts: settlement.aceAttempts,
       complete: true,
       winnerTeam: settlement.winningTeam,
       history: nextHistory,
@@ -248,11 +289,12 @@ export function finishCompetitiveGame(match, completedGame) {
     };
   }
   return {
-    ...match,
+    ...normalized,
     levels: settlement.nextLevels,
+    aceAttempts: settlement.aceAttempts,
     currentLevelRank: settlement.nextLevels[settlement.winningTeam],
     currentGame: completedGame,
-    gameNumber: match.gameNumber + 1,
+    gameNumber: normalized.gameNumber + 1,
     previousFinishedPlayers: completedGame.finishedPlayers,
     history: nextHistory,
     pendingTributeEvents: [],
@@ -292,4 +334,6 @@ export const competitiveRules = Object.freeze({
   teamOfPlayer,
   nextRank,
   applyTribute,
+  applyAceAttemptRule,
+  ACE_ATTEMPT_LIMIT,
 });

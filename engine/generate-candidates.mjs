@@ -2,8 +2,8 @@ import { classifyPlay } from "./classify-play.mjs";
 import { canBeat } from "./compare-play.mjs";
 import { cardId, isWildCard, playUsesOnlyHandCards } from "./card.mjs";
 import { PLAY_TYPES } from "./play-types.mjs";
-import { rankPower } from "./rank-order.mjs";
-import { enumerateStraightFlushCandidates } from "../strategy/straight-flush-arrange.mjs";
+import { compareRanks, rankPower } from "./rank-order.mjs";
+import { enumerateStraightFlushCandidates } from "./straight-flush-candidates.mjs";
 
 const CHAIN_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
 const NORMAL_SUITS = ["S", "H", "C", "D"];
@@ -85,7 +85,12 @@ function buildSameRankCombos(groups, wildCards, rank, size, comboLimit = 5, abor
 }
 
 /** 同点炸弹：从四炸到满张均生成；有纯四炸时优先生成不含逢人配的组合 */
-function addBombCandidatesForRank(candidates, groups, wildCards, rank, levelRank, { lite = false, emergency = false, abortCheck = null } = {}) {
+function addBombCandidatesForRank(candidates, groups, wildCards, rank, levelRank, {
+  lite = false,
+  emergency = false,
+  deterministicBounded = false,
+  abortCheck = null,
+} = {}) {
   if (abortCheck?.()) return;
   const naturalCards = naturalCardsForRank(groups, rank);
   const maxSize = naturalCards.length + wildCards.length;
@@ -98,7 +103,9 @@ function addBombCandidatesForRank(candidates, groups, wildCards, rank, levelRank
       ? 2
       : lite
         ? (size === 4 && naturalCards.length >= 4 ? 4 : 3)
-        : (size === 4 && naturalCards.length >= 4 ? 8 : 5);
+        : deterministicBounded
+          ? 1
+          : (size === 4 && naturalCards.length >= 4 ? 8 : 5);
     for (const combo of buildSameRankCombos(groups, wildCards, rank, size, comboLimit, abortCheck)) {
       if (abortCheck?.()) break;
       candidates.push(classifyPlay(combo, levelRank));
@@ -151,19 +158,44 @@ function addComplexCandidates(candidates, groups, wildCards, levelRank, {
   includeConsecutivePairs = true,
   includePlane = true,
   chainComboMax = 18,
+  tripleComboMax = 12,
+  kickerComboMax = 6,
+  kickerRankMax = Infinity,
+  previousPlay = null,
   abortCheck = null,
 } = {}) {
-  const ranks = [...groups.keys()].filter((rank) => rank !== "SJ" && rank !== "BJ");
+  const ranks = [...groups.keys()]
+    .filter((rank) => rank !== "SJ" && rank !== "BJ")
+    .sort((left, right) => rankPower(left, levelRank) - rankPower(right, levelRank));
 
   if (includeTripleWithPair) {
     for (const tripleRank of ranks) {
       if (abortCheck?.()) break;
-      const tripleCombos = buildSameRankCombos(groups, wildCards, tripleRank, 3, 12);
+      if (
+        previousPlay?.type === PLAY_TYPES.tripleWithPair
+        && compareRanks(tripleRank, previousPlay.mainRank, levelRank) <= 0
+      ) continue;
+      const tripleCombos = buildSameRankCombos(groups, wildCards, tripleRank, 3, tripleComboMax);
       for (const tripleCombo of tripleCombos) {
         const remainingWildCards = subtractCards(wildCards, tripleCombo.filter((card) => wildCards.includes(card)));
-        for (const pairRank of ranks) {
-          if (pairRank === tripleRank) continue;
-          for (const pairCombo of buildSameRankCombos(groups, remainingWildCards, pairRank, 2).slice(0, 6)) {
+        const pairRanks = ranks
+          .filter((pairRank) => (
+            pairRank !== tripleRank
+            && (naturalCardsForRank(groups, pairRank).length + remainingWildCards.length >= 2)
+          ))
+          .sort((left, right) => (
+            Number(left === levelRank) - Number(right === levelRank)
+            || rankPower(left, levelRank) - rankPower(right, levelRank)
+          ))
+          .slice(0, kickerRankMax);
+        for (const pairRank of pairRanks) {
+          for (const pairCombo of buildSameRankCombos(
+            groups,
+            remainingWildCards,
+            pairRank,
+            2,
+            kickerComboMax,
+          )) {
             candidates.push(classifyPlay([...tripleCombo, ...pairCombo], levelRank));
           }
         }
@@ -174,7 +206,7 @@ function addComplexCandidates(candidates, groups, wildCards, levelRank, {
   if (includeStraight) {
     for (const ranksWindow of chainWindows(5, 5)) {
       if (abortCheck?.()) break;
-      for (const combo of buildChainCombos(groups, wildCards, ranksWindow, 1, 18, abortCheck)) {
+      for (const combo of buildChainCombos(groups, wildCards, ranksWindow, 1, chainComboMax, abortCheck)) {
         candidates.push(classifyPlay(combo, levelRank));
       }
     }
@@ -183,7 +215,7 @@ function addComplexCandidates(candidates, groups, wildCards, levelRank, {
   if (includeConsecutivePairs) {
     for (const ranksWindow of chainWindows(3, 3)) {
       if (abortCheck?.()) break;
-      for (const combo of buildChainCombos(groups, wildCards, ranksWindow, 2, 18, abortCheck)) {
+      for (const combo of buildChainCombos(groups, wildCards, ranksWindow, 2, chainComboMax, abortCheck)) {
         candidates.push(classifyPlay(combo, levelRank));
       }
     }
@@ -230,17 +262,23 @@ export function generateBasicCandidates(hand, levelRank, previousPlay = null, op
   const lite = options.lite === true;
   const emergency = options.emergency === true;
   const robotFast = options.robotFast === true;
+  const deterministicBounded = options.deterministicBounded === true;
   const previousType = previousPlay?.type ?? null;
   const isOpening = !previousType || previousType === PLAY_TYPES.pass;
   const robotLead = robotFast && isOpening;
-  const genStarted = performance.now();
+  const genStarted = robotFast ? performance.now() : 0;
   const robotGenBudgetMs = robotFast ? (robotLead ? 150 : 50) : null;
   const outerAbort = typeof options.abortCheck === "function" ? options.abortCheck : null;
   const abortCheck = () => {
     if (robotGenBudgetMs != null && performance.now() - genStarted > robotGenBudgetMs) return true;
     return outerAbort?.() ?? false;
   };
-  const genOpts = { lite: lite || robotFast, emergency: emergency || robotFast, abortCheck };
+  const genOpts = {
+    lite: lite || robotFast,
+    emergency: emergency || robotFast,
+    deterministicBounded,
+    abortCheck,
+  };
   const wildCards = hand.filter((card) => isWildCard(card, levelRank));
   const nonWildCards = hand.filter((card) => !isWildCard(card, levelRank));
   const groups = groupByRank(nonWildCards);
@@ -280,7 +318,7 @@ export function generateBasicCandidates(hand, levelRank, previousPlay = null, op
     includePairs ? 2 : null,
     includeTriples ? 3 : null,
   ].filter(Boolean);
-  const sameRankComboLimit = robotFast ? 2 : emergency ? 2 : (lite ? 4 : 12);
+  const sameRankComboLimit = robotFast ? 2 : emergency ? 2 : (lite ? 4 : deterministicBounded ? 1 : 12);
 
   for (const [rank, cards] of groups) {
     if (abortCheck?.()) break;
@@ -327,7 +365,11 @@ export function generateBasicCandidates(hand, levelRank, previousPlay = null, op
       includeStraight,
       includeConsecutivePairs,
       includePlane,
-      chainComboMax: robotFast ? 6 : (emergency ? 2 : 18),
+      chainComboMax: deterministicBounded ? 2 : robotFast ? 6 : (emergency ? 2 : 18),
+      tripleComboMax: deterministicBounded ? 1 : 12,
+      kickerComboMax: deterministicBounded ? 1 : 6,
+      kickerRankMax: deterministicBounded ? 1 : Infinity,
+      previousPlay,
       abortCheck,
     });
   }

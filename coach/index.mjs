@@ -8,4 +8,5 @@ export * from "./turn-advice.mjs";
 export * from "./robot-player.mjs";
 export * from "./auto-game.mjs";
 export * from "./review.mjs";
+export * from "./variation-training.mjs";
 export * from "./competitive-match.mjs";

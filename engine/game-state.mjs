@@ -318,7 +318,7 @@ export function playCards(state, cards) {
   if (play.type === PLAY_TYPES.pass) {
     return passTurn(state);
   }
-  if (!canBeat(play, state.lastActivePlay)) {
+  if (!canBeat(play, effectivePreviousPlay(state))) {
     throw new Error("Selected play cannot beat the previous active play.");
   }
 
@@ -365,7 +365,7 @@ export function playCards(state, cards) {
 }
 
 export function passTurn(state) {
-  if (!state.lastActivePlay) {
+  if (!effectivePreviousPlay(state)) {
     throw new Error("Cannot pass when there is no active play to beat.");
   }
 

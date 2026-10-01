@@ -6,8 +6,8 @@ import { PLAY_TYPES } from "../engine/play-types.mjs";
 import {
   alignReasonsForPlay,
   dedupeReasonStrings,
+  isDoctrinePrincipleReason,
   isEnforcementReason,
-  mergeReasonsByPrincipleCode,
 } from "../strategy/reason-align.mjs";
 import {
   explainRankAvailability,
@@ -32,6 +32,8 @@ import {
   isFollowingOpponentPair,
   resolveStraightBreakForSingle,
   resolveStraightBreakForTripleWithPair,
+  hasSpareSingleOutsideStraights,
+  isActionableLooseSingleBeater,
   resolveTripleBreakForPair,
   resolveTripleBreakForConsecutivePairs,
   resolveTripleBreakForStraight,
@@ -39,9 +41,15 @@ import {
 import {
   detectAdviceTop1Violations,
   doctrineViolationAckLine,
+  buildTop1MustBeatSfRunwayInsight,
 } from "../strategy/doctrine-enforce.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
 import { compareRanks, isControlRank, rankOrder, rankPower } from "../engine/rank-order.mjs";
+import {
+  buildTeammateBeatInsightAnalysis,
+  expandVagueObjectionQuestion,
+  findTeammateBeatIncident,
+} from "./partner-trick-insight.mjs";
 
 /** FAB 页脚版本标识，便于确认是否加载新 bundle */
 export const RULE_ENGINE_VERSION = "v2";
@@ -210,7 +218,24 @@ export function sanitizeReasonForUser(reason) {
   return raw;
 }
 
-/** 推荐理由列表：去掉 ML/执法条目与矛盾惩罚项，按原则码合并，空则回退默认句 */
+/** 泛化兜底句：多条并存时靠后，优先展示跟牌/压牌策略句 */
+const GENERIC_USER_REASON_PATTERNS = [
+  /^用对子跟牌或抢权$/,
+  /^用单张跟牌或抢权$/,
+  /^跟牌抢回牌权$/,
+  /^开局减手$/,
+  /^接风减手$/,
+  /^顺子减手$/,
+];
+
+function userReasonPriority(reason) {
+  const raw = String(reason ?? "").trim();
+  if (!raw) return 99;
+  if (GENERIC_USER_REASON_PATTERNS.some((pattern) => pattern.test(raw))) return 10;
+  return 0;
+}
+
+/** 推荐理由列表：去掉 ML/执法/教纲码与矛盾惩罚项，默认只留 1 句最有信息量的策略向人话 */
 export function filterReasonsForUser(
   reasons,
   fallback = "这是当前评分较好的合法选择",
@@ -227,18 +252,16 @@ export function filterReasonsForUser(
     play,
     { previousPlay },
   );
-  let filtered = mergeReasonsByPrincipleCode(
-    dedupeReasonStrings(
-      aligned
-        .map((reason) => translateReasonForLearner(reason, { levelRank, previousPlay })
-          ?? sanitizeReasonForUser(reason))
-        .filter(Boolean),
-    ),
+  let filtered = dedupeReasonStrings(
+    aligned
+      .map((reason) => translateReasonForLearner(reason, { levelRank, previousPlay })
+        ?? sanitizeReasonForUser(reason))
+      .filter(Boolean)
+      .filter((reason) => !isDoctrinePrincipleReason(reason)),
   );
-  const reasonLimit = maxReasons ?? (choiceIndex >= 1 ? 2 : null);
-  if (reasonLimit != null && filtered.length > reasonLimit) {
-    filtered = filtered.slice(0, reasonLimit);
-  }
+  filtered = filtered
+    .sort((a, b) => userReasonPriority(a) - userReasonPriority(b))
+    .slice(0, maxReasons ?? 1);
   return filtered.length > 0 ? filtered : [fallback];
 }
 
@@ -348,6 +371,10 @@ function translateReasonForLearner(reason, context = {}) {
     "队友本墩已出过牌，可过牌等同花顺/炸弹": "队友本墩已跟牌，可过牌保留炸弹",
     "队友本墩已跟牌，可过牌保留炸弹": "队友本墩已跟牌，可过牌保留炸弹",
     "队友本墩已跟牌，可过牌保留大牌": "队友本墩已跟牌，可过牌保留大牌",
+    "队友本墩已出过牌，不必强行亮同花顺": "队友本墩已跟牌，可过牌保留大牌",
+    "队友本墩已出过牌，不必叠炸拦对手": "队友本墩已跟牌，可过牌保留炸弹",
+    "【P10】队友本墩已出过牌，不必叠更大炸": "队友本墩已跟牌，可过牌保留炸弹",
+    "【P10】队友占牌，正常让牌不压队友": "队友占牌，正常让牌不压队友",
     "对手报单，用级牌压更保险，避免被队友送牌放行": "对手报单，用级牌压更保险，避免被队友送牌放行",
     "对手报单，最小单张压牌易被队友送牌放行": "对手报单，最小单张压易被队友送牌，宜换级牌或大牌",
     "这手会动到已有炸弹，需要用牌路收益来抵消": "会动到已有炸弹，只有明显收益才值得",
@@ -987,16 +1014,16 @@ function findLooseSingleBeaterRank(hand, counts, mustBeat, levelRank, question) 
   const mentioned = q.match(/单([3-9]|10|J|Q|K|A|2)/i);
   if (mentioned) {
     const rank = normalizeRank(mentioned[1]);
-    if ((counts.get(rank) ?? 0) === 1 && compareRanks(rank, mustBeat.mainRank, levelRank) > 0) {
+    if (isActionableLooseSingleBeater(rank, hand, levelRank, mustBeat.mainRank)) {
       return rank;
     }
   }
-  for (const [rank, count] of counts.entries()) {
-    if (count === 1 && compareRanks(rank, mustBeat.mainRank, levelRank) > 0) {
-      return rank;
-    }
+  let best = null;
+  for (const [rank] of counts.entries()) {
+    if (!isActionableLooseSingleBeater(rank, hand, levelRank, mustBeat.mainRank)) continue;
+    if (!best || compareRanks(rank, best, levelRank) < 0) best = rank;
   }
-  return null;
+  return best;
 }
 
 /** 有散牌单张可压小单时，解释为何不应拆结构 */
@@ -1109,9 +1136,8 @@ function parseStraightFocusRank(question, topPlay) {
 function findSafeLooseBeaterRank(hand, counts, mustBeat, levelRank) {
   if (mustBeat?.type !== PLAY_TYPES.single) return null;
   let best = null;
-  for (const [rank, count] of counts.entries()) {
-    if (rank === "SJ" || rank === "BJ") continue;
-    if (count !== 1 || compareRanks(rank, mustBeat.mainRank, levelRank) <= 0) continue;
+  for (const [rank] of counts.entries()) {
+    if (!isActionableLooseSingleBeater(rank, hand, levelRank, mustBeat.mainRank)) continue;
     if (resolveStraightBreakForSingle(rank, hand, levelRank).breaksStraight) continue;
     if (!best || compareRanks(rank, best, levelRank) < 0) best = rank;
   }
@@ -1177,6 +1203,18 @@ function answerWhyPlayBreaksStraightQuestion(question, context, counts) {
     }
   } else {
     contentLines.push(`否，打${focusShort}不拆理牌后的顺子。`);
+    if (mustBeat?.type === PLAY_TYPES.single) {
+      const principleLines = buildBeatSinglePrincipleAnswer(context, counts, {
+        preferredLooseRank: safeLoose ?? focusRank,
+      });
+      if (principleLines?.length > 1) {
+        const answerText = sanitizeControlNarrative(
+          [`否，打${focusShort}不拆理牌后的顺子。`, ...principleLines.slice(1)].slice(0, 4).join("\n"),
+          levelRank,
+        );
+        return { source: "rule-engine", mode: "why-not-play", text: answerText };
+      }
+    }
     if (topPlay?.mainRank === focusRank) {
       contentLines.push(`推荐1就是单${rankLabel(focusRank)}，可以出。`);
     }
@@ -1251,12 +1289,36 @@ function answerWhyBombControlThenGroupQuestion(context) {
   return { source: "rule-engine", mode: "why-bomb-then-group", text: lines.join("\n") };
 }
 
+/** Top1 是否须压拆同花顺跑道（连对/三带二/对子），非凑四炸 */
+function top1MustBeatSfRunwayViolation(context) {
+  return buildTop1MustBeatSfRunwayInsight(context);
+}
+
+function answerTop1MustBeatSfRunwayObjection(context) {
+  const insight = buildTop1MustBeatSfRunwayInsight(context);
+  if (!insight) return null;
+  return {
+    source: "rule-engine",
+    mode: "why-must-beat-sf-runway",
+    text: `【规则引擎作答】${insight}`,
+  };
+}
+
+function isMustBeatSfRunwayObjectionQuestion(question, context) {
+  const q = String(question ?? "");
+  if (!top1MustBeatSfRunwayViolation(context)) return false;
+  if (/同花顺/i.test(q) && /不应|不宜|不该|不要|别.*拆|拆.*同花顺|同花顺.*拆/i.test(q)) return true;
+  return /不合理|不对|有问题|偏了|推荐.*错|不应拆|不宜拆|不该拆/i.test(q);
+}
+
 /** 是否追问「为何拆同花顺凑四炸/五炸」 */
-function isWhyBreakStraightFlushForBombQuestion(question) {
+function isWhyBreakStraightFlushForBombQuestion(question, context = null) {
   const q = String(question ?? "");
   if (!/同花顺/i.test(q)) return false;
-  return /拆.*同花顺|同花顺.*拆|凑.*炸|组.*炸|四个?[3-9JQKA2]|四张?[3-9JQKA2]/i.test(q)
-    || /为什么.*(?:让|要).*拆/i.test(q);
+  const bombHint = /凑.*炸|组.*炸|四炸|四个?[3-9JQKA2]|四张?[3-9JQKA2]/i.test(q);
+  if (context && top1MustBeatSfRunwayViolation(context) && !bombHint) return false;
+  if (bombHint) return true;
+  return /拆.*同花顺|同花顺.*拆/i.test(q) && /为什么.*(?:让|要).*拆/i.test(q);
 }
 
 function parseStraightFlushBombRank(question, counts) {
@@ -1309,7 +1371,7 @@ function resolveStraightFlushBombConflict(hand, levelRank, bombRank) {
 
 /** 拆同花顺凑炸：正面回应用户质疑并给替代炸 */
 function answerWhyBreakStraightFlushForBombQuestion(question, context, counts) {
-  if (!isWhyBreakStraightFlushForBombQuestion(question)) return null;
+  if (!isWhyBreakStraightFlushForBombQuestion(question, context)) return null;
 
   const levelRank = context.levelRank ?? "2";
   const hand = context.humanHand ?? [];
@@ -2747,6 +2809,12 @@ function partnerHandCountFromContext(context) {
     const row = before.find((item) => item.playerIndex === partner);
     return row?.handCount ?? 27;
   }
+  const players = context.players;
+  if (Array.isArray(players) && players.length > 0) {
+    const partner = partnerIndexFromContext(context);
+    const row = players.find((item) => item.playerIndex === partner);
+    if (row?.handCount != null) return row.handCount;
+  }
   return 27;
 }
 
@@ -2755,6 +2823,43 @@ function topPlayIsBombOnPartner(context) {
   const top = context.currentAdvice?.choices?.[0];
   const topPlay = top?.play ?? top?.candidate;
   return Boolean(topPlay && BOMB_PLAY_TYPES.has(topPlay.type));
+}
+
+/** 追问：队友剩1张，接风宜小单送队友走完 */
+function isFeedPartnerFinishQuestion(question, context) {
+  const q = String(question ?? "");
+  if (/炸|夺权|五炸|满张/i.test(q)) return false;
+  if (/送.*走|送队友|送对家|送老史|送.*走完|打小牌送|小单.*送/i.test(q)) return true;
+  if (/队友|对家|老史|搭档/.test(q) && /(只剩|剩).*(一张|1张)|一张牌/.test(q)) return true;
+  if (/哪怕拆牌|打小牌|拆牌.*小/i.test(q) && /队友|老史|对家|搭档/.test(q)) return true;
+  return partnerHandCountFromContext(context) === 1
+    && /接风|领出|走完|头游|不合理|不对/i.test(q);
+}
+
+function answerFeedPartnerFinishQuestion(context) {
+  const partnerName = partnerNameFromContext(context);
+  const partnerCount = partnerHandCountFromContext(context);
+  const top = context.currentAdvice?.choices?.[0];
+  const topPlay = top?.play ?? top?.candidate;
+  const lines = [
+    "【规则引擎作答】",
+    "",
+    `结论：你说得对。${partnerName}只剩${partnerCount}张冲刺时，**接风宜打小单送队友走完**，哪怕拆牌也值得。`,
+    "原则P10（队友冲刺）：此时不宜三带二/连对等成组抢权，容易被对手拦截，耽误队友拿头游。",
+    "原则P11针对**对手**报单封门；队友剩1张时应优先送队友，不是封对手末张。",
+  ];
+  if (topPlay?.type === PLAY_TYPES.single) {
+    lines.push(`左侧推荐1「${playShortLabel(topPlay)}」若为小单，与送队友节奏一致。`);
+  } else if (topPlay?.type === PLAY_TYPES.tripleWithPair) {
+    lines.push(`左侧推荐1「${playShortLabel(topPlay)}」偏成组减手，送队友时应改推小单。`);
+  } else if (topPlay?.label) {
+    lines.push(`左侧当前推荐1：${playShortLabel(topPlay)}；残局送队友优先小单。`);
+  }
+  return {
+    source: "rule-engine",
+    mode: "feed-partner-finish",
+    text: lines.join("\n"),
+  };
 }
 
 /** 追问：剩一张该不该过牌让队友 */
@@ -2786,6 +2891,28 @@ function answerLastCardFinishYieldQuestion(context) {
   };
 }
 
+/** 追问：机器人/队友用王或炸压队友占牌 */
+function isRobotTeammateBeatQuestion(question, context) {
+  const q = String(question ?? "");
+  if (/压队友|队友.*(大王|小王|王对|炸)|为何不合理|为什么不合理/.test(q)) return true;
+  if (/勇哥|毛蛋|老史/.test(q) && /(大王|王对|压队友|直接用|不合理)/.test(q)) return true;
+  const incident = findTeammateBeatIncident(context.recentPlayHistory ?? context.playHistory ?? []);
+  if (!incident) return false;
+  return /不合理|不对|压队友|王对|大王|不该/.test(q) || q.length <= 12;
+}
+
+function answerRobotTeammateBeatQuestion(context) {
+  const incident = findTeammateBeatIncident(context.recentPlayHistory ?? context.playHistory ?? []);
+  const analysis = buildTeammateBeatInsightAnalysis(incident);
+  if (!analysis) {
+    return answerWhyBeatPartnerQuestion(context, rankCountsFromHand(context.humanHand ?? []));
+  }
+  return {
+    source: "rule-engine",
+    mode: "robot-beat-partner",
+    text: `【规则引擎作答】${analysis}`,
+  };
+}
 /** 追问：为何要压队友 / 为何拦队友牌权 */
 function isWhyBeatPartnerQuestion(question) {
   const q = String(question ?? "");
@@ -2801,7 +2928,7 @@ function isPartnerSprintBombQuestion(question, context) {
   if (partnerCount > 2) return false;
   if (!isPartnerLastPlayer(context) && partnerCount <= 2) {
     if (/五炸|炸弹|炸掉|打炸|夺权|接风/.test(q) && /队友|老史|对家|走完|头游|勇哥/.test(q)) return true;
-    if (/队友|老史|对家/.test(q) && /剩.*[12一两]张|只剩.*张|单牌/.test(q)) return true;
+    if (/队友|老史|对家/.test(q) && /剩.*[12一两]张|只剩.*张|单牌/.test(q) && /炸|夺权|该不该|要不要|应该.*炸|必须.*炸|给他接风/i.test(q)) return true;
     if (/该不该.*炸|要不要.*炸|应该.*炸|必须.*炸/.test(q)) return true;
   }
   return false;
@@ -3973,20 +4100,28 @@ export function tryLocalCoachAnswer(question, context) {
   const counts = rankCountsFromHand(context.humanHand ?? []);
   const facts = buildEngineFacts(context);
 
-  if (isLastCardFinishYieldQuestion(text, context)) {
-    return attachDoctrineViolationAck(context, answerLastCardFinishYieldQuestion(context));
-  }
-
-  if (isWhyBeatPartnerQuestion(text)) {
-    return attachDoctrineViolationAck(context, answerWhyBeatPartnerQuestion(context, counts));
-  }
-
   if (isPartnerSprintBombQuestion(text, context)) {
     return attachDoctrineViolationAck(context, answerPartnerSprintBombQuestion(text, context, counts));
   }
 
+  if (isFeedPartnerFinishQuestion(text, context)) {
+    return attachDoctrineViolationAck(context, answerFeedPartnerFinishQuestion(context));
+  }
+
+  if (isLastCardFinishYieldQuestion(text, context)) {
+    return attachDoctrineViolationAck(context, answerLastCardFinishYieldQuestion(context));
+  }
+
   if (isWhyNotRushBigBombQuestion(text, context)) {
     return attachDoctrineViolationAck(context, answerWhyNotRushBigBombQuestion(text, context, counts));
+  }
+
+  if (isRobotTeammateBeatQuestion(text, context)) {
+    return attachDoctrineViolationAck(context, answerRobotTeammateBeatQuestion(context));
+  }
+
+  if (isWhyBeatPartnerQuestion(text)) {
+    return attachDoctrineViolationAck(context, answerWhyBeatPartnerQuestion(context, counts));
   }
 
   const withPrincipleLead = (answer) => {
@@ -4018,7 +4153,12 @@ export function tryLocalCoachAnswer(question, context) {
     return attachDoctrineViolationAck(context, answerWhyBombControlThenGroupQuestion(context));
   }
 
-  if (isWhyBreakStraightFlushForBombQuestion(text)) {
+  if (isMustBeatSfRunwayObjectionQuestion(text, context)) {
+    const sfRunwayAnswer = answerTop1MustBeatSfRunwayObjection(context);
+    if (sfRunwayAnswer) return sfRunwayAnswer;
+  }
+
+  if (isWhyBreakStraightFlushForBombQuestion(text, context)) {
     const sfBombAnswer = answerWhyBreakStraightFlushForBombQuestion(text, context, counts);
     if (sfBombAnswer) return attachDoctrineViolationAck(context, sfBombAnswer);
   }
@@ -4027,6 +4167,11 @@ export function tryLocalCoachAnswer(question, context) {
     const bombStructAnswer = answerWhyBreakStraightForBombQuestion(text, context, counts);
     // 压顺子四炸专答已含 P7，不再叠 P1/P4「不应拆顺子」开篇
     if (bombStructAnswer) return attachDoctrineViolationAck(context, bombStructAnswer);
+  }
+
+  if (isWhyBreakInsteadOfLooseSingleQuestion(text)) {
+    const looseAnswer = answerWhyBreakInsteadOfLooseSingleQuestion(text, context, counts);
+    if (looseAnswer) return withPrincipleLead(looseAnswer);
   }
 
   if (isWhyPlayBreaksStraightQuestion(text)) {

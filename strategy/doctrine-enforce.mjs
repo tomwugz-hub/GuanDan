@@ -67,6 +67,7 @@ import {
 import { looseSmallSingleRanks } from "./scorers/tempo-lead.mjs";
 import { partnerHandCount, shouldYieldPassToPartner } from "./table-context.mjs";
 import { detectHardInvariantCodes, filterHardInvariants } from "./hard-invariants.mjs";
+import { isWastefulPremiumPairOpeningLead } from "./robot-doctrine.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
@@ -543,6 +544,28 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
     });
   }
 
+  if (
+    isLeadTurn(tableContext)
+    && !tableContext.opponentActive
+    && candidate.type === PLAY_TYPES.pair
+    && isWastefulPremiumPairOpeningLead(
+      candidate,
+      tableContext._candidates ?? [],
+      resolvedHand,
+      levelRank,
+    )
+  ) {
+    const rank = candidate.mainRank;
+    violations.push({
+      code: "P12",
+      summary: rank === "A" || rank === "K"
+        ? "接风不宜空扔高控对，宜小单/小对试探"
+        : "接风不宜空扔王对，有成组/散牌路线",
+      blockTop1: true,
+      blockTop3: true,
+    });
+  }
+
   // —— P4：跟牌压单却用三带二拆钢板 ——
   if (
     isFollowingOpponentSingle(previousPlay, levelRank, tableContext)
@@ -703,6 +726,9 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       const altBombs = bombBeaters.filter(
         (item) => !breaksStrategicStraightFlush(item, resolvedHand, levelRank),
       );
+      const wholeSfBeaters = (tableContext._candidates ?? []).filter(
+        (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+      );
       const wholeBombs = structureAwareBombs(resolvedHand, levelRank);
       const minBeatPower = bombBeaters.length > 0
         ? Math.min(...bombBeaters.map((item) => rankPower(item.mainRank, levelRank)))
@@ -710,10 +736,15 @@ export function detectDoctrineViolations(candidate, hand, levelRank, tableContex
       const isMinBeatingBomb = minBeatPower != null
         && candidate.type === PLAY_TYPES.bomb
         && rankPower(candidate.mainRank, levelRank) === minBeatPower;
-      if ((altBombs.length > 0 || wholeBombs.length > 0) && !(isMinBeatingBomb && altBombs.length === 0)) {
+      if (
+        (altBombs.length > 0 || wholeBombs.length > 0 || wholeSfBeaters.length > 0)
+        && !(isMinBeatingBomb && altBombs.length === 0 && wholeSfBeaters.length === 0)
+      ) {
         violations.push({
           code: "P4",
-          summary: `有整炸够压，不宜拆${sfBreak}凑炸`,
+          summary: wholeSfBeaters.length > 0
+            ? `有同花顺可整组管牌，不宜拆${sfBreak}凑炸`
+            : `有整炸够压，不宜拆${sfBreak}凑炸`,
           blockTop1: true,
           blockTop3: true,
         });

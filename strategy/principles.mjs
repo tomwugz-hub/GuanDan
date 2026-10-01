@@ -6,7 +6,12 @@
  * 对手施压/控场见 P4/P7 与 opponent-pressure；接风节奏见 tempo-lead.mjs。
  */
 import { cardId, isJoker, isWildCard } from "../engine/card.mjs";
-import { robotMustFollowAdjustment, opponentPersonaAdjustment, scoreRobotDoctrine } from "./robot-doctrine.mjs";
+import {
+  isWastefulPremiumPairOpeningLead,
+  opponentPersonaAdjustment,
+  robotMustFollowAdjustment,
+  scoreRobotDoctrine,
+} from "./robot-doctrine.mjs";
 import { classifyPlay } from "../engine/classify-play.mjs";
 import { canBeat } from "../engine/compare-play.mjs";
 import { opponentsPendingAfterPlayer } from "../engine/game-state.mjs";
@@ -23,12 +28,13 @@ import {
   STRAIGHT_HIGH_OVER_WRAP_REASON,
 } from "./strategic-groups.mjs";
 import {
+  inferLeadMode,
   isCatchWindPremiumReduction,
   playerJustWonTrickWithBomb,
   playerJustWonTrickWithGroupPlay,
   CATCH_WIND_RUNWAY_HAND_MAX,
 } from "./lead-mode.mjs";
-import { isLeadTurnSfRunwayBreak, leadSfRunwayPrinciplesPenalty, mustBeatCpSfRunwayPrinciplesPenalty, mustBeatPairSfRunwayPrinciplesPenalty, mustBeatTwpSfRunwayPrinciplesPenalty, breaksStraightFlushRunwayOnMustBeatPair } from "./sf-runway-guard.mjs";
+import { isLeadTurnSfRunwayBreak, leadSfRunwayPrinciplesPenalty, mustBeatCpSfRunwayPrinciplesPenalty, mustBeatPairSfRunwayPrinciplesPenalty, mustBeatTwpSfRunwayPrinciplesPenalty, breaksStraightFlushRunwayOnMustBeatPair, exemptMustBeatSfRunwayBreakForPreservedRunway } from "./sf-runway-guard.mjs";
 import {
   enrichScoringContext,
   isTeammate,
@@ -231,6 +237,9 @@ export function pickStructureSafeEmergencyCandidate(hand, levelRank, candidates,
     levelRank,
     candidates,
   );
+  const leadMode = tableContext.leadMode
+    ?? (tableContext.state ? inferLeadMode(tableContext.state, playerIndex) : "unknown");
+  const heavyCatchWind = leadMode === "catch-wind" && hand.length > CATCH_WIND_RUNWAY_HAND_MAX;
   const typePriority = endgameAfterBombLead
     ? [
       PLAY_TYPES.straight,
@@ -240,10 +249,26 @@ export function pickStructureSafeEmergencyCandidate(hand, levelRank, candidates,
       PLAY_TYPES.pair,
       PLAY_TYPES.single,
     ]
-    : EMERGENCY_LEAD_TYPE_PRIORITY;
+    : heavyCatchWind
+      ? [
+        PLAY_TYPES.consecutivePairs,
+        PLAY_TYPES.tripleWithPair,
+        PLAY_TYPES.plane,
+        PLAY_TYPES.straight,
+        PLAY_TYPES.single,
+        PLAY_TYPES.pair,
+      ]
+      : EMERGENCY_LEAD_TYPE_PRIORITY;
   for (const type of typePriority) {
     const pool = active.filter((item) => item.type === type);
     if (!pool.length) continue;
+    if (type === PLAY_TYPES.pair) {
+      const safePairs = pool.filter(
+        (item) => !isWastefulPremiumPairOpeningLead(item, active, hand, levelRank),
+      );
+      const pickFrom = safePairs.length > 0 ? safePairs : pool;
+      return pickFrom.reduce((left, right) => (left.power <= right.power ? left : right));
+    }
     if (type === PLAY_TYPES.single) {
       const loose = pool.filter((item) => {
         const rank = item.mainRank;
@@ -259,7 +284,7 @@ export function pickStructureSafeEmergencyCandidate(hand, levelRank, candidates,
     if (type === PLAY_TYPES.tripleWithPair) {
       return pickBestTripleWithPairLead(pool, hand, levelRank);
     }
-    return pool[0];
+    return pool.reduce((left, right) => (left.power <= right.power ? left : right));
   }
   return active[0] ?? null;
 }
@@ -831,6 +856,15 @@ export function isForbiddenBombRescueItem(item, hand, previousPlay, tableContext
     return true;
   }
   if (shouldReserveBombForHighProbeSingle(ctx, hand, previousPlay, resolvedLevel)) return true;
+  if (
+    candidate.type === PLAY_TYPES.bomb
+    && breaksStrategicStraightFlush(candidate, hand, resolvedLevel)
+    && (tableContext._candidates ?? []).some(
+      (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -1691,6 +1725,20 @@ export function scorePreferJokerBeforeStraightFlushFinish(
     reasons.push(jokerReason);
     principles.push("P7");
     return { score, reasons, principles, hasStrongConflict, handledP1Single: true };
+  }
+
+  if (
+    candidate.type === PLAY_TYPES.straightFlush
+    && previousPlay
+    && [PLAY_TYPES.single, PLAY_TYPES.pair].includes(previousPlay.type)
+    && isSmallFaceRank(previousPlay.mainRank, levelRank)
+    && hand.length > 8
+  ) {
+    score += 20_000;
+    reasons.push("【P7】须压小牌不宜亮同花顺，宜王或散单抢权");
+    principles.push("P7");
+    hasStrongConflict = true;
+    return { score, reasons, principles, hasStrongConflict, handledP1Single: false };
   }
 
   if (candidate.type === PLAY_TYPES.straightFlush) {
@@ -2777,6 +2825,13 @@ export function diagnoseBeatRoutineStructureViolation(candidate, hand, levelRank
     tableContext.preferredGroups ?? null,
   );
   if (!premiumBreak) return null;
+  if (
+    candidate.type === PLAY_TYPES.tripleWithPair
+    && premiumBreak.includes("同花顺")
+    && exemptMustBeatSfRunwayBreakForPreservedRunway(candidate, hand, levelRank, tableContext)
+  ) {
+    return null;
+  }
   const shapeLabel = candidate.type === PLAY_TYPES.pair
     ? "对"
     : candidate.type === PLAY_TYPES.tripleWithPair
@@ -3895,9 +3950,16 @@ export function scoreCandidateByPrinciples(candidate, hand, levelRank, tableCont
     if (bombBeaters.length > 0 && previousPlay) {
       const sfBreakLabel = breaksStrategicStraightFlush(candidate, resolvedHand, levelRank);
       const structureWholeBombs = structureAwareBombs(resolvedHand, levelRank);
-      if (sfBreakLabel && structureWholeBombs.length > 0) {
+      const wholeSfBeaters = (tableContext._candidates ?? []).filter(
+        (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+      );
+      if (sfBreakLabel && (structureWholeBombs.length > 0 || wholeSfBeaters.length > 0)) {
         score += 22_000;
-        reasons.push(`不宜拆${sfBreakLabel}凑${candidate.mainRank}炸，整炸更优`);
+        reasons.push(
+          wholeSfBeaters.length > 0
+            ? `不宜拆${sfBreakLabel}凑${candidate.mainRank}炸，宜整组同花顺管牌`
+            : `不宜拆${sfBreakLabel}凑${candidate.mainRank}炸，整炸更优`,
+        );
         principles.push("P4");
         hasStrongConflict = true;
       }

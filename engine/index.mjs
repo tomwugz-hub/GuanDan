@@ -6,3 +6,4 @@ export * from "./classify-play.mjs";
 export * from "./compare-play.mjs";
 export * from "./generate-candidates.mjs";
 export * from "./game-state.mjs";
+export * from "./straight-flush-candidates.mjs";

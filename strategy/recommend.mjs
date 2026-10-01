@@ -28,6 +28,7 @@ import {
   breaksStraightFlushRunwayOnMustBeatPair,
   mustBeatCpSfRunwayPrinciplesPenalty,
   mustBeatPairSfRunwayPrinciplesPenalty,
+  exemptMustBeatSfRunwayBreakForPreservedRunway,
 } from "./sf-runway-guard.mjs";
 import {
   candidateMlBlendWeight,
@@ -73,6 +74,7 @@ import {
   shouldReserveStructureForRoutineBeat,
   shouldPreferPassForHeavyHandRoutineTripleWithPair,
   hasStructureSafeRoutineBeater,
+  hasLightStructureSafeTwpBeater,
   isWildLowValueBeat,
 } from "./wild-doctrine.mjs";
 import {
@@ -107,11 +109,12 @@ import { buildStrategicGroups } from "./strategic-groups.mjs";
 import { bookDoctrineAdjustment } from "./guandan-book-principles.mjs";
 import { cases100Adjustment, pickC100MustBeatSingleBeater, pickC100MustBeatPairBeater, pickC100MustBeatTripleBeater, pickC100MustBeatBombBeater, pickC100MustBeatConsecutivePairsBeater, pickC100MustBeatTripleWithPairBeater, pickC100MustBeatPlaneBeater, pickC100MustBeatStraightBeater, pickC100MustBeatStraightFlushBeater, pickC100OpeningLead, pickC100OpeningLeadDirect } from "./guandan-100cases-principles.mjs";
 import { filterHardInvariants } from "./hard-invariants.mjs";
+import { isWastefulPremiumPairOpeningLead } from "./robot-doctrine.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 
 /** 大手牌须压炸弹快路径：只组同点炸弹，避免逢人配组合枚举爆炸。 */
-function pickFastRankBombBeater(hand, levelRank, previousPlay) {
+function pickFastRankBombBeater(hand, levelRank, previousPlay, { preferredGroups = [] } = {}) {
   if (!previousPlay || !BOMB_TYPES.has(previousPlay.type)) return null;
   const wilds = hand.filter((card) => isWildCard(card, levelRank));
   const byRank = new Map();
@@ -129,11 +132,15 @@ function pickFastRankBombBeater(hand, levelRank, previousPlay) {
       if (play.type === PLAY_TYPES.bomb && canBeat(play, previousPlay)) beaters.push(play);
     }
   }
-  return beaters.sort((left, right) => {
+  beaters.sort((left, right) => {
     const leftSize = left.bombSize ?? left.cards?.length ?? 4;
     const rightSize = right.bombSize ?? right.cards?.length ?? 4;
     return leftSize - rightSize || left.power - right.power;
-  })[0] ?? null;
+  });
+  const preserveSf = beaters.filter(
+    (item) => !breaksPremiumStraightOrJokerGroup(item, preferredGroups, levelRank),
+  );
+  return (preserveSf.length > 0 ? preserveSf : beaters)[0] ?? null;
 }
 
 /** L1 主攻弱路散单：须先入池且不受拆顺 P1 误拦（第12篇） */
@@ -329,12 +336,19 @@ export function hasActionableRegularBeater(candidates, hand, levelRank, tableCon
   const reserveStructure = mustBeat
     && shouldReserveStructureForRoutineBeat(tableContext, hand, previousPlay, levelRank);
   const preferPassRoutineTwp = mustBeat
+    && tableContext.scoringAudience !== "robot"
     && shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, hand, previousPlay, levelRank);
   const preferredGroups = tableContext.preferredGroups ?? null;
   if (preferPassRoutineTwp) {
-    if (previousPlay?.type === PLAY_TYPES.tripleWithPair
-      && analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext).hasStructureSafeBeater) {
-      return true;
+    if (previousPlay?.type === PLAY_TYPES.tripleWithPair) {
+      if (hasLightStructureSafeTwpBeater(candidates, previousPlay, hand, levelRank, preferredGroups)) {
+        return true;
+      }
+      const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext);
+      const pickMin = pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand, tableContext);
+      if (pickMin && exemptMustBeatSfRunwayBreakForPreservedRunway(pickMin, hand, levelRank, tableContext)) {
+        return true;
+      }
     }
     return false;
   }
@@ -344,9 +358,13 @@ export function hasActionableRegularBeater(candidates, hand, levelRank, tableCon
       && analyzeMustBeatPairContext(hand, levelRank, previousPlay, tableContext).hasStructureSafeWholePairBeater) {
       return true;
     }
-    if (previousPlay?.type === PLAY_TYPES.tripleWithPair
-      && analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext).hasStructureSafeBeater) {
-      return true;
+    if (previousPlay?.type === PLAY_TYPES.tripleWithPair) {
+      const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, tableContext);
+      if (twpCtx.structureSafeBeaters.some(
+        (item) => isActionableCandidate(item, hand, levelRank, tableContext),
+      )) {
+        return true;
+      }
     }
     return false;
   }
@@ -356,6 +374,19 @@ export function hasActionableRegularBeater(candidates, hand, levelRank, tableCon
       && (!mustBeat || canBeat(candidate, previousPlay))
       && !(reserveWild && isWildLowValueBeat(candidate, levelRank))
       && !(reserveStructure && isStructureBreakingRoutineBeat(candidate, hand, levelRank, preferredGroups))
+      && isActionableCandidate(candidate, hand, levelRank, tableContext),
+  );
+}
+
+/** 候选池内是否已有可出牌（非仅 twpCtx 元数据判真） */
+function hasPlayableRegularBeaterInPool(candidates, hand, levelRank, tableContext) {
+  if (!hasActionableRegularBeater(candidates, hand, levelRank, tableContext)) return false;
+  const previousPlay = tableContext.previousPlay ?? null;
+  if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) return false;
+  return candidates.some(
+    (candidate) => candidate.type !== PLAY_TYPES.pass
+      && !BOMB_TYPES.has(candidate.type)
+      && canBeat(candidate, previousPlay)
       && isActionableCandidate(candidate, hand, levelRank, tableContext),
   );
 }
@@ -632,8 +663,7 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
           tableContext.preferredGroups ?? [],
           tableContext,
         )
-        && !(hasExplicitColumnLayout && preservesPhysicalStraightFlush(play))
-        && !(uiColumnSfSets.length > 0 && preservesPhysicalStraightFlush(play))
+        && !preservesPhysicalStraightFlush(play)
       ) continue;
       if (straightFlushCardSets.length > 0 && !preservesPhysicalStraightFlush(play)) continue;
       if (
@@ -669,8 +699,7 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
           tableContext.preferredGroups ?? [],
           tableContext,
         )
-        || (hasExplicitColumnLayout && preservesPhysicalStraightFlush(item))
-        || (uiColumnSfSets.length > 0 && preservesPhysicalStraightFlush(item))
+        || preservesPhysicalStraightFlush(item)
       )
       && (
         directNaturalKeys.has((item.cards ?? []).map(physicalCardKey).sort().join("|"))
@@ -684,7 +713,8 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
   candidates = candidates.filter(
     (item) => {
       if (!breaksStraightFlushRunwayOnMustBeatTwp(item, hand, levelRank, tableContext)) return true;
-      return uiColumnSfSets.length > 0 && preservesPhysicalStraightFlush(item);
+      // 拆次要分组同花顺但完整保留主跑道（如黑桃 7-10+逢人配）时仍可用
+      return preservesPhysicalStraightFlush(item);
     },
   );
   if (candidates.length === 0) return null;
@@ -714,7 +744,7 @@ export function pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand
 }
 
 /** 人类 lite / 机器人：仅用 lite 候选补漏，不拉全量池 */
-function mergeMissingActionableRegularBeatersLite(candidates, hand, levelRank, previousPlay, tableContext) {
+export function mergeMissingActionableRegularBeatersLite(candidates, hand, levelRank, previousPlay, tableContext) {
   if (!previousPlay || previousPlay.type === PLAY_TYPES.pass) return candidates;
   if (isPastDeadline(tableContext)) return candidates;
   const ctx = { ...tableContext, previousPlay };
@@ -736,11 +766,15 @@ function mergeMissingActionableRegularBeatersLite(candidates, hand, levelRank, p
   if (previousPlay.type === PLAY_TYPES.tripleWithPair) {
     const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, ctx);
     const minTwp = pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand, ctx);
-    if (minTwp) {
+    const preferPass = ctx.scoringAudience !== "robot"
+      && shouldPreferPassForHeavyHandRoutineTripleWithPair(ctx, hand, previousPlay, levelRank);
+    const sfRunwayMin = minTwp
+      && exemptMustBeatSfRunwayBreakForPreservedRunway(minTwp, hand, levelRank, ctx);
+    if (minTwp && (!preferPass || sfRunwayMin)) {
       candidates = appendUniqueCandidates(candidates, [minTwp]);
     }
   }
-  if (hasActionableRegularBeater(candidates, hand, levelRank, ctx)) return candidates;
+  if (hasPlayableRegularBeaterInPool(candidates, hand, levelRank, ctx)) return candidates;
 
   let supplement = generateBasicCandidates(hand, levelRank, previousPlay, {
     lite: true,
@@ -1539,6 +1573,10 @@ function filterRobotOpeningLeadPool(pool, hand, levelRank, tableContext, mustLea
   if (withoutBombBreak.length > 0) active = withoutBombBreak;
   const withoutBareLevelPair = filterBareLevelRankPairLeads(active, hand, levelRank, active);
   if (withoutBareLevelPair.length > 0) active = withoutBareLevelPair;
+  const withoutJokerPairDump = active.filter(
+    (item) => !isWastefulPremiumPairOpeningLead(item, active, hand, levelRank),
+  );
+  if (withoutJokerPairDump.length > 0) active = withoutJokerPairDump;
   return active;
 }
 
@@ -1575,7 +1613,10 @@ function pickRobotLeadByPrinciples(hand, levelRank, candidates, tableContext) {
     if (oppTwoCard) {
       const noPairs = pool.filter((item) => item.type !== PLAY_TYPES.pair);
       scorePool = noPairs.length > 0 ? noPairs : pool;
-    } else if (hand.length >= 8) {
+    } else if (
+      hand.length >= 8
+      && !(leadMode === "catch-wind" && hand.length <= 12)
+    ) {
       scorePool = pool.filter((item) => item.type !== PLAY_TYPES.single);
     }
     if (
@@ -1799,7 +1840,8 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
       };
     }
     if (previousPlay.type === PLAY_TYPES.tripleWithPair) {
-      const minTwp = pickMinStructureSafeTripleWithPairBeater(
+      const twpBeatCtx = { ...beatCtx, lite: true, scoringAudience: "robot" };
+      let minTwp = pickMinStructureSafeTripleWithPairBeater(
         {
           beaters: [],
           structureSafeBeaters: [],
@@ -1807,11 +1849,34 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
         },
         levelRank,
         hand,
-        { ...beatCtx, lite: true, scoringAudience: "robot" },
+        twpBeatCtx,
       );
+      if (!minTwp) {
+        const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, twpBeatCtx);
+        minTwp = pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand, twpBeatCtx);
+      }
       if (minTwp) {
         return {
           top: { candidate: minTwp, score: -800, reasons: ["机器人快路径：结构安全三带二"] },
+          pool: [],
+          scoringContext: beatCtx,
+          blockedCandidates: [],
+        };
+      }
+    }
+    if (previousPlay.type === PLAY_TYPES.consecutivePairs) {
+      const safeCp = candidates.filter(
+        (item) => item.type === PLAY_TYPES.consecutivePairs
+          && canBeat(item, previousPlay)
+          && !breaksStraightFlushRunwayOnMustBeatCp(item, hand, levelRank, beatCtx),
+      );
+      if (safeCp.length > 0) {
+        const minCp = safeCp.reduce(
+          (best, item) => (!best || item.power < best.power ? item : best),
+          null,
+        );
+        return {
+          top: { candidate: minCp, score: -800, reasons: ["机器人快路径：结构安全连对"] },
           pool: [],
           scoringContext: beatCtx,
           blockedCandidates: [],
@@ -1879,7 +1944,12 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
           blockedCandidates: [],
         };
       }
-      if (hasActionableRegularBeater(candidates, hand, levelRank, beatCtx)) {
+      if (hasActionableRegularBeater(
+        mergeMissingActionableRegularBeatersLite(candidates, hand, levelRank, previousPlay, beatCtx),
+        hand,
+        levelRank,
+        beatCtx,
+      )) {
         return null;
       }
       if (
@@ -1902,6 +1972,52 @@ function buildRobotQuickRecommendations(hand, levelRank, previousPlay, tableCont
       if (minBomb) {
         return {
           top: { candidate: minBomb, score: -600, reasons: ["机器人快路径：仅炸弹可压"] },
+          pool: [],
+          scoringContext: beatCtx,
+          blockedCandidates: [],
+        };
+      }
+    }
+    const mergedLite = mergeMissingActionableRegularBeatersLite(
+      candidates,
+      hand,
+      levelRank,
+      previousPlay,
+      beatCtx,
+    );
+    if (hasPlayableRegularBeaterInPool(mergedLite, hand, levelRank, beatCtx)) {
+      const reserveWild = shouldReserveWildForSmallRoutineBeat(beatCtx, hand, previousPlay, levelRank);
+      const reserveStructure = shouldReserveStructureForRoutineBeat(beatCtx, hand, previousPlay, levelRank);
+      const preferredGroups = beatCtx.preferredGroups ?? null;
+      let minRegular = mergedLite
+        .filter(
+          (candidate) => candidate.type !== PLAY_TYPES.pass
+            && !BOMB_TYPES.has(candidate.type)
+            && canBeat(candidate, previousPlay)
+            && !(reserveWild && isWildLowValueBeat(candidate, levelRank))
+            && !(reserveStructure && isStructureBreakingRoutineBeat(candidate, hand, levelRank, preferredGroups))
+            && isActionableCandidate(candidate, hand, levelRank, beatCtx),
+        )
+        .reduce((best, item) => (!best || item.power < best.power ? item : best), null);
+      if (!minRegular && previousPlay.type === PLAY_TYPES.tripleWithPair) {
+        const twpCtx = analyzeMustBeatTripleWithPairContext(hand, levelRank, previousPlay, beatCtx);
+        minRegular = pickMinStructureSafeTripleWithPairBeater(twpCtx, levelRank, hand, beatCtx);
+        if (!minRegular && reserveStructure && twpCtx.hasStructureSafeBeater) {
+          minRegular = twpCtx.structureSafeBeaters
+            .filter((item) => isActionableCandidate(item, hand, levelRank, beatCtx))
+            .reduce(
+              (best, item) => (!best || item.power < best.power ? item : best),
+              null,
+            );
+        }
+      }
+      if (minRegular) {
+        return {
+          top: {
+            candidate: minRegular,
+            score: -650,
+            reasons: ["机器人快路径：最小可行动够压"],
+          },
           pool: [],
           scoringContext: beatCtx,
           blockedCandidates: [],
@@ -2399,28 +2515,23 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
       lite: true,
       scoringAudience: "human-lite",
     });
-    if (minTwp) {
-      const runwayBreak = breaksStraightFlushRunwayOnMustBeatTwp(minTwp, hand, levelRank, beatCtx);
-      const uiSfOk = (beatCtx.preferredGroups ?? [])
-        .some((group) => /同花顺/.test(group.label ?? "")
-          && (group.play?.cards ?? group.cards ?? []).length === 4)
-        && minTwp.cards?.every((card) => {
-          const key = `${card.rank}:${card.suit}:${card.deckIndex ?? 0}`;
-          return (beatCtx.preferredGroups ?? [])
-            .filter((group) => /同花顺/.test(group.label ?? "")
-              && (group.play?.cards ?? group.cards ?? []).length === 4)
-            .every((group) => !(group.play?.cards ?? group.cards ?? []).some(
-              (sf) => `${sf.rank}:${sf.suit}:${sf.deckIndex ?? 0}` === key,
-            ));
-        });
-      if (!runwayBreak || uiSfOk) {
-        return {
-          top: { candidate: minTwp, score: -800, reasons: [reasonFromPrinciple("P4")] },
-          pool: [],
-          scoringContext: beatCtx,
-          blockedCandidates: [],
-        };
-      }
+    const sfRunwayMin = minTwp
+      && exemptMustBeatSfRunwayBreakForPreservedRunway(minTwp, hand, levelRank, beatCtx);
+    if (sfRunwayMin) {
+      return {
+        top: { candidate: minTwp, score: -800, reasons: [reasonFromPrinciple("P4")] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+    if (minTwp && !reserveRoutineTwp) {
+      return {
+        top: { candidate: minTwp, score: -800, reasons: [reasonFromPrinciple("P4")] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
     }
     if (reserveRoutineTwp) return null;
   }
@@ -2446,6 +2557,28 @@ function tryHumanLiteMustBeatQuick(hand, levelRank, previousPlay, tableContext) 
     if (c100Straight) {
       return {
         top: { candidate: c100Straight, score: -850, reasons: ["【C100-M1】百例杂花顺顺过，不宜动同花顺/炸弹"] },
+        pool: [],
+        scoringContext: beatCtx,
+        blockedCandidates: [],
+      };
+    }
+  }
+
+  if (
+    previousPlay.type === PLAY_TYPES.single
+    && (previousPlay.mainRank === "BJ" || previousPlay.mainRank === "SJ")
+  ) {
+    const sfBeaters = candidates.filter(
+      (item) => item.type === PLAY_TYPES.straightFlush && canBeat(item, previousPlay),
+    );
+    const minSf = pickMin(sfBeaters);
+    if (minSf) {
+      return {
+        top: {
+          candidate: minSf,
+          score: -780,
+          reasons: [reasonFromPrinciple("P7"), "须压王宜整组同花顺，不宜拆同花顺凑炸"],
+        },
         pool: [],
         scoringContext: beatCtx,
         blockedCandidates: [],
@@ -2573,7 +2706,29 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
         blockedCandidates: [],
       };
     }
-    const fastBomb = pickFastRankBombBeater(hand, levelRank, previousPlay);
+    const bombFastPreferredGroups = ctx.preferredGroups?.length
+      ? ctx.preferredGroups
+      : buildStrategicGroups(hand, levelRank);
+    const sfBombBeater = fastCandidates.find(
+      (item) => item.type === PLAY_TYPES.straightFlush
+        && canBeat(item, previousPlay)
+        && !breaksPremiumStraightOrJokerGroup(item, bombFastPreferredGroups, levelRank),
+    );
+    if (sfBombBeater) {
+      return {
+        top: {
+          candidate: sfBombBeater,
+          score: -720,
+          reasons: ["【P7】同花顺压炸，不宜拆跑道组厚炸"],
+        },
+        pool: [],
+        scoringContext: bombFastCtx,
+        blockedCandidates: [],
+      };
+    }
+    const fastBomb = pickFastRankBombBeater(hand, levelRank, previousPlay, {
+      preferredGroups: bombFastPreferredGroups,
+    });
     if (fastBomb) {
       return {
         top: {
@@ -2880,9 +3035,37 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
   );
   candidates = candidates.filter((candidate) => playUsesOnlyHandCards(hand, candidate));
   if (precomputedSafeTripleWithPair) {
-    candidates = appendUniqueCandidates(candidates, [precomputedSafeTripleWithPair]);
+    const preferPassTwp = ctx.scoringAudience !== "robot"
+      && shouldPreferPassForHeavyHandRoutineTripleWithPair(
+        ctx,
+        hand,
+        previousPlay,
+        levelRank,
+      );
+    const sfRunwayMin = exemptMustBeatSfRunwayBreakForPreservedRunway(
+      precomputedSafeTripleWithPair,
+      hand,
+      levelRank,
+      ctx,
+    );
+    if (!preferPassTwp || sfRunwayMin) {
+      candidates = appendUniqueCandidates(candidates, [precomputedSafeTripleWithPair]);
+    }
   }
   if (litePath && previousPlay?.type === PLAY_TYPES.tripleWithPair) {
+    const preferPassTwpFilter = ctx.scoringAudience !== "robot"
+      && shouldPreferPassForHeavyHandRoutineTripleWithPair(
+        ctx,
+        hand,
+        previousPlay,
+        levelRank,
+      );
+    if (preferPassTwpFilter) {
+      candidates = candidates.filter((candidate) => (
+        candidate.type !== PLAY_TYPES.tripleWithPair
+        || exemptMustBeatSfRunwayBreakForPreservedRunway(candidate, hand, levelRank, ctx)
+      ));
+    }
     const preservedKey = precomputedSafeTripleWithPair
       ? candidatePoolKey(precomputedSafeTripleWithPair)
       : null;

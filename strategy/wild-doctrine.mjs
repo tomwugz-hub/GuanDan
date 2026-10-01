@@ -7,6 +7,7 @@ import { PLAY_TYPES } from "../engine/play-types.mjs";
 import { compareRanks } from "../engine/rank-order.mjs";
 import { opponentDangerLevel } from "./table-context.mjs";
 import { isStructureBreakingRoutineBeat } from "./scorers/structure.mjs";
+import { exemptMustBeatSfRunwayBreakForPreservedRunway } from "./sf-runway-guard.mjs";
 
 const BOMB_TYPES = new Set([PLAY_TYPES.bomb, PLAY_TYPES.straightFlush, PLAY_TYPES.jokerBomb]);
 const ROUTINE_BEAT_TYPES = new Set([
@@ -70,7 +71,14 @@ export function shouldPreferPassForHeavyHandRoutineTripleWithPair(tableContext, 
   const resolvedHand = hand?.length ? hand : resolveHand(tableContext);
   if (resolvedHand.length < 15) return false;
   const pool = tableContext._candidates ?? [];
-  if (hasStructureSafeRoutineBeater(pool, previousPlay, resolvedHand, resolvedLevel, tableContext.preferredGroups)) {
+  if (hasLightStructureSafeTwpBeater(pool, previousPlay, resolvedHand, resolvedLevel, tableContext.preferredGroups)) {
+    return false;
+  }
+  if ((pool ?? []).some(
+    (item) => item.type === PLAY_TYPES.tripleWithPair
+      && canBeat(item, previousPlay)
+      && exemptMustBeatSfRunwayBreakForPreservedRunway(item, resolvedHand, resolvedLevel, tableContext),
+  )) {
     return false;
   }
   return true;
@@ -101,6 +109,18 @@ export function hasStructureSafeRoutineBeater(candidates, previousPlay, hand, le
     (item) => item.type === previousPlay.type
       && canBeat(item, previousPlay)
       && !isStructureBreakingRoutineBeat(item, hand, levelRank, preferredGroups),
+  );
+}
+
+/** 须压三带二：仅比对手大三带一级的结构安全够压（如 777+55 管 666+22），JJJ+55 不算 */
+export function hasLightStructureSafeTwpBeater(candidates, previousPlay, hand, levelRank, preferredGroups = null) {
+  if (previousPlay?.type !== PLAY_TYPES.tripleWithPair) return false;
+  return (candidates ?? []).some(
+    (item) => item.type === PLAY_TYPES.tripleWithPair
+      && canBeat(item, previousPlay)
+      && !(item.cards ?? []).some((card) => isWildCard(card, levelRank))
+      && !isStructureBreakingRoutineBeat(item, hand, levelRank, preferredGroups)
+      && compareRanks(item.mainRank, previousPlay.mainRank, levelRank) <= 1,
   );
 }
 

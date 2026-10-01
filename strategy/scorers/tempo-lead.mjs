@@ -13,6 +13,7 @@ import {
   CATCH_WIND_RUNWAY_HAND_MAX,
 } from "../lead-mode.mjs";
 import { isThickBombSingleLead, solePairForTripleRank, isBareLevelRankPairLead } from "../principles.mjs";
+import { isWastefulPremiumPairOpeningLead } from "../robot-doctrine.mjs";
 import {
   minOpponentHandCount,
   opponentReportsTwoCards,
@@ -530,6 +531,24 @@ export function tempoLeadAdjustment(candidate, hand, tableContext, cardKey, leve
       ) {
         score += 6200;
         reasons.push("【G6】残局接风小对易被压，宜保留对子与同花顺收尾");
+        return { score, reasons };
+      }
+      if (
+        hand.length > CATCH_WIND_RUNWAY_HAND_MAX
+        && isWastefulPremiumPairOpeningLead(
+          candidate,
+          tableContext._candidates ?? [],
+          hand,
+          levelRank,
+        )
+      ) {
+        score += heavyHand ? 6800 : 5600;
+        reasons.push("接风手牌仍多，不宜空扔高控对，宜小单/小对试探");
+        return { score, reasons };
+      }
+      if (hand.length > CATCH_WIND_RUNWAY_HAND_MAX) {
+        score -= 1200;
+        reasons.push("接风手牌仍多，优先小单试探");
         return { score, reasons };
       }
       score -= 2400;

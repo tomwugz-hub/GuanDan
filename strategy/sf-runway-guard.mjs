@@ -17,7 +17,7 @@ import { enumerateStraightFlushCandidates } from "./straight-flush-arrange.mjs";
 import { buildStrategicGroups } from "./strategic-groups.mjs";
 
 /** 策略修订号：与 app/main.mjs 校验一致，用于识别浏览器是否仍缓存旧模块 */
-export const COACH_STRATEGY_REVISION = 56;
+export const COACH_STRATEGY_REVISION = 66;
 
 const SHAPE_LABELS = {
   [PLAY_TYPES.straight]: "杂顺",
@@ -188,6 +188,50 @@ function candidatePartiallyBreaksSfGroup(candidate, group) {
   return used > 0 && used < groupKeys.length;
 }
 
+/** 候选是否完整保留至少一条物理同花顺跑道（含 4 张自然+逢人配；与 pickMin 对齐） */
+function preservesPhysicalStraightFlushRunway(candidate, hand, levelRank, tableContext) {
+  if (!candidate?.cards?.length || !hand?.length) return false;
+  const candidateAvoidsSet = (sfCards) =>
+    (candidate.cards ?? []).every((card) => !sfCards.has(cardId(card)));
+
+  const uiColumnSfSets = (tableContext?.preferredGroups ?? [])
+    .filter((group) => /同花顺/.test(group.label ?? "")
+      && (group.play?.cards ?? group.cards ?? []).length === 4)
+    .map((group) => new Set((group.play?.cards ?? group.cards ?? []).map((card) => cardId(card))));
+
+  if (uiColumnSfSets.length > 0) {
+    return uiColumnSfSets.every((sfCards) => candidateAvoidsSet(sfCards));
+  }
+
+  const straightFlushCardSets = (tableContext?.preferredGroups ?? [])
+    .filter((group) => group.play?.type === PLAY_TYPES.straightFlush || /同花顺/.test(group.label ?? ""))
+    .map((group) => new Set((group.play?.cards ?? group.cards ?? []).map((card) => cardId(card))))
+    .filter((cards) => cards.size >= 4);
+
+  const naturalStraightFlushCardSets = [];
+  const chainRanks = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
+  const wildCards = hand.filter((card) => isWildCard(card, levelRank));
+  for (const suit of new Set(hand.map((card) => card.suit))) {
+    const suitedNatural = hand.filter((card) => card.suit === suit && !isWildCard(card, levelRank));
+    for (let start = 0; start <= chainRanks.length - 5; start += 1) {
+      const ranks = chainRanks.slice(start, start + 5);
+      const natural = ranks
+        .map((rank) => suitedNatural.find((card) => card.rank === rank))
+        .filter(Boolean);
+      const missing = 5 - natural.length;
+      if (natural.length < 4 || missing > wildCards.length) continue;
+      const runway = new Set([...natural, ...wildCards.slice(0, missing)].map((card) => cardId(card)));
+      straightFlushCardSets.push(runway);
+      if (missing === 0) naturalStraightFlushCardSets.push(runway);
+    }
+  }
+
+  if (naturalStraightFlushCardSets.length > 0) {
+    return naturalStraightFlushCardSets.some((sfCards) => candidateAvoidsSet(sfCards));
+  }
+  return straightFlushCardSets.some((sfCards) => candidateAvoidsSet(sfCards));
+}
+
 /** 须压须保护的主同花顺跑道：UI 理牌列 + buildStrategicGroups 锁定，非全量枚举 */
 function resolveLockedStraightFlushGroups(hand, levelRank, tableContext, cache) {
   const fromPreferred = (cache.strategicGroups ?? []).filter(
@@ -209,12 +253,23 @@ function resolveLockedStraightFlushGroups(hand, levelRank, tableContext, cache) 
   return [];
 }
 
+/** 须压：拆次要分组误报时，若未动用逢人配且完整保留主跑道则可豁免 */
+export function exemptMustBeatSfRunwayBreakForPreservedRunway(candidate, hand, levelRank, tableContext) {
+  if (!candidate?.cards?.length) return false;
+  if ((candidate.cards ?? []).some((card) => isWildCard(card, levelRank))) return false;
+  return preservesPhysicalStraightFlushRunway(candidate, hand, levelRank, tableContext);
+}
+
 /** 须压同型常规牌：枚举/分组检测拆同花顺跑道（不因理牌只锁低路 SF 而漏检逢人配高路） */
 function resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, premiumBreak) {
+  const preservesRunway = candidate?.type === PLAY_TYPES.tripleWithPair
+    && exemptMustBeatSfRunwayBreakForPreservedRunway(candidate, hand, levelRank, tableContext);
   const cache = resolveHandStructureCache(hand, levelRank, tableContext);
   const lockedSf = resolveLockedStraightFlushGroups(hand, levelRank, tableContext, cache);
   for (const group of lockedSf) {
     if (candidatePartiallyBreaksSfGroup(candidate, group)) {
+      // 拆次要分组同花顺但完整保留主跑道（如黑桃 7-10+逢人配）时不算破坏
+      if (preservesRunway) continue;
       return group.label ?? premiumBreak ?? "同花顺";
     }
   }
@@ -223,13 +278,16 @@ function resolveMustBeatSfRunwayBreak(candidate, hand, levelRank, tableContext, 
     const held = physicalRankCount(hand, candidate.mainRank, levelRank);
     if (held > 2) return null;
   }
-  if (premiumBreak && isSfRunwayPremiumBreakLabel(premiumBreak) && lockedSf.length === 0) {
-    return premiumBreak;
+  if (premiumBreak && isSfRunwayPremiumBreakLabel(premiumBreak)) {
+    if (preservesRunway) return null;
+    if (lockedSf.length === 0) return premiumBreak;
   }
   const straightFlushes = cache.straightFlushes.length > 0
     ? cache.straightFlushes
     : enumerateStraightFlushCandidates(hand, levelRank);
-  return candidateBreaksEnumeratedStraightFlush(candidate, straightFlushes);
+  const enumBreak = candidateBreaksEnumeratedStraightFlush(candidate, straightFlushes);
+  if (enumBreak && preservesRunway) return null;
+  return enumBreak;
 }
 
 /** 须压连对：候选是否拆同花顺/同花色跑道 */

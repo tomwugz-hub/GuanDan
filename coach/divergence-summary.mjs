@@ -24,6 +24,14 @@ const VERDICT_LABELS = {
   [DIVERGENCE_VERDICTS.COACH_QUESTIONABLE]: "教练不合理",
 };
 
+/** 面向用户的复盘叙事标签（学习导向，不暗示自动改码） */
+const VERDICT_UI_LABELS = {
+  [DIVERGENCE_VERDICTS.USER_BETTER]: "与教练不一致",
+  [DIVERGENCE_VERDICTS.COACH_BETTER]: "建议学习点",
+  [DIVERGENCE_VERDICTS.STYLE]: "风格差异",
+  [DIVERGENCE_VERDICTS.COACH_QUESTIONABLE]: "教练存疑",
+};
+
 const ADJUDICATION_BY_VERDICT = {
   [DIVERGENCE_VERDICTS.USER_BETTER]: "user",
   [DIVERGENCE_VERDICTS.COACH_BETTER]: "coach",
@@ -59,6 +67,11 @@ function bombRankFromLabel(label) {
 
 export function verdictLabel(verdict) {
   return VERDICT_LABELS[verdict] ?? "待观察";
+}
+
+/** UI / 归档 markdown 用的学习导向标签 */
+export function verdictUiLabel(verdict) {
+  return VERDICT_UI_LABELS[verdict] ?? verdictLabel(verdict);
 }
 
 /** 从复盘记录还原教纲检测所需的桌面上下文 */
@@ -196,7 +209,7 @@ function finalizeClassification(result) {
 }
 
 /**
- * 启发式分类：供 UI 与 COACH-FIX-REQUEST 优先改「你更对」项。
+ * 启发式分类：供 UI 与复盘归档分类（内部 verdict，UI 用 verdictUiLabel）。
  */
 export function classifyDivergence(item, record = null) {
   const reasons = (item.recommendedReasons ?? []).join(" ");

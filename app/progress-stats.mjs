@@ -7,6 +7,7 @@ const EMPTY_STATS = Object.freeze({
   totalGames: 0,
   totalHands: 0,
   top1Matches: 0,
+  learningPoints: 0,
   recentGames: [],
   drillSessions: [],
 });
@@ -23,6 +24,7 @@ export function loadProgressStats() {
       totalGames: Number(data.totalGames) || 0,
       totalHands: Number(data.totalHands) || 0,
       top1Matches: Number(data.top1Matches) || 0,
+      learningPoints: Number(data.learningPoints) || 0,
       recentGames: Array.isArray(data.recentGames) ? data.recentGames.slice(-7) : [],
       drillSessions: Array.isArray(data.drillSessions) ? data.drillSessions.slice(-20) : [],
     };
@@ -35,6 +37,10 @@ function saveProgressStats(stats) {
   safeSetItem(PROGRESS_STATS_KEY, JSON.stringify(stats));
 }
 
+function learningPointsFromSummary(summary) {
+  return (summary?.coachBetterCount ?? 0) + (summary?.coachQuestionableCount ?? 0);
+}
+
 /** 局末保存复盘时累加统计 */
 export function updateProgressFromReview(summary, gameId = "") {
   const stats = loadProgressStats();
@@ -42,15 +48,18 @@ export function updateProgressFromReview(summary, gameId = "") {
   const divergenceCount = summary?.divergenceCount ?? 0;
   const top1Matches = summary?.top1MatchCount ?? Math.max(0, totalHands - divergenceCount);
   const top1AlignRate = totalHands > 0 ? top1Matches / totalHands : 0;
+  const learningPoints = learningPointsFromSummary(summary);
 
   stats.totalGames += 1;
   stats.totalHands += totalHands;
   stats.top1Matches += top1Matches;
+  stats.learningPoints += learningPoints;
   stats.recentGames.push({
     gameId: gameId || `game-${stats.totalGames}`,
     savedAt: new Date().toISOString(),
     totalHands,
     divergenceCount,
+    learningPoints,
     top1AlignRate,
   });
   if (stats.recentGames.length > 7) {
@@ -84,25 +93,33 @@ export function recordDrillSessionFromReview(gameMeta, divergenceSummary, { focu
   return stats;
 }
 
-/** 累计推荐1一致率（百分比整数） */
+/** 累计推荐1一致率（百分比整数，次要指标） */
 export function formatAlignRate(stats) {
   if (!stats?.totalHands) return "—";
   return `${Math.round((stats.top1Matches / stats.totalHands) * 100)}%`;
 }
 
-/** 近 7 局条形趋势 HTML（纯文本条，无图表库） */
+/** 累计建议学习点（教练更对 + 教练存疑） */
+export function formatLearningPoints(stats) {
+  if (!stats?.totalGames) return "—";
+  return `${stats.learningPoints ?? 0} 处`;
+}
+
+/** 近 7 局建议学习点趋势 HTML */
 export function renderRecentTrendBars(recentGames = []) {
   if (!recentGames.length) {
-    return "<p class=\"muted\">保存复盘后会显示近 7 局趋势。</p>";
+    return "<p class=\"muted\">保存复盘后会显示近 7 局学习点趋势。</p>";
   }
+  const maxPoints = Math.max(...recentGames.map((g) => g.learningPoints ?? 0), 1);
   let html = "<div class=\"progress-trend\">";
   for (const game of recentGames) {
-    const pct = Math.round((game.top1AlignRate ?? 0) * 100);
+    const points = game.learningPoints ?? 0;
+    const pct = Math.round((points / maxPoints) * 100);
     const label = game.gameId ? String(game.gameId).replace(/^game-/, "") : "局";
-    html += `<div class="progress-trend-row" title="${pct}% 一致">
+    html += `<div class="progress-trend-row" title="${points} 处建议学习">
       <span class="progress-trend-label">${label}</span>
       <span class="progress-trend-bar"><span style="width:${pct}%"></span></span>
-      <span class="progress-trend-pct">${pct}%</span>
+      <span class="progress-trend-pct">${points}</span>
     </div>`;
   }
   html += "</div>";

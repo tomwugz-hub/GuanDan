@@ -8,8 +8,8 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="掼蛋教练" />
-    <title>掼蛋教练 Pro 2.0</title>
+    <meta name="apple-mobile-web-app-title" content="AI 掼蛋学院" />
+    <title>AI 掼蛋学院 · 教练 Pro</title>
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="stylesheet" href="./mobile-ui.css" />
     <style id="mobile-critical-css">
@@ -741,7 +741,7 @@
 
       .table-middle-band {
         position: absolute;
-        z-index: 6;
+        z-index: 4;
         left: 50%;
         top: 38%;
         display: flex;
@@ -758,7 +758,7 @@
         flex-direction: column;
         align-items: center;
         width: auto;
-        max-width: min(520px, calc(100vw - 80px));
+        max-width: min(420px, calc(100vw - 240px));
         padding: 0;
         pointer-events: none;
       }
@@ -792,18 +792,21 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        padding: 2px 11px;
+        padding: 4px 11px;
         border-radius: 8px;
         background: rgba(24, 34, 42, 0.72);
         font-size: 13px;
-        line-height: 1;
-        white-space: nowrap;
+        line-height: 1.35;
+        max-width: min(420px, calc(100vw - 240px));
+        text-align: center;
+        text-wrap: balance;
+        white-space: normal;
       }
 
       .seat-plays {
         position: absolute;
         inset: 0;
-        z-index: 5;
+        z-index: 7;
         pointer-events: none;
       }
 
@@ -3579,7 +3582,7 @@
     <div class="app desktop-shell" id="desktopShell">
       <header>
         <div class="header-main">
-        <h1>掼蛋教练 Pro</h1>
+        <h1>AI 掼蛋学院 · 教练 Pro</h1>
         <div class="toolbar">
           <label class="field">级牌
             <select id="levelRank">

@@ -20,6 +20,54 @@ const ROUTINE_PRESS_TYPES = new Set([
   PLAY_TYPES.plane,
 ]);
 
+function hasNonBombLeadAlternative(pool, candidate) {
+  return pool.some(
+    (item) => item !== candidate
+      && item.type !== PLAY_TYPES.pass
+      && !BOMB_TYPES.has(item.type)
+      && (
+        item.type === PLAY_TYPES.tripleWithPair
+        || item.type === PLAY_TYPES.triple
+        || item.type === PLAY_TYPES.consecutivePairs
+        || item.type === PLAY_TYPES.straight
+        || item.type === PLAY_TYPES.plane
+        || (item.type === PLAY_TYPES.pair && item.mainRank !== "SJ" && item.mainRank !== "BJ")
+        || (item.type === PLAY_TYPES.single && item.mainRank !== "SJ" && item.mainRank !== "BJ")
+      ),
+  );
+}
+
+/** 接风/领出：有常规成组或散牌路线时不空扔王对 */
+export function isWastefulJokerPairOpeningLead(candidate, pool = []) {
+  if (candidate?.type !== PLAY_TYPES.pair) return false;
+  if (candidate.mainRank !== "SJ" && candidate.mainRank !== "BJ") return false;
+  return hasNonBombLeadAlternative(pool, candidate);
+}
+
+/** 接风/领出：手牌仍多时不空扔 A/K/王对（有成组或小牌路线时） */
+export function isWastefulPremiumPairOpeningLead(candidate, pool = [], hand = [], levelRank = "2") {
+  if (candidate?.type !== PLAY_TYPES.pair) return false;
+  const rank = candidate.mainRank;
+  if (rank === "SJ" || rank === "BJ") {
+    return isWastefulJokerPairOpeningLead(candidate, pool);
+  }
+  if (rank !== "A" && rank !== "K") return false;
+  if ((hand?.length ?? 0) <= 12) return false;
+  if (!hasNonBombLeadAlternative(pool, candidate)) return false;
+  return pool.some(
+    (item) => item !== candidate
+      && item.type !== PLAY_TYPES.pass
+      && !BOMB_TYPES.has(item.type)
+      && (
+        (item.type === PLAY_TYPES.single && compareRanks(item.mainRank, "8", levelRank) <= 0)
+        || (item.type === PLAY_TYPES.pair && compareRanks(item.mainRank, "10", levelRank) <= 0)
+        || item.type === PLAY_TYPES.tripleWithPair
+        || item.type === PLAY_TYPES.straight
+        || item.type === PLAY_TYPES.consecutivePairs
+      ),
+  );
+}
+
 /** 仅同花顺能压小单/对子且局面尚早：保留同花顺（与 principles/audit 阈值一致，独立于此避免循环依赖） */
 function shouldReserveStraightFlushForSmallCards(tableContext, hand, previousPlay) {
   if (tableContext.isOpening || tableContext.partnerOwnsTrick) return false;
@@ -270,6 +318,25 @@ export function scoreRobotDoctrine(candidate, hand, levelRank, tableContext) {
       reasons.push("【P12】刚炸/同花顺夺权接风，不宜空扔厚炸");
       principles.push("P12");
     }
+  }
+
+  if (
+    (tableContext.leadMode === "catch-wind" || tableContext.leadMode === "fresh-open")
+    && !tableContext.opponentActive
+    && isWastefulPremiumPairOpeningLead(
+      candidate,
+      tableContext._candidates ?? [],
+      hand,
+      levelRank,
+    )
+  ) {
+    score += 22_000;
+    reasons.push(
+      candidate.mainRank === "A" || candidate.mainRank === "K"
+        ? "【P12】接风不宜空扔高控对，宜小单/小对试探"
+        : "【P12】接风不宜空扔王对，有成组/散牌路线",
+    );
+    principles.push("P12");
   }
 
   if (

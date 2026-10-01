@@ -1,0 +1,11 @@
+export { createDecisionResult } from "./result.mjs";
+export { buildDecisionState, normalizeDecisionPlay } from "./state.mjs";
+export { decisionPlaySignature, decisionStateSignature } from "./signature.mjs";
+export { sourceDecisionCandidates } from "./candidates.mjs";
+export { buildCandidateFacts, buildHandFacts } from "./facts.mjs";
+export { buildCompleteStructures, structuresBrokenByCandidate } from "./structures.mjs";
+export { detectHardInvariantCodes, filterHardInvariants } from "./invariants.mjs";
+export { decide, DECISION_CORE_REVISION } from "./decide.mjs";
+export { rankDecisionCandidates } from "./rank.mjs";
+export { renderDecisionExplanation } from "./explain.mjs";
+export { skillTagsForEvidence } from "./skills.mjs";

@@ -1,6 +1,7 @@
-import { summarizeGameDivergences } from "./divergence-summary.mjs";
+import { summarizeGameDivergences, verdictUiLabel } from "./divergence-summary.mjs";
 import { buildGameInsightsMarkdownSection } from "./in-play-insight.mjs";
 import { buildUserDisputesMarkdownSection } from "./user-dispute.mjs";
+import { buildVariationTrainingMarkdown, buildVariationTrainingSet } from "./variation-training.mjs";
 
 export function buildGameReviewPayload({
   gameSnapshot,
@@ -13,6 +14,7 @@ export function buildGameReviewPayload({
   gameInsights = [],
 }) {
   const summary = summarizeGameDivergences(coachAdviceTimeline, humanPlayerIndex);
+  const variationTraining = buildVariationTrainingSet(coachAdviceTimeline, { humanPlayerIndex });
   const gameId = gameSnapshot?.gameId ?? `game-${Date.now()}`;
 
   return {
@@ -20,7 +22,7 @@ export function buildGameReviewPayload({
     kind: "game-review",
     feedbackId: `gr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     createdAt: new Date().toISOString(),
-    purpose: "auto-divergence-review",
+    purpose: "auto-divergence-archive",
     tag: "game-review",
     question: userNote.trim() || `本局自动对比：${summary.divergenceCount} 处与推荐1不一致`,
     gameId,
@@ -32,6 +34,7 @@ export function buildGameReviewPayload({
     currentPosition: gameSnapshot,
     userDisputes: userDisputes ?? [],
     gameInsights: gameInsights ?? [],
+    variationTraining,
   };
 }
 
@@ -39,20 +42,20 @@ export function buildGameReviewFixMarkdown(payload) {
   const summary = payload.divergenceSummary ?? { divergences: [], divergenceCount: 0, totalHands: 0 };
   const lines = [
     "---",
-    "status: pending",
+    "status: archived",
     `feedbackId: ${payload.feedbackId ?? "unknown"}`,
     `kind: game-review`,
     `createdAt: ${new Date().toISOString()}`,
     "---",
     "",
-    "# 本局自动对比 · 待改左侧推荐",
+    "# 本局复盘归档",
     "",
     `**牌局：** ${payload.gameId ?? "—"}，级牌 ${payload.levelRank ?? "—"}`,
     `**你出牌：** ${summary.totalHands} 手，**与推荐1不同：** ${summary.divergenceCount} 手`,
-    `**分类：** 你更对 ${summary.userBetterCount ?? 0} · 教练更对 ${summary.coachBetterCount ?? 0} · 教练不合理 ${summary.coachQuestionableCount ?? 0} · 风格差异 ${summary.styleCount ?? 0}`,
+    `**分类：** 与教练不一致 ${summary.userBetterCount ?? 0} · 建议学习点 ${summary.coachBetterCount ?? 0} · 教练存疑 ${summary.coachQuestionableCount ?? 0} · 风格差异 ${summary.styleCount ?? 0}`,
     "",
-    "请只改 `strategy/`（必要时 `coach/`）里**你认为用户打得更有道理**的差异手；不必强行让用户服从推荐。",
-    "改完执行 `node tests/smoke.mjs` 与 `node tools/build-standalone.mjs`，将 `status` 改为 `done`。",
+    "本文件仅供复盘归档与数据集 ingest；**不会**因用户意见自动改 `strategy/`。",
+    "仅教纲 blockTop1 等开发者审查项（status: pending）才进入改码流程。",
     "",
   ];
 
@@ -61,16 +64,17 @@ export function buildGameReviewFixMarkdown(payload) {
   }
 
   if (summary.divergences.length === 0) {
-    lines.push("（本局无差异手，可仅归档。）", "");
+    lines.push("（本局无差异手。）", "");
   } else {
     lines.push("## 差异明细", "");
     for (const item of summary.divergences) {
+      const uiLabel = verdictUiLabel(item.verdict);
       const doctrineLine = item.doctrineCodes?.length
         ? `- **教纲：** ${item.doctrineCodes.join("/")}${item.doctrineReason ? ` — ${item.doctrineReason}` : ""}`
         : null;
       lines.push(
-        `### 第 ${item.turnNumber} 手 · ${item.verdictLabel ?? "待观察"}`,
-        `- **分类：** ${item.verdictLabel ?? "—"}${item.verdictNote ? `（${item.verdictNote}）` : ""}`,
+        `### 第 ${item.turnNumber} 手 · ${uiLabel}`,
+        `- **分类：** ${uiLabel}${item.verdictNote ? `（${item.verdictNote}）` : ""}`,
         `- **裁决：** ${item.adjudication ?? "—"}`,
         ...(doctrineLine ? [doctrineLine] : []),
         ...(item.coachQuestionable ? ["- **教练存疑：** 是"] : []),
@@ -86,6 +90,8 @@ export function buildGameReviewFixMarkdown(payload) {
   if (insights.length > 0) {
     lines.push(...buildGameInsightsMarkdownSection(insights), "");
   }
+
+  lines.push(...buildVariationTrainingMarkdown(payload.variationTraining), "");
 
   const disputes = payload.userDisputes ?? [];
   if (disputes.length > 0) {

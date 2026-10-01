@@ -66,7 +66,13 @@ export function detectKeyMoment(state, context = {}) {
     },
     {
       type: KEY_PAUSE_TYPES.BOMB_TIMING,
-      match: () => hasBombs && (oppMin <= 5 || initiative),
+      // 有牌权时须至少出过一手，避免开局第 0 手误弹「炸不炸」
+      match: () => {
+        if (!hasBombs) return false;
+        if (oppMin <= 5) return true;
+        const played = (state.playHistory?.length ?? 0) > 0;
+        return initiative && played;
+      },
       message: () => (initiative
         ? "关键时刻：手里有炸弹，现在有牌权——炸不炸？"
         : `关键时刻：手里有炸弹，对手剩${oppMin}张——现在炸吗？`),

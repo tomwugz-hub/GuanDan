@@ -11,10 +11,7 @@ import {
   createInitialGameState,
   finishCompetitiveGame,
   buildStrategicGroups,
-  mergePremiumStrategicGroups,
-  evaluateHandProfile,
   groupPlayHistoryByRound,
-  getTurnAdvice,
   buildEngineFacts,
   buildGameReviewPayload,
   summarizeGameDivergences,
@@ -35,6 +32,8 @@ import {
   sortCardsForDisplay,
   startNextCompetitiveGame,
   fixResistTributeStarter,
+  ACE_ATTEMPT_LIMIT,
+  normalizeCompetitiveMatch,
   tryLocalCoachAnswer,
   appendRuleEngineAnswerFooter,
   analyzeInPlayInsight,
@@ -113,11 +112,15 @@ import {
   sortStraightFlushCards,
 } from "../strategy/straight-flush-arrange.mjs";
 import { detectKeyMoment } from "./key-moment-pause.mjs";
-import { fastRobotFallback, humanAdviceFallback, ROBOT_LITE_MAX_CANDIDATES, ROBOT_STEP_DEADLINE_MS } from "../coach/robot-player.mjs";
-import { COACH_STRATEGY_REVISION } from "../strategy/sf-runway-guard.mjs";
+import { getHumanTurnAdvice } from "../coach/human-advice.mjs";
+import { DECISION_CORE_REVISION } from "../decision/index.mjs";
+import {
+  COACH_STRATEGY_REVISION,
+} from "../strategy/sf-runway-guard.mjs";
 import { buildFormalRobotPlayOptions } from "../simulation/opponent-persona.mjs";
+import { buildRobotAutoTimelineRecord } from "./robot-auto-timeline-record.mjs";
 
-const REQUIRED_STRATEGY_REVISION = 6;
+const REQUIRED_STRATEGY_REVISION = COACH_STRATEGY_REVISION;
 
 const HUMAN_INDEX = 0;
 const PLAYER_NAMES = ["你", "勇哥", "老史", "毛蛋"];
@@ -433,6 +436,19 @@ if (elements.useKeyPause) elements.useKeyPause.checked = keyPauseEnabled;
 if (elements.mobileMlPolicy) elements.mobileMlPolicy.checked = useMlPolicy;
 if (elements.mobileKeyPause) elements.mobileKeyPause.checked = keyPauseEnabled;
 if (elements.mobileGuideTips) elements.mobileGuideTips.checked = guidesEnabled();
+
+/** 尽早绑定主操作钮，避免后续顶层初始化抛错导致「新开一局」无响应 */
+function reportBootError(error) {
+  console.error(error);
+  const text = error?.message ? String(error.message) : String(error);
+  if (elements.message) {
+    elements.message.textContent = `页面脚本异常：${text}（可尝试 Ctrl+F5 强刷，或换 Chrome 打开）`;
+  }
+}
+
+window.addEventListener("error", (event) => reportBootError(event.error ?? event.message));
+window.addEventListener("unhandledrejection", (event) => reportBootError(event.reason));
+bindPrimaryActions();
 
 function isTouchMobileDevice() {
   if (typeof window === "undefined") return false;
@@ -1056,24 +1072,23 @@ function serializeChoice(choice, index) {
 function serializeCoachAdvice(advice, actualPlay, source = "unknown") {
   if (source === "robot-auto") {
     const rec = advice.recommendation;
-    return {
+    return buildRobotAutoTimelineRecord({
       turnNumber: state.turnNumber,
       playerIndex: advice.playerIndex,
       playerName: PLAYER_NAMES[advice.playerIndex],
-      source,
       levelRank: advice.levelRank,
-      handCount: state.players[advice.playerIndex].hand.length,
+      handBefore: sortCardsForDisplay(state.players[advice.playerIndex].hand).map(serializeCard),
+      lastActivePlayerIndex: state.lastActivePlayerIndex,
       mustBeat: advice.mustBeat,
-      choices: rec ? [{
-        index: 1,
-        score: Math.round(rec.score ?? 0),
+      decisionSignature: advice.decisionSignature,
+      evidence: advice.evidence,
+      recommendation: rec ? {
+        score: rec.score,
         play: serializePlay(rec.candidate),
-        reasons: (rec.reasons ?? []).slice(0, 3),
-      }] : [],
+        reasons: rec.reasons,
+      } : null,
       actualPlay: serializePlay(actualPlay),
-      actualChoiceIndex: 1,
-      actualChoiceMatch: "suggestion-1",
-    };
+    });
   }
 
   const choices = adviceChoices(advice).map(serializeChoice);
@@ -1303,149 +1318,30 @@ function captureHeadTourReviewIfNeeded() {
   };
 }
 
-function currentHandPlayGroups() {
-  if (!state) return [];
-  const cardById = new Map(state.players[HUMAN_INDEX].hand.map((card) => [cardId(card), card]));
-  return ensureHandColumns()
-    .map((column) => column.map((id) => cardById.get(id)).filter(Boolean))
-    .filter((cards) => cards.length > 1)
-    .map((cards) => {
-      const play = classifyPlay(cards, state.levelRank);
-      return { cards, play };
-    })
-    .filter(({ play }) => play.type !== PLAY_TYPES.invalid && play.type !== PLAY_TYPES.pass)
-    .map(({ cards, play }) => ({
-      cards,
-      label: `${playLabel(play)} ${cardsLabel(cards)}`,
-    }));
-}
-
 function mlFusionModeForUi() {
   return useMlPolicy ? "smart" : "off";
 }
 
-/** 人类教练候选池上限（须与 tests/smoke.mjs 性能预算一致） */
-const HUMAN_ADVICE_MAX_CANDIDATES_OPEN = 16;
-const HUMAN_ADVICE_MAX_CANDIDATES_PRESS = 40;
-const HUMAN_ADVICE_ALTERNATIVES_QUICK = 2;
 const HUMAN_ADVICE_ALTERNATIVES_FULL = 6;
 const HUMAN_ADVICE_MAX_RETRIES = 2;
 
 /** 本手是否已发起过建议计算（防止 render 循环反复触发） */
 let adviceScheduledTableKey = null;
-let cachedHumanAdviceContext = { key: "", value: null };
+/** 精算超时/放弃后定格占位，避免每帧重算卡死 */
+let adviceSettledTableKey = null;
 
 function isAdvicePhaseComplete(advice = currentAdvice) {
   return Boolean(advice && !isAdviceStale(advice) && (advice._phase ?? "full") === "full");
 }
 
-function isHumanPressing(gameState = state) {
-  return Boolean(
-    gameState?.lastActivePlay
-    && gameState.lastActivePlay.type !== PLAY_TYPES.pass
-    && !isCatchWindPending(gameState),
-  );
-}
-
-function buildHumanAdviceContext({ lightweight = false } = {}) {
-  const key = buildAdviceTableKey();
-  if (cachedHumanAdviceContext.key === key && cachedHumanAdviceContext.value) {
-    return cachedHumanAdviceContext.value;
+/** 精算超时或重试用尽：定格当前占位为 full，停止本手反复重算 */
+function settleAdviceAsFinal(tableKey = buildAdviceTableKey()) {
+  if (currentAdvice && currentAdvice.tableKey === tableKey) {
+    currentAdvice._phase = "full";
   }
-  const hand = state.players[HUMAN_INDEX].hand;
-  const pressing = isHumanPressing(state);
-  if (lightweight) {
-    const columnGroups = pressing ? currentHandPlayGroups() : [];
-    const preferredGroups = pressing && columnGroups.length > 0
-      ? mergePremiumStrategicGroups(
-        columnGroups,
-        hand,
-        state.levelRank,
-        buildStrategicGroups(hand, state.levelRank),
-      )
-      : columnGroups;
-    const ctx = {
-      pressing,
-      preferredGroups,
-      handProfile: null,
-    };
-    cachedHumanAdviceContext = { key, value: ctx };
-    return ctx;
-  }
-  const columnGroups = pressing ? currentHandPlayGroups() : [];
-  const strategicGroups = buildStrategicGroups(hand, state.levelRank, { skipStraightFlush: pressing });
-  const strategicGroupsForMerge = pressing
-    ? buildStrategicGroups(hand, state.levelRank)
-    : strategicGroups;
-  const preferredGroups = pressing
-    ? mergePremiumStrategicGroups(
-      columnGroups.length > 0 ? columnGroups : strategicGroups,
-      hand,
-      state.levelRank,
-      strategicGroupsForMerge,
-    )
-    : strategicGroups;
-  const ctx = {
-    pressing,
-    preferredGroups,
-    handProfile: evaluateHandProfile(hand, state.levelRank, { preferredGroups }),
-  };
-  cachedHumanAdviceContext = { key, value: ctx };
-  return ctx;
-}
-
-function humanAdviceOptionsQuick(abortCheck = null) {
-  const ctx = buildHumanAdviceContext();
-  return {
-    alternatives: HUMAN_ADVICE_ALTERNATIVES_QUICK,
-    maxCandidates: ctx.pressing ? 12 : HUMAN_ADVICE_MAX_CANDIDATES_OPEN,
-    preferredGroups: ctx.preferredGroups,
-    handProfile: ctx.handProfile,
-    mlModel: null,
-    mlFusionMode: "off",
-    lite: true,
-    scoringAudience: "human-lite",
-    deadline: performance.now() + 2500,
-    abortCheck,
-  };
-}
-
-function humanAdviceOptionsFull(ctx, abortCheck = null) {
-  const opening = !ctx.pressing;
-  const useMl = useMlPolicy && mlPolicyModel && ctx.pressing;
-  return {
-    preferredGroups: ctx.preferredGroups,
-    handProfile: ctx.handProfile,
-    maxCandidates: opening ? 20 : HUMAN_ADVICE_MAX_CANDIDATES_PRESS,
-    alternatives: HUMAN_ADVICE_ALTERNATIVES_FULL,
-    mlModel: useMl ? mlPolicyModel : null,
-    mlFusionMode: useMl ? mlFusionModeForUi() : "off",
-    lite: true,
-    scoringAudience: "human-lite",
-    deadline: performance.now() + 6000,
-    abortCheck,
-  };
-}
-
-function robotAdviceOptions(actorIndex = state?.currentPlayerIndex ?? 1) {
-  if (state) {
-    return {
-      alternatives: 0,
-      handProfile: null,
-      scoringAudience: "robot",
-      ...buildFormalRobotPlayOptions(state, actorIndex),
-    };
-  }
-  return {
-    alternatives: 0,
-    handProfile: null,
-    lite: true,
-    scoringAudience: "robot",
-    maxCandidates: ROBOT_LITE_MAX_CANDIDATES,
-    mlModel: null,
-    mlFusionMode: "off",
-    deadline: performance.now() + ROBOT_STEP_DEADLINE_MS,
-  };
+  adviceSettledTableKey = tableKey;
+  adviceComputeState.retryCount = 0;
+  adviceComputeState.slowNotice = false;
 }
 
 function robotMlModel() {
@@ -1472,20 +1368,17 @@ function isAdviceStale(advice) {
 
 function invalidateStaleAdvice() {
   if (currentAdvice && isAdviceStale(currentAdvice)) currentAdvice = null;
-  cachedHumanAdviceContext = { key: "", value: null };
 }
 
-function getHumanAdviceQuick(abortCheck = null) {
-  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsQuick(abortCheck));
+function getHumanAdviceQuick() {
+  const advice = getHumanTurnAdvice(state, HUMAN_INDEX, {
+    alternatives: HUMAN_ADVICE_ALTERNATIVES_FULL,
+  });
+  if (advice.status !== "ok") {
+    throw new Error(advice.error?.message ?? "统一决策内核未返回有效建议");
+  }
   advice.tableKey = buildAdviceTableKey();
   advice._phase = "quick";
-  return advice;
-}
-
-function getHumanAdviceFromContext(ctx, phase = "full", abortCheck = null) {
-  const advice = getTurnAdvice(state, HUMAN_INDEX, humanAdviceOptionsFull(ctx, abortCheck));
-  advice.tableKey = buildAdviceTableKey();
-  advice._phase = phase;
   return advice;
 }
 
@@ -1506,21 +1399,9 @@ function applyHumanAdviceIfCurrent(advice, generation) {
   return true;
 }
 
-/** 人类回合立即写入毫秒级兜底，避免侧栏长时间停在「正在计算」 */
+/** 人类建议计算期间只显示状态，不生成临时 Top1。 */
 function ensureHumanAdvicePlaceholder() {
-  if (!state || isGameOver(state) || state.currentPlayerIndex !== HUMAN_INDEX) return false;
-  const key = buildAdviceTableKey();
-  if (currentAdvice?.tableKey === key && !isAdviceStale(currentAdvice)) return true;
-  try {
-    const emergency = buildEmergencyHumanAdvice();
-    if (emergency.tableKey !== key) return false;
-    currentAdvice = emergency;
-    adviceScheduledTableKey = key;
-    return true;
-  } catch (error) {
-    console.error("教练建议兜底失败", error);
-    return false;
-  }
+  return false;
 }
 
 function cancelIdleTask(idRef) {
@@ -1540,12 +1421,13 @@ const adviceComputeGeneration = { value: 0 };
 const adviceComputeState = {
   inFlight: false,
   slowNotice: false,
+  failureMessage: null,
   slowTimer: null,
   pendingRefresh: false,
   watchdogTimer: null,
   retryCount: 0,
 };
-const ADVICE_COMPUTE_TIMEOUT_MS = 4_500;
+const ADVICE_COMPUTE_TIMEOUT_MS = 2_600;
 
 function clearAdviceSlowTimer() {
   if (adviceComputeState.slowTimer !== null) {
@@ -1578,7 +1460,7 @@ function finishAdviceCompute({ generation, refreshUi = true } = {}) {
   if (refreshUi) {
     renderAdvice({ computeAdvice: false });
     renderControls();
-    if (!robotQueueActive) renderGameReviewPanel();
+    if (!robotQueueActive) scheduleDeferredPanelsRender();
   }
   if (
     !currentAdvice
@@ -1591,6 +1473,9 @@ function finishAdviceCompute({ generation, refreshUi = true } = {}) {
   } else {
     adviceComputeState.pendingRefresh = false;
     if (!currentAdvice) adviceScheduledTableKey = null;
+    else if (!isAdvicePhaseComplete() && currentAdvice._phase === "emergency") {
+      settleAdviceAsFinal(currentAdvice.tableKey);
+    }
   }
 }
 
@@ -1602,9 +1487,11 @@ function cancelAdviceCompute() {
   adviceComputeGeneration.value += 1;
   adviceComputeState.inFlight = false;
   adviceComputeState.slowNotice = false;
+  adviceComputeState.failureMessage = null;
   adviceComputeState.pendingRefresh = false;
   adviceComputeState.retryCount = 0;
   adviceScheduledTableKey = null;
+  adviceSettledTableKey = null;
 }
 
 function shouldAbortAdviceCompute(generation) {
@@ -1615,6 +1502,7 @@ function shouldAbortAdviceCompute(generation) {
 }
 
 function advicePendingMessage() {
+  if (adviceComputeState.failureMessage) return adviceComputeState.failureMessage;
   return adviceComputeState.slowNotice
     ? "可先出牌，推荐稍后更新。"
     : "正在计算推荐，请稍候… 也可先手动选牌出牌。";
@@ -1633,6 +1521,7 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
   const generation = adviceComputeGeneration.value;
   adviceComputeState.inFlight = true;
   adviceComputeState.slowNotice = false;
+  adviceComputeState.failureMessage = null;
   clearAdviceSlowTimer();
   clearAdviceComputeWatchdog();
   adviceComputeState.slowTimer = setTimeout(() => {
@@ -1647,10 +1536,48 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
     if (!adviceComputeState.inFlight || generation !== adviceComputeGeneration.value) return;
     console.warn("教练建议计算超时，中止本轮");
     adviceComputeGeneration.value += 1;
-    adviceComputeState.slowNotice = true;
-    ensureHumanAdvicePlaceholder();
+    currentAdvice = null;
+    adviceComputeState.failureMessage = "本次分析未完成，请重试。";
+    settleAdviceAsFinal();
     finishAdviceCompute({ generation, refreshUi });
   }, ADVICE_COMPUTE_TIMEOUT_MS);
+
+  const runAdviceComputePass = () => {
+    try {
+      if (shouldAbortAdviceCompute(generation)) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
+      if (state.currentPlayerIndex !== HUMAN_INDEX) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
+
+      const abortCheck = () => shouldAbortAdviceCompute(generation);
+      const quickAdvice = getHumanAdviceQuick(abortCheck);
+      if (shouldAbortAdviceCompute(generation)) {
+        finishAdviceCompute({ generation, refreshUi });
+        return;
+      }
+      quickAdvice._phase = "full";
+      adviceSettledTableKey = null;
+      adviceComputeState.slowNotice = false;
+      adviceComputeState.failureMessage = null;
+      if (applyHumanAdviceIfCurrent(quickAdvice, generation) && refreshUi) {
+        renderAdvice({ computeAdvice: false });
+        renderControls();
+      }
+    } catch (error) {
+      console.error("教练建议计算失败", error);
+      if (!shouldAbortAdviceCompute(generation)) {
+        currentAdvice = null;
+        adviceComputeState.failureMessage = "本次分析未完成，请重试。";
+        settleAdviceAsFinal();
+      }
+    } finally {
+      finishAdviceCompute({ generation, refreshUi });
+    }
+  };
 
   window.setTimeout(() => {
     try {
@@ -1668,69 +1595,22 @@ function runHumanAdviceCompute({ refreshUi = true } = {}) {
         return;
       }
 
-      applyHumanAdviceIfCurrent(buildEmergencyHumanAdvice(), generation)
-        || ensureHumanAdvicePlaceholder();
-      if (refreshUi) {
+      if (refreshUi && forHuman && currentAdvice) {
         renderAdvice({ computeAdvice: false });
         renderControls();
       }
 
-      window.setTimeout(() => {
-        try {
-          if (shouldAbortAdviceCompute(generation)) {
-            finishAdviceCompute({ generation, refreshUi });
-            return;
-          }
-          if (state.currentPlayerIndex !== HUMAN_INDEX) {
-            finishAdviceCompute({ generation, refreshUi });
-            return;
-          }
-
-          const abortCheck = () => shouldAbortAdviceCompute(generation);
-          const quickAdvice = getHumanAdviceQuick(abortCheck);
-          if (shouldAbortAdviceCompute(generation)) {
-            finishAdviceCompute({ generation, refreshUi });
-            return;
-          }
-          applyHumanAdviceIfCurrent(quickAdvice, generation);
-          if (refreshUi) {
-            renderAdvice({ computeAdvice: false });
-            renderControls();
-          }
-
-          window.setTimeout(() => {
-            try {
-              if (shouldAbortAdviceCompute(generation)) return;
-              if (state.currentPlayerIndex !== HUMAN_INDEX) return;
-
-              const abortCheck = () => shouldAbortAdviceCompute(generation);
-              const ctx = buildHumanAdviceContext();
-              const fullAdvice = getHumanAdviceFromContext(ctx, "full", abortCheck);
-              if (shouldAbortAdviceCompute(generation)) return;
-              adviceComputeState.slowNotice = false;
-              if (applyHumanAdviceIfCurrent(fullAdvice, generation) && refreshUi) {
-                renderAdvice({ computeAdvice: false });
-                renderControls();
-              }
-            } catch (error) {
-              console.error("教练建议精算失败", error);
-              ensureHumanAdvicePlaceholder();
-            } finally {
-              finishAdviceCompute({ generation, refreshUi });
-            }
-          }, 0);
-        } catch (error) {
-          console.error("教练建议计算失败", error);
-          if (!shouldAbortAdviceCompute(generation) && !currentAdvice) {
-            ensureHumanAdvicePlaceholder();
-          }
-          finishAdviceCompute({ generation, refreshUi });
-        }
-      }, 0);
+      if (typeof requestIdleCallback === "function") {
+        requestIdleCallback(runAdviceComputePass, { timeout: ADVICE_COMPUTE_TIMEOUT_MS - 200 });
+      } else {
+        window.setTimeout(runAdviceComputePass, 0);
+      }
     } catch (error) {
       console.error("教练建议初始化失败", error);
-      if (!shouldAbortAdviceCompute(generation) && !currentAdvice) {
-        ensureHumanAdvicePlaceholder();
+      if (!shouldAbortAdviceCompute(generation)) {
+        currentAdvice = null;
+        adviceComputeState.failureMessage = "本次分析未完成，请重试。";
+        settleAdviceAsFinal();
       }
       finishAdviceCompute({ generation, refreshUi });
     }
@@ -1778,6 +1658,11 @@ function scheduleHumanAdviceRefresh({ force = false } = {}) {
   cancelIdleTask(adviceRefreshIdleRef);
   invalidateStaleAdvice();
   const tableKey = buildAdviceTableKey();
+  if (state?.currentPlayerIndex === HUMAN_INDEX) {
+    if (!currentAdvice?.tableKey || currentAdvice.tableKey !== tableKey) {
+      ensureHumanAdvicePlaceholder();
+    }
+  }
   if (isAdvicePhaseComplete()) {
     renderAdvice({ computeAdvice: false });
     if (hintAwaiting) applyHintFromAdvice(currentAdvice);
@@ -1786,7 +1671,7 @@ function scheduleHumanAdviceRefresh({ force = false } = {}) {
   if (
     !force
     && adviceScheduledTableKey === tableKey
-    && (adviceComputeState.inFlight || isAdvicePhaseComplete())
+    && (adviceComputeState.inFlight || isAdvicePhaseComplete() || adviceSettledTableKey === tableKey)
   ) {
     return;
   }
@@ -2724,9 +2609,10 @@ function showHint() {
     return;
   }
   hintAwaiting = true;
-  message = "推荐计算中，请稍候…";
+  ensureHumanAdvicePlaceholder();
+  message = currentAdvice ? "已给出推荐，可点「提示」高亮。" : "推荐计算中，请稍候…";
   render();
-  scheduleHumanAdviceRefresh();
+  if (!isAdvicePhaseComplete()) scheduleHumanAdviceRefresh();
 }
 
 function keyPauseFiredSet(meta) {
@@ -2882,7 +2768,7 @@ function applyRestoredSession(data) {
   hintShown = false;
   hintAwaiting = false;
   state = data.state;
-  matchState = data.matchState ?? null;
+  matchState = normalizeCompetitiveMatch(data.matchState ?? null);
   if (matchState) {
     state = fixResistTributeStarter(state, matchState);
     matchState.currentGame = state;
@@ -3043,6 +2929,13 @@ function expectedTributeLabel(finishedPlayers) {
   return `预计单贡：${PLAYER_NAMES[fourth]}向${PLAYER_NAMES[first]}进贡；下一局发牌后再判断是否双大王抗贡。`;
 }
 
+function aceAttemptSummaryForTeam(matchState, teamIndex) {
+  if (!matchState || matchState.levels[teamIndex] !== "A") return "";
+  const count = matchState.aceAttempts?.[teamIndex] ?? 0;
+  if (count <= 0) return "（打 A 须双上过关，三把未双上退回 2）";
+  return `（打 A 已 ${count}/${ACE_ATTEMPT_LIMIT} 把未双上）`;
+}
+
 function settleCompetitiveGameIfNeeded() {
   if (!matchState || !state || !isGameOver(state) || matchSettledTurnNumber === state.turnNumber) return;
   matchState = finishCompetitiveGame(matchState, state);
@@ -3051,7 +2944,19 @@ function settleCompetitiveGameIfNeeded() {
   if (matchState.complete) {
     message = `竞技赛结束：${teamLabel(matchState.winnerTeam)}打 A 双上过关。`;
   } else if (latest) {
-    message = `${teamLabel(latest.settlement.winningTeam)}本局${latest.settlement.sameTeamSecond ? "双上" : "头游"}，升 ${latest.settlement.upgradeSteps} 级；下一局打 ${matchState.currentLevelRank}。`;
+    const settlement = latest.settlement;
+    if (settlement.demotedTeams?.includes(0)) {
+      message = `己方打 A 连续 ${ACE_ATTEMPT_LIMIT} 把未双上，退回打 2；下一局打 ${matchState.currentLevelRank}。`;
+    } else if (settlement.demotedTeams?.includes(1)) {
+      message = `对方打 A 连续 ${ACE_ATTEMPT_LIMIT} 把未双上，退回打 2；下一局打 ${matchState.currentLevelRank}。`;
+    } else if (settlement.sameTeamSecond) {
+      message = `${teamLabel(settlement.winningTeam)}本局双上，升 ${settlement.upgradeSteps} 级；下一局打 ${matchState.currentLevelRank}。`;
+    } else {
+      const aceHint = matchState.levels[0] === "A"
+        ? aceAttemptSummaryForTeam(matchState, 0)
+        : "";
+      message = `${teamLabel(settlement.winningTeam)}本局头游，升 ${settlement.upgradeSteps} 级${aceHint}；下一局打 ${matchState.currentLevelRank}。`;
+    }
   }
 }
 
@@ -3220,7 +3125,7 @@ async function newCompetitiveMatch() {
     matchGameNumber: matchState.gameNumber,
     matchLevels: matchState.levels,
   });
-  message = "竞技赛已开始：从 2 打起。本局结束后会结算升级，再进入进贡还贡。";
+  message = "竞技赛已开始：从 2 打起；打 A 须双上过关，三把未双上退回 2。本局结束后会结算升级，再进入进贡还贡。";
   render({ immediate: true, lite: true });
   if (state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
     queueRobotTurns();
@@ -3504,25 +3409,8 @@ async function pushCoachFeedbackForQuestion(question, record = null) {
 
 
 async function probeAiBridgeStatus() {
-  if (!elements.aiStatus) return;
-  try {
-    const response = await fetch("http://127.0.0.1:8787/training-sample", { method: "OPTIONS" });
-    aiBridgeOnline = response.ok || response.status === 204;
-    if (aiBridgeOnline) {
-      const flush = await flushFeedbackQueue();
-      if (flush.flushed > 0) {
-        feedbackSubmitCount += flush.flushed;
-        message = `已同步 ${flush.flushed} 条反馈。`;
-        render();
-      }
-    }
-    if (aiBridgeOnline) {
-      elements.aiStatus.textContent = "专注打牌即可，局末会自动记录复盘。";
-    }
-  } catch {
-    aiBridgeOnline = false;
-    elements.aiStatus.textContent = "请用「点我启动掼蛋教练Pro.cmd」启动游戏；刷新后会自动恢复对局进度。";
-  }
+  aiBridgeOnline = false;
+  if (elements.aiStatus) elements.aiStatus.textContent = "在线训练无需电脑开机；进度保存在当前浏览器，换设备不会自动同步。";
 }
 
 async function importExternalReplayFiles(fileList) {
@@ -3605,7 +3493,7 @@ async function saveTrainingSample() {
 
   const text = JSON.stringify(payload, null, 2);
   try {
-    const response = await fetch("http://127.0.0.1:8787/training-sample", {
+    const response = await Promise.reject(new Error("请使用导出区保存训练记录")); /* local bridge disabled */ void ({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: text,
@@ -3617,7 +3505,7 @@ async function saveTrainingSample() {
   } catch (error) {
     elements.exportOutput.value = text;
     elements.exportPanel.hidden = false;
-    message = "请先运行「点我启动掼蛋教练Pro.cmd」再保存记录；已把内容放到导出区。";
+    message = "训练记录已放到导出区，请导出备份；本网站不依赖个人电脑。";
   }
   render();
 }
@@ -4917,38 +4805,6 @@ function playAdviceChoice(index) {
   });
 }
 
-/** 计算超时/异常时的轻量建议，避免侧栏一直停在「正在计算」 */
-function buildEmergencyHumanAdvice() {
-  const hand = state.players[HUMAN_INDEX].hand;
-  const pressing = isHumanPressing(state);
-  const columnGroups = pressing ? currentHandPlayGroups() : [];
-  const preferredGroups = pressing && columnGroups.length > 0
-    ? mergePremiumStrategicGroups(
-      columnGroups,
-      hand,
-      state.levelRank,
-      buildStrategicGroups(hand, state.levelRank),
-    )
-    : columnGroups;
-  const previousPlay = effectivePreviousPlay(state);
-  const rec = humanAdviceFallback(hand, state.levelRank, previousPlay, preferredGroups, {
-    state,
-    playerIndex: HUMAN_INDEX,
-    lastActivePlayerIndex: state.lastActivePlayerIndex,
-  });
-  return {
-    playerIndex: HUMAN_INDEX,
-    levelRank: state.levelRank,
-    mustBeat: previousPlay ? serializePlay(previousPlay) : null,
-    handProfile: null,
-    recommendation: rec,
-    alternatives: [],
-    canPlay: rec.candidate.type !== PLAY_TYPES.pass,
-    tableKey: buildAdviceTableKey(),
-    _phase: "emergency",
-  };
-}
-
 /** 手动出牌时尚未算出 advice 时的占位记录，避免 tryPlay 同步全量评分 */
 function buildMinimalHumanAdviceForPlay(play) {
   return {
@@ -5002,9 +4858,10 @@ function clearRobotQueueActiveIfCurrent(generation) {
   }
 }
 
-/** 主线程长时间阻塞时 setTimeout watchdog 也会滞后，用渲染帧检测并强制兜底 */
+/** 主线程长时间阻塞时只停止并暴露错误，不切换另一套出牌策略。 */
 function maybeRecoverStalledRobotQueue() {
   if (!state || isGameOver(state) || state.currentPlayerIndex === HUMAN_INDEX || autoGameRunning) return;
+  if (robotQueueTimedOut) return;
 
   if (!robotQueueActive) {
     queueRobotTurns();
@@ -5020,19 +4877,13 @@ function maybeRecoverStalledRobotQueue() {
   }
 
   if (robotWaitSeconds() < ROBOT_STALL_RECOVER_SEC) return;
-  console.warn(`机器人队列停滞 ${robotWaitSeconds()}s，强制兜底恢复`);
+  console.warn(`机器人队列停滞 ${robotWaitSeconds()}s，停止自动队列`);
   robotQueueTimedOut = true;
   robotQueueActive = false;
   robotQueueStartedAt = 0;
   cancelRobotQueueTimers();
-  message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌较慢，已自动兜底继续。`;
-  if (kickStuckSession({ timeout: true })) {
-    render({ immediate: true, lite: true });
-    queueRobotTurns();
-  } else {
-    render({ immediate: true, lite: true });
-    queueRobotTurns();
-  }
+  message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌未完成，已停止，未自动换牌。`;
+  render({ immediate: true, lite: true });
 }
 
 function cancelRobotQueueWatchdog(generation) {
@@ -5105,8 +4956,8 @@ function reconcileTablePlaysWithState() {
   }
 }
 
-/** 修复 currentPlayer 与历史矛盾，必要时强制机器人过牌兜底 */
-function kickStuckSession({ timeout = false, silent = false } = {}) {
+/** 仅修复可证明的回合状态矛盾，不替机器人伪造策略出牌。 */
+function kickStuckSession({ silent = false } = {}) {
   if (!state || isGameOver(state)) return false;
 
   const { state: repaired, repaired: fixed } = repairTurnStuck(state);
@@ -5117,52 +4968,7 @@ function kickStuckSession({ timeout = false, silent = false } = {}) {
     return true;
   }
 
-  if (!timeout || state.currentPlayerIndex === HUMAN_INDEX) {
-    return false;
-  }
-
-  const actorIndex = state.currentPlayerIndex;
-  try {
-    let play;
-    const previousPlay = effectivePreviousPlay(state);
-    if (previousPlay) {
-      play = classifyPlay([], state.levelRank);
-      state = playCards(state, []);
-    } else {
-      const player = state.players[actorIndex];
-      const tableCtx = {
-        state,
-        playerIndex: actorIndex,
-        lastActivePlayerIndex: state.lastActivePlayerIndex,
-        previousPlay: null,
-      };
-      const fallback = fastRobotFallback(player.hand, state.levelRank, null, tableCtx);
-      play = fallback.candidate;
-      state = playCards(state, play.cards);
-    }
-    syncTablePlaysForCurrentTrick(actorIndex, play);
-    if (!silent) {
-      message = play.type === PLAY_TYPES.pass
-        ? `${PLAYER_NAMES[actorIndex]}：过牌（自动兜底）`
-        : `${PLAYER_NAMES[actorIndex]}：${cardsLabel(play.cards)}（自动兜底）`;
-    }
-    return true;
-  } catch (error) {
-    console.warn("机器人兜底出牌失败", error);
-    return false;
-  }
-}
-
-/** 机器人出牌记录：复用 recommendPlay 结果，不再同步二次 getTurnAdvice */
-function buildRobotTurnAdvice(actorIndex, recommendation) {
-  return {
-    playerIndex: actorIndex,
-    levelRank: state.levelRank,
-    mustBeat: state.lastActivePlay ? serializePlay(state.lastActivePlay) : null,
-    handProfile: null,
-    recommendation,
-    alternatives: [],
-  };
+  return false;
 }
 
 function applyRobotTurnResult(actorIndex, result, adviceRecord) {
@@ -5203,7 +5009,7 @@ function finishRobotQueueGameOver(generation) {
   scheduleDeferredPanelsRender();
 }
 
-/** 正式对局机器人单步：推荐失败或超时时走 fastRobotFallback，避免队列卡死 */
+/** 正式对局机器人单步：唯一 Top1 来自统一决策内核。 */
 function executeFormalRobotTurn(gameState, actorIndex) {
   const { state: normalized, repaired } = repairTurnStuck(gameState);
   const workingState = repaired ? normalized : gameState;
@@ -5211,30 +5017,8 @@ function executeFormalRobotTurn(gameState, actorIndex) {
     state = workingState;
     syncTableAfterTrickRepair(workingState);
   }
-  const player = workingState.players[actorIndex];
-  const previousPlay = effectivePreviousPlay(workingState);
-  const tableCtx = {
-    state: workingState,
-    playerIndex: actorIndex,
-    lastActivePlayerIndex: workingState.lastActivePlayerIndex,
-    previousPlay,
-  };
   const opts = buildFormalRobotPlayOptions(workingState, actorIndex);
-  try {
-    return playRecommendedTurn(workingState, opts);
-  } catch (error) {
-    console.warn(`${PLAYER_NAMES[actorIndex]} 推荐异常，走兜底`, error);
-    const fallback = fastRobotFallback(
-      player.hand,
-      workingState.levelRank,
-      previousPlay,
-      tableCtx,
-    );
-    return {
-      state: playCards(workingState, fallback.candidate.cards),
-      recommendation: fallback,
-    };
-  }
+  return playRecommendedTurn(workingState, opts);
 }
 
 /** 单帧仅推一手机器人，步末 setTimeout(0) 让出主线程且 watchdog 能触发 */
@@ -5278,7 +5062,7 @@ function runRobotQueueStep(generation) {
 
   try {
     const result = executeFormalRobotTurn(state, actorIndex);
-    const adviceBeforePlay = buildRobotTurnAdvice(actorIndex, result.recommendation);
+    const adviceBeforePlay = result.advice;
     const adviceRecord = serializeCoachAdvice(
       adviceBeforePlay,
       result.recommendation.candidate,
@@ -5287,9 +5071,8 @@ function runRobotQueueStep(generation) {
     applyRobotTurnResult(actorIndex, result, adviceRecord);
   } catch (error) {
     console.error(`${playerName} 自动出牌失败`, error);
-    if (!kickStuckSession({ timeout: true, silent: true })) {
-      stepOk = false;
-    }
+    message = `${playerName} 决策失败，本轮已停止，未自动换牌。`;
+    stepOk = false;
   }
 
   const stepElapsed = performance.now() - stepStarted;
@@ -5310,24 +5093,21 @@ function runRobotQueueStep(generation) {
   }
   if (detectTurnStuck(state)) {
     clearRobotQueueActiveIfCurrent(generation);
-    let recovered = kickStuckSession({ silent: true });
-    if (!recovered) recovered = kickStuckSession({ timeout: true, silent: true });
+    const recovered = kickStuckSession({ silent: true });
     render({ immediate: true, lite: true });
     if (state?.currentPlayerIndex === HUMAN_INDEX) {
       scheduleHumanAdviceRefresh();
     } else if (recovered) {
       scheduleRobotStep(generation);
     } else {
-      queueRobotTurns();
+      message = "检测到无法自动修复的回合状态，机器人已停止。";
+      render({ immediate: true, lite: true });
     }
     return;
   }
   if (!stepOk || generation !== robotQueueGeneration) {
     clearRobotQueueActiveIfCurrent(generation);
     render({ immediate: true, lite: true });
-    if (!stepOk && generation === robotQueueGeneration && state && !isGameOver(state) && state.currentPlayerIndex !== HUMAN_INDEX) {
-      queueRobotTurns();
-    }
     return;
   }
 
@@ -5356,16 +5136,15 @@ function scheduleRobotStep(generation) {
       robotQueueTimedOut = false;
       return;
     }
-    console.warn("机器人出牌超时，尝试修复并继续。");
+    console.warn("机器人出牌调度超时，停止自动队列。");
     robotQueueTimedOut = true;
     clearRobotQueueActiveIfCurrent(generation);
-    message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌超时，已自动兜底过牌并继续。`;
-    if (kickStuckSession({ timeout: true })) {
+    message = `${PLAYER_NAMES[state.currentPlayerIndex]} 走牌未完成，已停止，未自动换牌。`;
+    if (kickStuckSession()) {
       render({ immediate: true, lite: true });
       queueRobotTurns();
     } else {
       render({ immediate: true, lite: true });
-      queueRobotTurns();
     }
   }, ROBOT_QUEUE_TIMEOUT_MS);
 
@@ -5416,17 +5195,13 @@ function autoGame() {
     while (state && !isGameOver(state) && transcript.length < 600 && batch < 6) {
       const actorIndex = state.currentPlayerIndex;
       const robotOpts = buildFormalRobotPlayOptions(state, actorIndex);
-      const adviceBeforePlay = getTurnAdvice(state, actorIndex, {
-        ...robotOpts,
-        alternatives: 3,
-        handProfile: null,
-      });
+      const result = playRecommendedTurn(state, robotOpts);
+      const adviceBeforePlay = result.advice;
       const adviceRecord = serializeCoachAdvice(
         adviceBeforePlay,
         adviceBeforePlay.recommendation.candidate,
         "auto-game",
       );
-      const result = playRecommendedTurn(state, robotOpts);
       // 自动打完代打不计入人类复盘
       if (actorIndex !== HUMAN_INDEX) {
         appendCoachAdviceRecord(adviceRecord);
@@ -5664,7 +5439,7 @@ function renderMatch() {
   elements.matchStatus.textContent = matchState.complete
     ? `竞技赛结束：${teamLabel(matchState.winnerTeam)}胜`
     : `竞技赛第 ${matchState.gameNumber} 局`;
-  const base = `己方 ${matchState.levels[0]}，对方 ${matchState.levels[1]}，当前打 ${matchState.currentLevelRank}`;
+  const base = `己方 ${matchState.levels[0]}，对方 ${matchState.levels[1]}，当前打 ${matchState.currentLevelRank}${aceAttemptSummaryForTeam(matchState, 0)}`;
   const tribute = matchState.pendingTributeEvents.length > 0
     ? `；${matchState.pendingTributeEvents.map(tributeEventLabel).join("；")}`
     : "";
@@ -6717,7 +6492,7 @@ function renderAdvice({ computeAdvice = true } = {}) {
     wait.className = "advice-box";
     const actorName = PLAYER_NAMES[state.currentPlayerIndex];
     wait.innerHTML = robotQueueTimedOut
-      ? `<h3>对手走牌中</h3><p>${actorName} 走牌超时，已自动兜底；若仍卡住请刷新页面。</p>`
+      ? `<h3>对手走牌已停止</h3><p>${actorName} 本次决策未完成，系统没有自动换牌；可重新开局。</p>`
       : robotQueueActive
         ? `<h3>对手走牌中</h3><p>${actorName} 正在走牌，很快轮到你。</p>`
         : `<h3>等待出牌</h3><p>轮到你时，这里会显示推荐与理由。</p>`;
@@ -6746,7 +6521,7 @@ function renderAdvice({ computeAdvice = true } = {}) {
 
   const recommendation = document.createElement("div");
   recommendation.className = "advice-box";
-  const choices = adviceChoices(advice);
+  const topChoice = adviceChoices(advice)[0] ?? null;
   recommendation.innerHTML = `
     <h3>教练建议</h3>
     <p>${liveMustBeat}</p>
@@ -6758,16 +6533,14 @@ function renderAdvice({ computeAdvice = true } = {}) {
   }
   const choiceList = document.createElement("div");
   choiceList.className = "choice-list";
-  for (let index = 0; index < choices.length; index += 1) {
-    choiceList.append(renderChoiceCard(choices[index], index));
-  }
+  if (topChoice) choiceList.append(renderChoiceCard(topChoice, 0));
   recommendation.append(choiceList);
 
   const buildTag = document.createElement("p");
   buildTag.className = "advice-build-tag";
   buildTag.style.cssText = "font-size:11px;opacity:0.55;margin-top:8px;";
   const build = globalThis.__GUANDAN_BUILD__ ?? "未知";
-  buildTag.textContent = `策略 build ${build} · rev ${COACH_STRATEGY_REVISION}`;
+  buildTag.textContent = `决策内核 ${DECISION_CORE_REVISION} · build ${build} · legacy ${COACH_STRATEGY_REVISION}`;
   recommendation.append(buildTag);
 
   const insightWrap = document.createElement("div");
@@ -7138,8 +6911,8 @@ function adviceChoiceBadgeLabel(index) {
   const priorityLabels = ["最优", "备选", "谨慎"];
   if (index !== 0) return priorityLabels[index] ?? "可选";
   const phase = currentAdvice?._phase;
-  if (phase === "emergency") return "临时";
-  if (phase === "quick" || adviceComputeState.inFlight || adviceComputeState.slowNotice) return "精算中";
+  if (phase === "emergency" || phase === "full") return priorityLabels[0];
+  if (adviceComputeState.inFlight || adviceComputeState.slowNotice) return "更新中";
   return priorityLabels[0];
 }
 
@@ -7406,6 +7179,8 @@ function renderNow({ lite = false } = {}) {
     renderMobileAdviceStrip();
     renderCenterTurnHint();
     renderMobileChrome();
+    if (humanTurn) ensureHumanAdvicePlaceholder();
+    renderAdvice({ computeAdvice: !lite });
     if (isMobileLandscape()) {
       requestAnimationFrame(() => {
         syncMobileActionBandMetrics();
@@ -7413,15 +7188,15 @@ function renderNow({ lite = false } = {}) {
         syncMlHandToolsChrome();
       });
     }
-    renderAdvice({ computeAdvice: !lite });
-    if (lite) {
-      // 机器人连推 / 教练精算 / 尚无建议时跳过复盘面板，避免与建议计算抢主线程
-      const deferReviewPanel = state.currentPlayerIndex === HUMAN_INDEX && !currentAdvice;
-      if (!robotQueueActive && !adviceComputeState.inFlight && !deferReviewPanel) {
+    const deferHeavyPanels = humanTurn && !isAdvicePhaseComplete();
+    if (lite || deferHeavyPanels) {
+      const deferReviewPanel = humanTurn && !currentAdvice;
+      if (!robotQueueActive && !adviceComputeState.inFlight && !deferReviewPanel && !deferHeavyPanels) {
         renderGameReviewPanel();
       }
       renderControls();
       if (bootComplete && !robotQueueActive) schedulePersistSession();
+      if (deferHeavyPanels) scheduleDeferredPanelsRender();
       return;
     }
     renderGameReviewPanel();
@@ -7732,7 +7507,11 @@ elements.mobileMlPolicy?.addEventListener("change", () => {
 });
 
 initMobileLevelSelect();
-syncMobileLayout();
+try {
+  syncMobileLayout();
+} catch (error) {
+  reportBootError(error);
+}
 
 elements.importReplayFiles?.addEventListener("change", async (event) => {
   const files = event.target.files;
@@ -7904,7 +7683,7 @@ function bindMobileLandscapeActions() {
 
 function bindPlayDockActions() {
   const dock = elements.playDockActions;
-  if (!dock || dock.dataset.bound === "1") return;
+  if (!dock || dock.dataset?.bound === "1") return;
   dock.dataset.bound = "1";
   const handlers = {
     playSelected,
@@ -8023,22 +7802,9 @@ function bindPrimaryActions() {
   }
 }
 
-function reportBootError(error) {
-  console.error(error);
-  const text = error?.message ? String(error.message) : String(error);
-  if (elements.message) {
-    elements.message.textContent = `页面脚本异常：${text}（可尝试 Ctrl+F5 强刷，或换 Chrome 打开）`;
-  }
-}
-
-window.addEventListener("error", (event) => reportBootError(event.error ?? event.message));
-window.addEventListener("unhandledrejection", (event) => reportBootError(event.reason));
-
-bindPrimaryActions();
-
 function formatBootMessage(baseMessage = "") {
   const mlNote = useMlPolicy
-    ? (mlPolicyModel ? " ML 模型已加载。" : " ML 已开但模型未加载，请用 cmd 启动。")
+    ? (mlPolicyModel ? " ML 模型已加载。" : " ML 模型暂未加载，仍可使用规则训练。")
     : " 当前为纯规则推荐。";
   return `${baseMessage || "就绪。"}${mlNote}`;
 }
@@ -8099,7 +7865,7 @@ async function bootApp() {
   const activeRestored = restored && state && !isGameOver(state);
   render({ immediate: true, lite: activeRestored });
   if (COACH_STRATEGY_REVISION !== REQUIRED_STRATEGY_REVISION) {
-    message = `策略模块可能未更新（rev ${COACH_STRATEGY_REVISION ?? "?"}），请关掉标签重跑启动脚本。${message}`;
+    message = `策略模块可能未更新（rev ${COACH_STRATEGY_REVISION ?? "?"}），请刷新网站。${message}`;
   }
   if (elements.message) elements.message.textContent = formatBootMessage(message);
   bootComplete = true;

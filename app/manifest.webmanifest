@@ -1,0 +1,13 @@
+{
+  "name": "掼蛋教练 Pro 试玩",
+  "short_name": "掼蛋教练",
+  "description": "掼蛋 AI 教练 · 手机横屏试玩 v0.3.0-day3",
+  "version": "0.3.0-day3",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#124830",
+  "theme_color": "#124830",
+  "lang": "zh-CN"
+}
