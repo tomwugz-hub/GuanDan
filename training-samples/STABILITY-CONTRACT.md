@@ -7,7 +7,7 @@
 | 约束 | 执行标准 |
 |------|----------|
 | 赢牌导向 | 牌权、控场、后续出牌空间 > 单纯「最小够压」；二者冲突时以夺权为准（已体现在 P7 六炸修订） |
-| 同源一致 | 引擎 Top1、左侧推荐理由、问教练答复必须同源（`principles.mjs` → `doctrine-enforce`）；禁止主观臆测手牌/局面 |
+| 同源一致 | **左侧 Top1 与机器人** 必须同源（`decision/decide.mjs` → `getHumanTurnAdvice` / `playUnifiedRobotTurn`）；问教练仍走 `principles.mjs` + `local-qa`，理由须与 Top1 不矛盾 |
 | 改策略闭环 | 每次修订须举一反三 + 补 `doctrine-regression` 回归场景 + 用户三步实机验收 |
 
 ### 节奏与对局质量（与赢牌导向并列）
@@ -57,7 +57,8 @@
 
 **架构约束（单一真相）**：
 
-- 推荐、机器人、问教练共用：`physical hand` → `principles.mjs` → `doctrine-enforce.mjs`
+- **产品出牌推荐**：`physical hand` → `decision/decide.mjs`（候选 → 硬不变量 → 教纲排序）
+- **问教练 / 教纲执法（遗留）**：`principles.mjs` → `doctrine-enforce.mjs`（改 Top1 时优先改 `decision/doctrines/*`）
 - 问教练数牌用 `rankCountsFromHand` / `physicalRankCounts`，不以理牌分组代替物理张数
 - ML `smart` 模式下教纲冲突候选 ML 权重归零，不得抬回 Top1
 - 专问路由失败 → `fallback` 短答（禁止「规则备忘」炸弹 brief 作主路径）

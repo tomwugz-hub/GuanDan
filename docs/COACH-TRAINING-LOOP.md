@@ -17,10 +17,10 @@
 | 环节 | 说明 |
 |------|------|
 | 局末 | 应用写入 `COACH-FIX-REQUEST.md`（pending） |
-| **本地（主路径）** | detached 拉起 `tools/process-coach-fix-request.mjs` → 改 `strategy/` → smoke + build → 标 done → 非交互 push |
+| **本地（主路径）** | detached 拉起 `tools/process-coach-fix-request.mjs` → 改 `decision/`（产品 Top1）→ smoke + build → 标 done → 非交互 push |
 | 即时 | 并行 POST 到 Automation Webhook（载荷含完整 markdown） |
 | 兜底 | 每 5 分钟 cron 检查仓库内 pending（需 `GUANDAN_AUTO_GIT_PUSH=1`） |
-| 云端 | Agent 读 pending → 仅「你更对」时改 `strategy/` → smoke + build → 标 done → push |
+| 云端 | Agent 读 pending → 仅「你更对」时改 `decision/` → smoke + build → 标 done → push |
 | 本地 | `git pull` 后游戏页 **Ctrl+F5** 刷新 |
 
 ### 一次性配置（约 5 分钟）

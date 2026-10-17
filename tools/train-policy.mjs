@@ -73,7 +73,10 @@ function rowTop1Accuracy(rows, names, weights, bias) {
 }
 
 function main() {
-  const rowsPath = join(root, process.argv[2] ?? "datasets/v1/rows.jsonl");
+  const rowsArg = process.argv[2] ?? "datasets/v1/rows.jsonl";
+  const rowsPath = rowsArg.startsWith("/") || rowsArg.match(/^[A-Za-z]:\\/)
+    ? rowsArg
+    : join(root, rowsArg);
   const outDir = join(root, process.argv[3] ?? "models/policy-v001");
   mkdirSync(outDir, { recursive: true });
 

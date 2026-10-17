@@ -106,7 +106,10 @@ assert(analyzed.analysis.length > 4, "应有 1～3 句分析摘要");
 
 const adoptedReply = formatInPlayInsightReply(analyzed.analysis, INSIGHT_VERDICTS.ADOPTED);
 assert(adoptedReply.includes("教练说："), "应有教练说前缀");
-assert(adoptedReply.includes("已记入本局优化"), "采纳应有优化文案");
+assert(
+  adoptedReply.includes("局末复盘会标注教纲要点") || adoptedReply.includes("已记入本局优化"),
+  "采纳应有局末复盘/优化文案",
+);
 
 const recordedReply = formatInPlayInsightReply(analyzed.analysis, INSIGHT_VERDICTS.RECORDED);
 assert(recordedReply.includes("局末一并汇总"), "记录应有局末汇总文案");

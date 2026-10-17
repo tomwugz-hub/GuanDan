@@ -1355,7 +1355,10 @@ function buildDeadlineFallbackRecommendations(hand, levelRank, previousPlay, tab
     if (beatCtx.opponentActive && !beatCtx.partnerOwnsTrick) {
       const pairCtx = analyzeMustBeatPairContext(hand, levelRank, previousPlay, beatCtx);
       const reserveStructure = shouldReserveStructureForRoutineBeat(beatCtx, hand, previousPlay, levelRank);
-      const minPair = pickMinWholePairBeater(pairCtx, { reserveStructure, hand, levelRank, tableContext: beatCtx });
+      let minPair = pickMinWholePairBeater(pairCtx, { reserveStructure, hand, levelRank, tableContext: beatCtx });
+      if (minPair && breaksStraightFlushRunwayOnMustBeatPair(minPair, hand, levelRank, beatCtx)) {
+        minPair = null;
+      }
       if (minPair) {
         return {
           top: {
@@ -1444,6 +1447,34 @@ function buildDeadlineFallbackRecommendations(hand, levelRank, previousPlay, tab
       };
     }
   }
+  if (!mustLead && previousPlay.type === PLAY_TYPES.consecutivePairs) {
+    const beatCtx = enrichScoringContext(
+      { ...tableContext, previousPlay },
+      pool,
+      hand,
+      levelRank,
+    );
+    if (beatCtx.opponentActive && !beatCtx.partnerOwnsTrick) {
+      const safeCp = pool.filter(
+        (item) => item.type === PLAY_TYPES.consecutivePairs
+          && canBeat(item, previousPlay)
+          && breaksStraightFlushRunwayOnMustBeatCp(item, hand, levelRank, beatCtx) == null,
+      );
+      if (safeCp.length === 0) {
+        const passPlay = classifyPlay([], levelRank);
+        return {
+          top: {
+            candidate: passPlay,
+            score: 0,
+            reasons: ["计算超时，无结构安全连对可压，宜过牌保留同花顺"],
+          },
+          pool: [],
+          scoringContext: { ...tableContext, preferredGroups },
+          blockedCandidates: [],
+        };
+      }
+    }
+  }
   const candidate = mustLead
     ? pickOpeningLeadFallback(hand, levelRank, pool, preferredGroups, tableContext)
     : pool[0];
@@ -1480,6 +1511,62 @@ function buildDeadlineFallbackRecommendations(hand, levelRank, previousPlay, tab
     pool: [],
     scoringContext: { ...tableContext, preferredGroups },
     blockedCandidates: [],
+  };
+}
+
+/** Legacy UI 应急路径：与 deadline 兜底同源，供回归测试与兼容 import。 */
+export function humanAdviceFallback(hand, levelRank, previousPlay, preferredGroups = [], tableContext = {}) {
+  const ctx = {
+    ...tableContext,
+    preferredGroups,
+    lite: tableContext.lite ?? true,
+    scoringAudience: tableContext.scoringAudience ?? "human-lite",
+  };
+  const resolvedPrevious = previousPlay ?? (ctx.state ? effectivePreviousPlay(ctx.state) : null);
+  const mustLead = !resolvedPrevious || resolvedPrevious.type === PLAY_TYPES.pass;
+  if (mustLead) {
+    const rec = recommendPlay(hand, levelRank, resolvedPrevious, { ...ctx, mlFusionMode: "off" });
+    const leadCtx = {
+      ...ctx,
+      state: ctx.state,
+      playerIndex: ctx.playerIndex ?? 0,
+      previousPlay: resolvedPrevious,
+    };
+    if (
+      rec.candidate?.type !== PLAY_TYPES.pass
+      && !isLeadTurnSfRunwayBreak(rec.candidate, hand, levelRank, leadCtx)
+    ) {
+      return {
+        candidate: rec.candidate,
+        score: rec.score,
+        reasons: rec.reasons,
+      };
+    }
+  }
+  const { top } = deadlineFallbackRecommendations(hand, levelRank, previousPlay, ctx);
+  let candidate = top?.candidate ?? null;
+  if (
+    candidate
+    && previousPlay
+    && previousPlay.type !== PLAY_TYPES.pass
+    && candidate.type === PLAY_TYPES.pair
+    && breaksStraightFlushRunwayOnMustBeatPair(candidate, hand, levelRank, {
+      ...ctx,
+      previousPlay,
+      opponentActive: true,
+    })
+  ) {
+    candidate = classifyPlay([], levelRank);
+    return {
+      candidate,
+      score: 0,
+      reasons: ["应急兜底：不宜拆同花顺跑道对子，宜过牌"],
+    };
+  }
+  return {
+    candidate,
+    score: top?.score ?? null,
+    reasons: top?.reasons ?? [],
   };
 }
 
@@ -3667,6 +3754,21 @@ export function computeRecommendations(hand, levelRank, previousPlay = null, tab
     pool: displayablePool.map(alignScoredItem),
     scoringContext,
     blockedCandidates: (postEnforce.blockedCandidates ?? []).map(alignScoredItem),
+  };
+}
+
+/** 机器人 lite/超时兜底，与旧 fastRobotFallback 测试契约一致。 */
+export function fastRobotFallback(hand, levelRank, previousPlay = null, tableContext = {}) {
+  const ctx = {
+    ...tableContext,
+    lite: tableContext.lite ?? true,
+    scoringAudience: "robot",
+  };
+  const { top } = computeRecommendations(hand, levelRank, previousPlay, ctx);
+  return {
+    candidate: top?.candidate ?? null,
+    score: top?.score ?? null,
+    reasons: top?.reasons ?? [],
   };
 }
 

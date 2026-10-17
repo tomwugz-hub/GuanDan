@@ -29,6 +29,7 @@ import {
   classifyAuditPath,
   summarizeElapsedMs,
 } from "./lib/audit-lite-mode.mjs";
+import { releaseGateViolationsOk } from "./lib/release-gate-audit.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const outDir = join(root, "..", "training-samples");
@@ -381,15 +382,12 @@ function main() {
     return totals;
   }, { constant: 0, fast: 0, normal: 0 });
   const elapsedMs = summarizeElapsedMs(results.flatMap((result) => result.elapsedSamples ?? []));
-  const softSfWaste = byCode["sf-waste-small"] ?? 0;
-  const hardViolationCount = allViolations.length - softSfWaste
-    + Math.max(0, softSfWaste - 2);
   const liteHardViolationCount = ["split-bomb", "beat-partner", "twp-level-kicker"]
     .reduce((total, code) => total + (byCode[code] ?? 0), 0);
   const report = {
     ok: mode === "lite" || mode === "perf"
       ? liteHardViolationCount === 0 && completed === count
-      : hardViolationCount === 0 && completed === count,
+      : releaseGateViolationsOk(byCode) && completed === count,
     mode,
     reportClass: mode === "lite"
       ? "diagnostic"

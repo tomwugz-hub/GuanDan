@@ -92,7 +92,8 @@ assert(auditCodes.includes("beat-partner"), "timeline 审计必须暴露 beat-pa
 
 // Structural guard: all four Top1-producing paths must invoke the shared filter.
 const recommendSource = readFileSync(new URL("../strategy/recommend.mjs", import.meta.url), "utf8");
-const robotSource = readFileSync(new URL("../coach/robot-player.mjs", import.meta.url), "utf8");
+const robotSource = readFileSync(new URL("../decision/invariants.mjs", import.meta.url), "utf8")
+  + readFileSync(new URL("../coach/robot-decision.mjs", import.meta.url), "utf8");
 const doctrineSource = readFileSync(new URL("../strategy/doctrine-enforce.mjs", import.meta.url), "utf8");
 for (const name of ["tryRobotQuickRecommendations", "deadlineFallbackRecommendations"]) {
   const start = recommendSource.indexOf(`function ${name}`);
@@ -100,7 +101,10 @@ for (const name of ["tryRobotQuickRecommendations", "deadlineFallbackRecommendat
   const body = recommendSource.slice(start, next < 0 ? undefined : next);
   assert(body.includes("filterHardInvariants("), `${name} 必须调用 filterHardInvariants`);
 }
-assert(robotSource.includes("filterHardInvariants("), "coach fallback 必须调用 filterHardInvariants");
+assert(
+  robotSource.includes("filterHardInvariants("),
+  "decision-core / 机器人路径必须调用 filterHardInvariants",
+);
 assert(doctrineSource.includes("filterHardInvariants("), "doctrine 必须调用 filterHardInvariants");
 
 console.log("PASS: hard invariants golden (beat-partner / twp-level-kicker / split-bomb)");

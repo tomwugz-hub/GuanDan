@@ -84,9 +84,9 @@ function buildAgentPrompt(markdown, toFix, disputes = []) {
   return [
     "你是掼蛋教练 Pro 策略工程师。按 .cursor/rules/guandan-coach-auto.mdc 执行，勿询问用户许可。",
     "",
-    `处理「你更对」与「教练不合理」（教纲违规）差异手（第 ${turns} 手），改 strategy/（必要时 coach/）。`,
+    `处理「你更对」与「教练不合理」（教纲违规）差异手（第 ${turns} 手），改 decision/（教纲/候选/不变量；必要时 coach/）。`,
     "教练更对且无教纲违规、纯风格差异不要强行改推荐。",
-    "用户申诉须阅读：理由充分时可推翻原「教练更对」裁决并改 strategy/。",
+    "用户申诉须阅读：理由充分时可推翻原「教练更对」裁决并改 decision/。",
     "改完不要停：本脚本会跑 smoke/build；你只需确保代码正确。",
     ...disputeLines,
     "",
@@ -282,7 +282,7 @@ async function main() {
     : "";
   const conclusion = toFix.length === 0
     ? `本局无「你更对/教练不合理/申诉重审」项（教练更对 ${coachBetter.length}、教练不合理 ${coachQuestionable.length}、风格差异 ${styleOnly.length}）${disputeNote}，不改推荐。`
-    : `已处理第 ${turnList} 手（你更对/教练不合理/申诉重审，见 strategy/ 变更）；教练更对 ${coachBetter.length}、风格差异 ${styleOnly.length} 处保持原推荐${disputeNote}。`;
+    : `已处理第 ${turnList} 手（你更对/教练不合理/申诉重审，见 decision/ 变更）；教练更对 ${coachBetter.length}、风格差异 ${styleOnly.length} 处保持原推荐${disputeNote}。`;
 
   await markDone(markdown, conclusion);
   await logLine(`已标 done: ${conclusion}`);
