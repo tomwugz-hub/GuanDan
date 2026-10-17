@@ -56,8 +56,9 @@ assert(
   "lite 路径 resolvePreferredGroups 应跳过 buildStrategicGroups",
 );
 assert(
-  /function buildEmergencyHumanAdvice[\s\S]{0,280}currentHandPlayGroups\(\)/.test(mainSource),
-  "应急建议须走 currentHandPlayGroups 轻量路径，不得在 render 热路径同步 buildHumanAdviceContext",
+  mainSource.includes("getHumanTurnAdvice")
+    && mainSource.includes("runHumanAdviceCompute"),
+  "人类建议应异步走统一决策内核，不在 render 热路径同步重算",
 );
 assert(
   /if \(computeAdvice\)[\s\S]{0,220}!adviceComputeState\.inFlight[\s\S]{0,80}scheduleHumanAdviceRefresh/.test(mainSource),

@@ -1,4 +1,5 @@
 import { getRobotTurnAdvice, playUnifiedRobotTurn } from "./robot-decision.mjs";
+export { humanAdviceFallback, fastRobotFallback } from "../strategy/recommend.mjs";
 
 /** Compatibility exports; selection no longer branches on these budgets. */
 export const ROBOT_LITE_MAX_CANDIDATES = 0;

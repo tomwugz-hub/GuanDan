@@ -51,17 +51,18 @@ function catchWindState(hand) {
 
 function assertRobotLead(label, hand, forbidPairRank) {
   const state = catchWindState(hand);
-  const { recommendation } = playRecommendedTurn(state, buildFormalRobotPlayOptions(state, 1));
+  const turn = playRecommendedTurn(state, buildFormalRobotPlayOptions(state, 1));
+  const { recommendation } = turn;
   const { candidate, reasons } = recommendation;
   if (candidate.type === PLAY_TYPES.pair && candidate.mainRank === forbidPairRank) {
     console.error(`FAIL ${label}: 不宜接风裸出级牌对${forbidPairRank}，实际对${candidate.mainRank}`, reasons?.[0]);
     process.exit(1);
   }
-  if (!reasons?.[0]?.includes("同源原则") && !reasons?.[0]?.includes("兜底")) {
-    console.error(`FAIL ${label}: 理由应含同源原则/兜底，实际`, reasons?.[0]);
+  if (turn.diagnostics?.executionPath !== "decision-core") {
+    console.error(`FAIL ${label}: 应走 decision-core，实际`, turn.diagnostics?.executionPath);
     process.exit(1);
   }
-  console.log(`  ✓ ${label}:`, candidate.type, candidate.mainRank ?? "", reasons[0]);
+  console.log(`  ✓ ${label}:`, candidate.type, candidate.mainRank ?? "", reasons?.[0] ?? "");
 }
 
 assertRobotLead("仅对3", handPair3Only, "3");

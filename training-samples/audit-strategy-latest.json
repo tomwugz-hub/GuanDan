@@ -1,87 +1,284 @@
 {
-  "ok": false,
-  "auditedAt": "2026-06-12T05:58:53.636Z",
+  "ok": true,
+  "mode": "full",
+  "reportClass": "release-gate",
+  "turnBudgetMs": null,
+  "totalTurns": 571,
+  "forcedFallbackCount": 0,
+  "actualDeadlineExceededCount": 0,
+  "fallbackPathCounts": {
+    "constant": 0,
+    "fast": 0,
+    "normal": 571
+  },
+  "elapsedMs": {
+    "p50": 1.08,
+    "p95": 20.95,
+    "p99": 77.89,
+    "max": 103.33
+  },
+  "auditedAt": "2026-10-17T03:15:08.445Z",
   "games": 6,
   "completed": 6,
   "incomplete": 0,
   "completionRate": 1,
   "avgTurns": 95,
-  "violationCount": 5,
+  "violationCount": 13,
   "violationsByCode": {
-    "sf-waste-small": 3,
-    "bomb-reason-contradiction": 2
+    "split-structure-single": 7,
+    "pass-with-regular-beat": 4,
+    "wild-low-value": 1,
+    "beat-partner": 1,
+    "split-bomb": 0,
+    "twp-level-kicker": 0
   },
+  "topReproductions": [
+    {
+      "code": "split-structure-single",
+      "count": 7,
+      "sample": {
+        "code": "split-structure-single",
+        "detail": "接风/领出拆结构出单10",
+        "gameSeed": 88016,
+        "turnNumber": 87,
+        "playerIndex": 2,
+        "playLabel": "方片10",
+        "reasons": [
+          "出牌后剩余11张。"
+        ],
+        "handCount": 12,
+        "mustBeat": null
+      }
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "count": 4,
+      "sample": {
+        "code": "pass-with-regular-beat",
+        "detail": "有普通压牌却过牌",
+        "gameSeed": 88015,
+        "turnNumber": 37,
+        "playerIndex": 3,
+        "playLabel": "过牌",
+        "reasons": [
+          "过牌仍是合法选择。"
+        ],
+        "handCount": 21,
+        "mustBeat": "TripleWithPair:7"
+      }
+    },
+    {
+      "code": "beat-partner",
+      "count": 1,
+      "sample": {
+        "code": "beat-partner",
+        "detail": "反压对家队友占牌",
+        "gameSeed": 88020,
+        "turnNumber": 59,
+        "playerIndex": 1,
+        "playLabel": "梅花10 梅花7 梅花8 梅花9 梅花J",
+        "reasons": [
+          "出完后手牌归零。",
+          "出牌后剩余0张。",
+          "该候选会消耗炸弹级资源。"
+        ],
+        "handCount": 5,
+        "mustBeat": "Pair:A"
+      }
+    },
+    {
+      "code": "wild-low-value",
+      "count": 1,
+      "sample": {
+        "code": "wild-low-value",
+        "detail": "逢人配配Triple",
+        "gameSeed": 88017,
+        "turnNumber": 83,
+        "playerIndex": 1,
+        "playLabel": "方片A 红桃2 红桃2（红桃2配黑桃A，红桃2配黑桃A）",
+        "reasons": [
+          "出牌后剩余10张。",
+          "该候选会拆开现有完整结构。"
+        ],
+        "handCount": 13,
+        "mustBeat": null
+      }
+    }
+  ],
   "samples": [
     {
-      "code": "bomb-reason-contradiction",
-      "detail": "理由说不必动炸仍出炸",
-      "gameSeed": 42104,
-      "turnNumber": 2,
-      "playerIndex": 2,
-      "playLabel": "Bomb",
-      "reasons": [
-        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
-        "【P7】能用小炸就不用大炸，优先最小够压炸弹",
-        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
-      ],
-      "handCount": 27,
-      "mustBeat": "ConsecutivePairs:K"
-    },
-    {
-      "code": "bomb-reason-contradiction",
-      "detail": "理由说不必动炸仍出炸",
-      "gameSeed": 42104,
-      "turnNumber": 8,
-      "playerIndex": 0,
-      "playLabel": "Bomb",
-      "reasons": [
-        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
-        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
-      ],
-      "handCount": 21,
-      "mustBeat": "ConsecutivePairs:5"
-    },
-    {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42104,
-      "turnNumber": 62,
-      "playerIndex": 2,
-      "playLabel": "StraightFlush",
-      "reasons": [
-        "只有炸弹能压，应抢牌权",
-        "对手剩牌少，提高拦截积极性"
-      ],
-      "handCount": 9,
-      "mustBeat": "Single:BJ"
-    },
-    {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42105,
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88015,
       "turnNumber": 37,
       "playerIndex": 3,
-      "playLabel": "StraightFlush",
+      "playLabel": "过牌",
       "reasons": [
-        "有普通炸弹可压，不宜亮同花顺",
-        "只有炸弹能压，应抢牌权",
-        "对手剩牌少，提高拦截积极性"
+        "过牌仍是合法选择。"
       ],
-      "handCount": 19,
-      "mustBeat": "Single:2"
+      "handCount": 21,
+      "mustBeat": "TripleWithPair:7"
     },
     {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42105,
-      "turnNumber": 77,
-      "playerIndex": 2,
-      "playLabel": "StraightFlush",
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88016,
+      "turnNumber": 65,
+      "playerIndex": 3,
+      "playLabel": "过牌",
       "reasons": [
-        "只有炸弹能压，应抢牌权"
+        "过牌仍是合法选择。"
       ],
-      "handCount": 10,
-      "mustBeat": "Single:BJ"
+      "handCount": 7,
+      "mustBeat": "Single:K"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88016,
+      "turnNumber": 87,
+      "playerIndex": 2,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单J",
+      "gameSeed": 88016,
+      "turnNumber": 94,
+      "playerIndex": 2,
+      "playLabel": "方片J",
+      "reasons": [
+        "出牌后剩余5张。"
+      ],
+      "handCount": 6,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单3",
+      "gameSeed": 88017,
+      "turnNumber": 69,
+      "playerIndex": 3,
+      "playLabel": "方片3",
+      "reasons": [
+        "出牌后剩余5张。"
+      ],
+      "handCount": 6,
+      "mustBeat": null
+    },
+    {
+      "code": "wild-low-value",
+      "detail": "逢人配配Triple",
+      "gameSeed": 88017,
+      "turnNumber": 83,
+      "playerIndex": 1,
+      "playLabel": "方片A 红桃2 红桃2（红桃2配黑桃A，红桃2配黑桃A）",
+      "reasons": [
+        "出牌后剩余10张。",
+        "该候选会拆开现有完整结构。"
+      ],
+      "handCount": 13,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88017,
+      "turnNumber": 89,
+      "playerIndex": 1,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余8张。"
+      ],
+      "handCount": 9,
+      "mustBeat": null
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88019,
+      "turnNumber": 1,
+      "playerIndex": 3,
+      "playLabel": "过牌",
+      "reasons": [
+        "过牌仍是合法选择。"
+      ],
+      "handCount": 27,
+      "mustBeat": "ConsecutivePairs:3"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88019,
+      "turnNumber": 11,
+      "playerIndex": 1,
+      "playLabel": "过牌",
+      "reasons": [
+        "过牌仍是合法选择。"
+      ],
+      "handCount": 16,
+      "mustBeat": "Straight:Q"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单6",
+      "gameSeed": 88020,
+      "turnNumber": 31,
+      "playerIndex": 1,
+      "playLabel": "梅花6",
+      "reasons": [
+        "本轮已接回牌权，优先清理散单并保留成组牌。",
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "beat-partner",
+      "detail": "反压对家队友占牌",
+      "gameSeed": 88020,
+      "turnNumber": 59,
+      "playerIndex": 1,
+      "playLabel": "梅花10 梅花7 梅花8 梅花9 梅花J",
+      "reasons": [
+        "出完后手牌归零。",
+        "出牌后剩余0张。",
+        "该候选会消耗炸弹级资源。"
+      ],
+      "handCount": 5,
+      "mustBeat": "Pair:A"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单2",
+      "gameSeed": 88020,
+      "turnNumber": 76,
+      "playerIndex": 2,
+      "playLabel": "黑桃2",
+      "reasons": [
+        "本轮已接回牌权，优先清理散单并保留成组牌。",
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88020,
+      "turnNumber": 79,
+      "playerIndex": 2,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余10张。"
+      ],
+      "handCount": 11,
+      "mustBeat": null
     }
   ],
   "autoGameSpotCheck": {
@@ -90,78 +287,181 @@
     "hitLimit": 0
   },
   "levelRank": "2",
-  "seedStart": 42100,
+  "seedStart": 88015,
   "allViolations": [
     {
-      "code": "bomb-reason-contradiction",
-      "detail": "理由说不必动炸仍出炸",
-      "gameSeed": 42104,
-      "turnNumber": 2,
-      "playerIndex": 2,
-      "playLabel": "Bomb",
-      "reasons": [
-        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
-        "【P7】能用小炸就不用大炸，优先最小够压炸弹",
-        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
-      ],
-      "handCount": 27,
-      "mustBeat": "ConsecutivePairs:K"
-    },
-    {
-      "code": "bomb-reason-contradiction",
-      "detail": "理由说不必动炸仍出炸",
-      "gameSeed": 42104,
-      "turnNumber": 8,
-      "playerIndex": 0,
-      "playLabel": "Bomb",
-      "reasons": [
-        "对手普通牌型，手牌仍多不必动炸，过牌等循环",
-        "【P4】对手普通牌型，手牌仍多不必动炸，过牌等循环"
-      ],
-      "handCount": 21,
-      "mustBeat": "ConsecutivePairs:5"
-    },
-    {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42104,
-      "turnNumber": 62,
-      "playerIndex": 2,
-      "playLabel": "StraightFlush",
-      "reasons": [
-        "只有炸弹能压，应抢牌权",
-        "对手剩牌少，提高拦截积极性"
-      ],
-      "handCount": 9,
-      "mustBeat": "Single:BJ"
-    },
-    {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42105,
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88015,
       "turnNumber": 37,
       "playerIndex": 3,
-      "playLabel": "StraightFlush",
+      "playLabel": "过牌",
       "reasons": [
-        "有普通炸弹可压，不宜亮同花顺",
-        "只有炸弹能压，应抢牌权",
-        "对手剩牌少，提高拦截积极性"
+        "过牌仍是合法选择。"
       ],
-      "handCount": 19,
-      "mustBeat": "Single:2"
+      "handCount": 21,
+      "mustBeat": "TripleWithPair:7"
     },
     {
-      "code": "sf-waste-small",
-      "detail": "同花顺压Single",
-      "gameSeed": 42105,
-      "turnNumber": 77,
-      "playerIndex": 2,
-      "playLabel": "StraightFlush",
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88016,
+      "turnNumber": 65,
+      "playerIndex": 3,
+      "playLabel": "过牌",
       "reasons": [
-        "只有炸弹能压，应抢牌权"
+        "过牌仍是合法选择。"
       ],
-      "handCount": 10,
-      "mustBeat": "Single:BJ"
+      "handCount": 7,
+      "mustBeat": "Single:K"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88016,
+      "turnNumber": 87,
+      "playerIndex": 2,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单J",
+      "gameSeed": 88016,
+      "turnNumber": 94,
+      "playerIndex": 2,
+      "playLabel": "方片J",
+      "reasons": [
+        "出牌后剩余5张。"
+      ],
+      "handCount": 6,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单3",
+      "gameSeed": 88017,
+      "turnNumber": 69,
+      "playerIndex": 3,
+      "playLabel": "方片3",
+      "reasons": [
+        "出牌后剩余5张。"
+      ],
+      "handCount": 6,
+      "mustBeat": null
+    },
+    {
+      "code": "wild-low-value",
+      "detail": "逢人配配Triple",
+      "gameSeed": 88017,
+      "turnNumber": 83,
+      "playerIndex": 1,
+      "playLabel": "方片A 红桃2 红桃2（红桃2配黑桃A，红桃2配黑桃A）",
+      "reasons": [
+        "出牌后剩余10张。",
+        "该候选会拆开现有完整结构。"
+      ],
+      "handCount": 13,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88017,
+      "turnNumber": 89,
+      "playerIndex": 1,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余8张。"
+      ],
+      "handCount": 9,
+      "mustBeat": null
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88019,
+      "turnNumber": 1,
+      "playerIndex": 3,
+      "playLabel": "过牌",
+      "reasons": [
+        "过牌仍是合法选择。"
+      ],
+      "handCount": 27,
+      "mustBeat": "ConsecutivePairs:3"
+    },
+    {
+      "code": "pass-with-regular-beat",
+      "detail": "有普通压牌却过牌",
+      "gameSeed": 88019,
+      "turnNumber": 11,
+      "playerIndex": 1,
+      "playLabel": "过牌",
+      "reasons": [
+        "过牌仍是合法选择。"
+      ],
+      "handCount": 16,
+      "mustBeat": "Straight:Q"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单6",
+      "gameSeed": 88020,
+      "turnNumber": 31,
+      "playerIndex": 1,
+      "playLabel": "梅花6",
+      "reasons": [
+        "本轮已接回牌权，优先清理散单并保留成组牌。",
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "beat-partner",
+      "detail": "反压对家队友占牌",
+      "gameSeed": 88020,
+      "turnNumber": 59,
+      "playerIndex": 1,
+      "playLabel": "梅花10 梅花7 梅花8 梅花9 梅花J",
+      "reasons": [
+        "出完后手牌归零。",
+        "出牌后剩余0张。",
+        "该候选会消耗炸弹级资源。"
+      ],
+      "handCount": 5,
+      "mustBeat": "Pair:A"
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单2",
+      "gameSeed": 88020,
+      "turnNumber": 76,
+      "playerIndex": 2,
+      "playLabel": "黑桃2",
+      "reasons": [
+        "本轮已接回牌权，优先清理散单并保留成组牌。",
+        "出牌后剩余11张。"
+      ],
+      "handCount": 12,
+      "mustBeat": null
+    },
+    {
+      "code": "split-structure-single",
+      "detail": "接风/领出拆结构出单10",
+      "gameSeed": 88020,
+      "turnNumber": 79,
+      "playerIndex": 2,
+      "playLabel": "方片10",
+      "reasons": [
+        "出牌后剩余10张。"
+      ],
+      "handCount": 11,
+      "mustBeat": null
     }
   ]
 }

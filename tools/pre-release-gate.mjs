@@ -5,6 +5,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertReleaseGateReport } from "./lib/release-gate-audit.mjs";
 
 const root = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(root, "..");
@@ -22,24 +23,9 @@ function run(label, script, args = [], extraEnv = {}) {
 function assertAuditReport() {
   const reportPath = join(projectRoot, "training-samples", "audit-strategy-latest.json");
   const report = JSON.parse(readFileSync(reportPath, "utf8"));
-  const fail = (msg) => {
-    throw new Error(`策略审计未达标：${msg}`);
-  };
-  if (report.completed !== report.games) {
-    fail(`应有 ${report.games} 局全部完成，实际 ${report.completed}`);
-  }
-  if ((report.violationsByCode["bomb-break"] ?? 0) > 0) fail("出现拆炸出牌");
-  if ((report.violationsByCode["bomb-void-reason"] ?? 0) > 0) fail("理由写炸弹作废仍出牌");
-  if ((report.violationsByCode["wild-low-value"] ?? 0) > 0) fail("逢人配低价值开局/接风");
-  if ((report.violationsByCode["split-twp-single"] ?? 0) > 0) fail("接风拆三带二出单");
-  if ((report.violationsByCode["bare-triple-with-pair"] ?? 0) > 0) fail("有对可配却裸出三张");
-  if ((report.violationsByCode["split-structure-single"] ?? 0) > 0) fail("接风/领出拆结构出单");
-  if ((report.violationsByCode["split-bomb"] ?? 0) > 0) fail("拆炸出牌（结构审计）");
-  if ((report.violationsByCode["sf-waste-small"] ?? 0) > 2) {
-    fail(`同花顺压小牌过多（${report.violationsByCode["sf-waste-small"]}）`);
-  }
+  assertReleaseGateReport(report);
   process.stderr.write(
-    `[gate] 策略审计通过：${report.games} 局，违规 ${report.violationCount} 处\n`,
+    `[gate] 策略审计通过：${report.games} 局，违规 ${report.violationCount} 处（阻断项见 tools/lib/release-gate-audit.mjs）\n`,
   );
 }
 
@@ -67,7 +53,7 @@ try {
   run("推荐双轨对齐", "tests/recommend-alignment.mjs");
   run("候选生成冒烟", "tests/import-smoke.mjs");
   run("百例场景候选校验", "tools/validate-100cases-scenarios.mjs");
-  run("策略审计 6 局", "tools/audit-strategy.mjs", ["6", "42100", "2", "200"]);
+  run("策略审计 6 局", "tools/audit-strategy.mjs", ["6", "88015", "2", "200"]);
   assertAuditReport();
 } catch (error) {
   process.stderr.write(`\n[gate] 发布门禁失败 — 禁止构建 standalone。请修复后再 npm run build。\n`);

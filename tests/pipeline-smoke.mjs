@@ -75,7 +75,7 @@ execSync(`node tools/replay-to-rows.mjs "${join(root, "training-samples", "batch
 const rowLines = readFileSync(join(tmp, "rows.jsonl"), "utf8").trim().split("\n");
 assert(rowLines.length > 20, `训练行应远大于 20，实际 ${rowLines.length}`);
 
-execSync("node tools/train-policy.mjs", { cwd: root, stdio: "pipe" });
+execSync(`node tools/train-policy.mjs "${join(tmp, "rows.jsonl")}"`, { cwd: root, stdio: "pipe" });
 const metrics = JSON.parse(readFileSync(join(root, "models/policy-v001/metrics.json"), "utf8"));
 assert(metrics.rowTop1.top1 > 0.5, `ML Top1 应 >50%，实际 ${metrics.rowTop1.top1}`);
 

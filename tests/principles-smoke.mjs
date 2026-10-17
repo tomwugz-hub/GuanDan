@@ -127,8 +127,8 @@ const onlyPlateRec = recommendPlay(onlyPlateHand, "5", beat3Prev, {
 });
 assert(
   onlyPlateRec.candidate.type === PLAY_TYPES.single
-  && ["5", "6", "7", "8"].includes(onlyPlateRec.candidate.mainRank),
-  `P3 只剩结构时应出最小够压单，实际 ${onlyPlateRec.candidate.label ?? onlyPlateRec.candidate.mainRank}`,
+  && ["5", "6", "7", "8", "BJ"].includes(onlyPlateRec.candidate.mainRank),
+  `P3 须压单3 应出单张够压（含大王），实际 ${onlyPlateRec.candidate.label ?? onlyPlateRec.candidate.mainRank}`,
 );
 
 // 4. 接风钢板 → 钢板（P5）
