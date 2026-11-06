@@ -32,10 +32,15 @@ bash scripts/experiments/r169/validate-no-wallclock.sh
 
 Optional **flag bits** battery (candidate only; old side ignores): `RUN_BITS=1 bash scripts/experiments/r169/validate-no-wallclock.sh`.
 
-## What “Δ=0” means
+## Reading arena lines (pairedStats): mean vs CI bootstrap
 
-- **Self pair** `oldbaseline vs oldbaseline`: must print **A 每副净升级 0.000** (identical policy).
-- **GD_R169=0** candidate vs patched old baseline: **should** match if `endgame` + legacy gate path match; any non-zero delta indicates **remaining nondeterminism or code path drift** (not solved by one decide test).
+- **Sample mean** (“A 每副净升级” / net level-up per deal) is a **deterministic function** of the finite set of per-deal outcomes for that run — **bootstrap resampling only moves the bracketed CI**, not the point estimate. If RUN1 and RUN2 report **different** means for the **same** command, that is **not** “CI randomness”; it is either **different inputs** (e.g. different code / env / incomplete log) or **true repeatability failure** in the code path that produces those outcomes.
+- **Same-policy self** (A and B name the same `decide@backup`) is **not** a Δ=0 gate: seating / tribute pairing makes **finite-deal** mean team points **not guaranteed** to be exactly 0 even when policies are identical — distinguish **population / design asymmetry** from **engine replay drift**.
+- **`pool.mjs` checkpoint key truncation** only matters when **`--ckpt`** is used. A **`--threads=1` run without `--ckpt`** does not exercise that path; do not attribute RUN1 vs RUN2 mean drift to ckpt collisions without a ckpt-enabled repro.
+- **Eval-only replay (real `decide`, not greedy)** — each `--runs` repeat is a **fresh Node child process** (`isolateRuns`, default on) so `selfplay/lib.mjs` module caches cannot alias two runs; SHA256 over `|[team0,team1]|` per deal:  
+  `GD_R95=5 GD_ENDGAME_NO_WALLCLOCK=1 node scripts/experiments/r169/replay-match-hashes.mjs --spec=decide --matchSeed=26991000 --deals=512 --runs=2`  
+  Same-process A/B compare: `--isolateRuns=0` (debug only).
+- **Calling `dealFourHands()` with no deck** is not shown on the arena path used here: `play/core.js` passes `dealFourHands(shuffle(makeDeck(), g.rng))`. Treat “remove default shuffle” as **guard-only** unless a trace shows the no-arg call on that path.
 
 ## Known nondeterminism blockers (if delta ≠ 0)
 
