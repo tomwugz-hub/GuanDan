@@ -1,0 +1,164 @@
+{
+ "when": "2026-10-28T04:38:47.302Z",
+ "version": "current",
+ "metrics": {
+  "noEnemyFollow_single": {
+   "value": 1.0471204188481675,
+   "n": 955
+  },
+  "noEnemyFollow_pair": {
+   "value": 2.7522935779816518,
+   "n": 436
+  },
+  "enemyPass_early": {
+   "value": 44.33004433004433,
+   "n": 6993
+  },
+  "enemyPass_mid": {
+   "value": 41.04477611940299,
+   "n": 7236
+  },
+  "enemyPass_late": {
+   "value": 28.44375963020031,
+   "n": 3245
+  },
+  "smallEnemyPass": {
+   "value": 7.744605379840379,
+   "n": 3383
+  },
+  "partnerOvertake_early": {
+   "value": 0,
+   "n": 2004
+  },
+  "partnerOvertake_mid": {
+   "value": 0.0962463907603465,
+   "n": 2078
+  },
+  "partnerOvertake_late": {
+   "value": 18.816067653276956,
+   "n": 946
+  },
+  "bombPartner": {
+   "value": 0,
+   "n": 4459
+  },
+  "partnerTinyEnemyShort": {
+   "value": 33.33333333333333,
+   "n": 6
+  },
+  "partnerTinyEnemyShort_old": {
+   "value": 33.33333333333333,
+   "n": 6
+  },
+  "partnerTinyEnemyShort_noStruct": {
+   "value": 20,
+   "n": 5
+  },
+  "bombEarlyOrdinary": {
+   "value": 2.0903573836817264,
+   "n": 1483
+  },
+  "bombOnBomb": {
+   "value": 28.701923076923073,
+   "n": 2080
+  },
+  "bombLeadEarly": {
+   "value": 1.4261019878997407,
+   "n": 2314
+  },
+  "noBombEnemyOut": {
+   "value": 5.485232067510549,
+   "n": 237
+  },
+  "wastedBombs": {
+   "value": 2.875,
+   "n": 800
+  },
+  "ctrlHeldEnd": {
+   "value": 2.25,
+   "n": 800
+  },
+  "stuckLast": {
+   "value": 0,
+   "n": 400
+  },
+  "ctrlEarlySmall": {
+   "value": 2.5677603423680457,
+   "n": 2103
+  },
+  "bigLeadEarly": {
+   "value": 0,
+   "n": 419
+  },
+  "leadBreakBomb": {
+   "value": 0.11536243030186503,
+   "n": 5201
+  },
+  "leadSingleBreakPair": {
+   "value": 1.0362694300518136,
+   "n": 193
+  },
+  "leadPairShare": {
+   "value": 15.018587360594795,
+   "n": 1345
+  },
+  "leadSingleShare": {
+   "value": 16.133828996282528,
+   "n": 1345
+  },
+  "missedGoOut": {
+   "value": 0,
+   "n": 1020
+  },
+  "slowDecisions": {
+   "value": 0.002300490004370931,
+   "n": 43469
+  },
+  "invariants": {
+   "value": 0,
+   "n": 592
+  },
+  "vs_Random": {
+   "value": 2.9791666666666665,
+   "n": 48
+  },
+  "vsRandom": {
+   "value": 2.9791666666666665,
+   "n": 48
+  },
+  "vs_Greedy": {
+   "value": 2.4791666666666665,
+   "n": 48
+  },
+  "vsGreedy": {
+   "value": 2.4791666666666665,
+   "n": 48
+  },
+  "vs_Old:pre-activity": {
+   "value": 1.9791666666666667,
+   "n": 48
+  },
+  "vs_Old:pre-round6": {
+   "value": 1.7291666666666667,
+   "n": 48
+  },
+  "returnBreaksGroup": {
+   "value": 35.86626139817629,
+   "n": 329
+  },
+  "tribResistSingle": {
+   "value": 9.051724137931034,
+   "n": 232
+  },
+  "tribResistDouble": {
+   "value": 32.73542600896861,
+   "n": 223
+  },
+  "surprise": {
+   "value": 0,
+   "n": 120
+  }
+ },
+ "red": [],
+ "surprises": []
+}

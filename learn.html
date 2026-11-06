@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>掼蛋教练 v12</title>
+  <link rel="stylesheet" href="app/app.css?v=12" />
+</head>
+<body>
+  <header class="top">
+    <span class="brand">掼蛋学习中心</span>
+    <a class="btn" href="index.html">返回牌桌</a>
+  </header>
+  <div class="tabs">
+    <div class="tab on" data-tab="radar">能力雷达</div>
+    <div class="tab" data-tab="path">学习路径</div>
+    <div class="tab" data-tab="replay">复盘分析</div>
+    <div class="tab" data-tab="stats">数据统计</div>
+  </div>
+  <section class="page on" id="radar">
+    <div class="cards-grid">
+      <div class="panel"><canvas id="radarCv" width="360" height="320"></canvas></div>
+      <div class="panel">
+        <h3>优势 / 短板</h3>
+        <div id="sw"></div>
+        <h3>建议</h3>
+        <ul id="sug"></ul>
+      </div>
+    </div>
+  </section>
+  <section class="page" id="path">
+    <div class="panel" id="pathList"></div>
+  </section>
+  <section class="page" id="replay">
+    <div class="panel">
+      <button type="button" id="btnExp">导出回放</button>
+      <label class="chk"><i></i>包含错误类型</label>
+      <textarea id="replayBox" rows="8" style="width:100%;margin-top:8px;background:#244632;color:#fff;border:0;border-radius:8px"></textarea>
+      <button type="button" id="btnImp">导入回放</button>
+      <div id="errList"></div>
+    </div>
+  </section>
+  <section class="page" id="stats">
+    <div class="cards-grid">
+      <div class="panel"><h3>胜率曲线</h3><canvas id="winCv" width="360" height="180"></canvas></div>
+      <div class="panel"><h3>错误类型</h3><canvas id="errCv" width="360" height="180"></canvas></div>
+      <div class="panel"><h3>最常见错误</h3><div id="commonErr"></div></div>
+      <div class="panel"><h3>维度变化</h3><div id="dimCh"></div></div>
+    </div>
+  </section>
+  <script src="app/all.js?v=12"></script>
+  <script src="app/learn.js?v=12"></script>
+</body>
+</html>

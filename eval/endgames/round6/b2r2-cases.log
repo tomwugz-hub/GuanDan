@@ -1,0 +1,55 @@
+pair-eval cases=50 jev=1 startlux=0 key=len=107 sha12=5416e5353e65
+eg001 gold=single:8 decide=single:8{8}✓ jev=single:8{8}✓
+eg002 gold=pass decide=pass✓ jev=pass✓
+eg003 gold=single:A/K/Q decide=single:A{A}✓ jev=single:A{A}✓
+eg004 gold=single:J/8/6/5 decide=single:J{J}✓ jev=single:J{J}✓
+eg005 gold=single:A decide=single:A{A}✓ jev=single:A{A}✓
+eg006 gold=pair:5 decide=pair:5{55}✓ jev=pair:5{55}✓
+eg007 gold=pair:K decide=pair:K{KK}✓ jev=pair:K{KK}✓
+eg008 gold=single:A decide=single:A{A}✓ jev=single:A{A}✓
+eg009 gold=pass decide=pass✓ jev=pass✓
+eg010 gold=triple:A decide=triple:A{AAA}✓ jev=triple:A{AAA}✓
+eg011 gold=single:BJ/RJ decide=single:RJ{RJ}✓ jev=single:RJ{RJ}✓
+eg012 gold=single:3 decide=single:3{3}✓ jev=single:3{3}✓
+eg013 gold=fullhouse:J decide=fullhouse:J{JJJ55}✓ jev=fullhouse:J{JJJ55}✓
+eg014 gold=single:9/10/J/Q/K/A decide=single:Q{Q}✓ jev=single:Q{Q}✓
+eg015 gold=single:9 decide=single:9{9}✓ jev=single:9{9}✓
+eg016 gold=bomb:5 decide=bomb:5{5555}✓ jev=bomb:5{5555}✓
+eg017 gold=pair:K decide=pair:K{KK}✓ jev=pair:K{KK}✓
+eg018 gold=tripleSeq:7/8 decide=tripleSeq:8{777888}✓ jev=tripleSeq:8{777888}✓
+eg019 gold=pass decide=pass✓ jev=pass✓
+eg020 gold=bomb:9 decide=bomb:9{9999}✓ jev=bomb:9{9999}✓
+eg021 gold=pairSeq:5/6/7 decide=pairSeq:7{556677}✓ jev=pairSeq:7{556677}✓
+eg022 gold=single:A decide=single:A{A}✓ jev=single:A{A}✓
+eg023 gold=single:A/K/Q decide=single:A{A}✓ jev=single:A{A}✓
+eg024 gold=pass decide=pass✓ jev=pass✓
+eg025 gold=single:2 decide=single:2{2}✓ jev=single:2{2}✓
+eg026 gold=fullhouse:9 decide=fullhouse:9{99955}✓ jev=fullhouse:9{99955}✓
+eg027 gold=single:8 decide=triple:3{333}✓ jev=triple:3{333}✓
+eg028 gold=bomb:A decide=bomb:A{AAAA}✓ jev=bomb:A{AAAA}✓
+eg029 gold=pass decide=pass✓ jev=pass✓
+eg030 gold=single:Q decide=single:Q{Q}✓ jev=single:Q{Q}✓
+eg031 gold=straight:3/7 decide=straight:7{34567}✓ jev=straight:7{34567}✓
+eg032 gold=straight:3 decide=straight:7{34567}✓ jev=straight:7{34567}✓
+eg033 gold=pass decide=pass✓ jev=pass✓
+eg034 gold=pair:A decide=pair:A{AA}✓ jev=pair:A{AA}✓
+eg035 gold=single:BJ/RJ decide=single:BJ{BJ}✓ jev=single:BJ{BJ}✓
+eg036 gold=pass decide=pass✓ jev=pass✓
+eg037 gold=pair:K decide=pair:K{KK}✓ jev=pair:K{KK}✓
+eg038 gold=pass decide=pass✓ jev=pass✓
+eg039 gold=pass decide=pass✓ jev=pass✓
+eg040 gold=bomb:7 decide=bomb:7{7777}✓ jev=bomb:7{7777}✓
+eg041 gold=single:Q/K/A decide=single:A{A}✓ jev=single:A{A}✓
+eg042 gold=single:4/5/6 decide=single:4{4}✓ jev=single:4{4}✓
+eg043 gold=single:BJ/RJ decide=single:RJ{RJ}✓ jev=single:RJ{RJ}✓
+eg044 gold=fullhouse:K decide=fullhouse:K{KKK55}✓ jev=fullhouse:K{KKK55}✓
+eg045 gold=pairSeq:4/5/6 decide=pairSeq:6{445566}✓ jev=pairSeq:6{445566}✓
+eg046 gold=single:A/K decide=single:A{A}✓ jev=single:A{A}✓
+eg047 gold=single:2 decide=single:2{2}✓ jev=single:2{2}✓
+eg048 gold=pair:Q decide=pair:Q{QQ}✓ jev=pair:Q{QQ}✓
+eg049 gold=bomb:4 decide=bomb:4{4444}✓ jev=bomb:4{4444}✓
+eg050 gold=pass decide=pass✓ jev=pass✓
+---
+decide: case 50/50 pair 0/0
+jev: case 50/50 pair 0/0
+report: /workspace/guandan-coach/eval/endgames/round6/b2r2-cases.md

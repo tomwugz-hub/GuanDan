@@ -1,0 +1,16 @@
+{
+  "name": "掼蛋教练 · 四人对局",
+  "short_name": "掼蛋教练",
+  "description": "离线掼蛋对局，带 decide 教练提示与标记。",
+  "lang": "zh-CN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f3d2e",
+  "theme_color": "#0a2a20",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

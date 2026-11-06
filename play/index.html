@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="掼蛋教练">
+<meta name="theme-color" content="#0a2a20">
+<meta name="format-detection" content="telephone=no">
+<title>掼蛋教练 · 四人对局</title>
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<script>if (location.protocol !== 'file:') { var l = document.createElement('link'); l.rel = 'manifest'; l.href = 'manifest.json'; document.head.appendChild(l); }</script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="felt"></div>
+<header id="topbar">
+  <button id="btnMenu" class="icoBtn" aria-label="菜单" title="菜单">☰</button>
+  <div class="info">
+    <span class="lvChip us"><i>我方</i>打<b id="lvUs">2</b></span>
+    <span class="lvChip them"><i>对方</i>打<b id="lvThem">2</b></span>
+    <span class="curLv">本副打<b id="level">2</b></span>
+    <span class="deal">第<b id="dealNo">1</b>副</span>
+    <span class="turnInfo">轮到 <b id="turn">-</b></span>
+  </div>
+  <button id="btnDrawer" class="icoBtn" aria-label="教练与出牌记录" title="教练提示 / 出牌记录">📋</button>
+  <div id="menu">
+    <div class="menuTitle">设置</div>
+    <label>机器人<select id="engine">
+      <option value="decide">decide（离线）</option>
+      <option value="jev" disabled>Jev（需电脑本地服务）</option>
+    </select></label>
+    <label>速度<select id="speed">
+      <option value="1200">慢</option>
+      <option value="700" selected>中</option>
+      <option value="250">快</option>
+    </select></label>
+    <label class="chk"><input type="checkbox" id="progression" checked> 升级</label>
+    <label class="chk"><input type="checkbox" id="showAll"> 明牌</label>
+    <button id="btnRules">📖 进贡规则</button>
+    <button id="btnNew">🔄 新比赛</button>
+    <button id="btnShare">📤 分享/导出对局记录</button>
+    <button id="btnDownload">💾 下载对局记录（标记 <span id="flagCount">0</span>）</button>
+  </div>
+</header>
+<main id="main">
+  <section id="table">
+    <div class="seat" id="seat2"></div>
+    <div class="seat" id="seat3"></div>
+    <div class="seat" id="seat1"></div>
+    <div class="seat" id="seat0"></div>
+    <div class="pz" id="pz2"></div>
+    <div class="pz" id="pz3"></div>
+    <div class="pz" id="pz1"></div>
+    <div class="pz" id="pz0"></div>
+    <div id="center"><div id="status"></div></div>
+    <div id="tribPanel" class="hidden" aria-live="polite"></div>
+  </section>
+  <aside id="side">
+    <div class="drawerHead"><b>教练 · 出牌记录</b><button id="drawerClose" class="icoBtn" aria-label="关闭">✕</button></div>
+    <div class="panel" id="coachPanel">
+      <div id="hintBox" class="muted">轮到你时点“提示”查看教练建议。</div>
+      <div id="feedback"></div>
+    </div>
+    <details class="panel" id="logPanel" open>
+      <summary>出牌记录 <small class="muted">（🚩 标记任一手）</small></summary>
+      <ol id="log"></ol>
+    </details>
+  </aside>
+</main>
+<footer id="handArea">
+  <div id="coachTip" class="hidden"></div>
+  <div id="actions">
+    <button id="btnFlagPos" class="mini">🚩标记</button>
+    <button id="btnPass" class="act pass">不出</button>
+    <button id="btnHint" class="act hint">提示</button>
+    <button id="btnPlay" class="act primary">出牌</button>
+    <button id="btnClear" class="mini">重置</button>
+  </div>
+  <div id="msg"></div>
+  <div id="hand"></div>
+</footer>
+
+<div class="modal hidden" id="flagModal">
+  <div class="box">
+    <h3>标记局面</h3>
+    <div id="flagDesc"></div>
+    <div class="radios">
+      <label><input type="radio" name="gold" value="played"> 实际出牌是对的</label>
+      <label><input type="radio" name="gold" value="coach"> 教练建议是对的</label>
+      <label><input type="radio" name="gold" value="unsure" checked> 不确定 / 都不对（备注里写）</label>
+    </div>
+    <textarea id="flagNote" rows="3" placeholder="备注（可选）：例如“应该顶大，下家只剩两张”"></textarea>
+    <div class="row"><button id="flagCancel">取消</button><button id="flagOk" class="primary">保存标记</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="endModal">
+  <div class="box">
+    <h3 id="endTitle">本副结束</h3>
+    <div id="endBody"></div>
+    <div class="row"><button id="btnShareEnd">导出记录</button><button id="endClose">查看牌局</button><button id="btnNext" class="primary">下一副</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="copyModal">
+  <div class="box">
+    <h3>复制对局记录</h3>
+    <p class="small">长按下面的文字全选并复制，然后粘贴到备忘录、微信或邮件里。</p>
+    <textarea id="copyText" rows="8" readonly></textarea>
+    <div class="row"><button id="copyClose" class="primary">关闭</button></div>
+  </div>
+</div>
+<div class="modal hidden" id="rulesModal">
+  <div class="box">
+    <h3>进贡 / 还贡 / 抗贡（主流规则）</h3>
+    <div class="rules small">
+      <p><b>何时进贡：</b>从每场比赛的第二副起，按上一副名次（头游、二游、三游、末游）。</p>
+      <p><b>单贡：</b>末游把手里<b>最大的一张牌</b>（大王、小王都算；<b>红桃级牌（逢人配）除外</b>）交给头游；头游还一张 <b>10 或以下</b>的牌给末游。由<b>末游先出</b>。头游与末游是同队时也一样。</p>
+      <p><b>双下（对方双上）：</b>三游、末游各进贡一张最大的牌，<b>大的给头游、小的给二游</b>；两张一样大时，<b>头游的下家</b>把贡给头游、另一位给二游。头游、二游各还一张 10 或以下的牌给向自己进贡的人。由<b>进贡给头游的人先出</b>。</p>
+      <p><b>抗贡：</b>单贡时末游手里有<b>两张大王</b>；双下时三游+末游<b>合计两张大王</b>（一人两张或各一张）→ 本副不进贡也不还贡，<b>头游先出</b>。</p>
+      <p><b>还贡的牌：</b>自然点 2–10（含 10）。王和<b>级牌</b>不能还（任何花色的级牌都比 A 大，包括逢人配；如打 4 时方块 4 不能还）。手里没有 10 或以下的非级牌时，还最小的一张（按本副大小：J/Q/K/A 先于级牌，逢人配最后）。</p>
+      <p><b>公开与否：</b>贡牌亮给大家看；还贡是暗还（只有还的人和收的人知道；打开“明牌”可看到）。</p>
+      <p><b>升级：</b>双上升 3 级，头游+三游升 2 级，头游+末游升 1 级；下一副打赢家的级。打 A 时拿头游且对家不是末游即过 A、整场获胜（之后新比赛从 2 打起，不进贡）。</p>
+    </div>
+    <div class="row"><button id="rulesClose" class="primary">知道了</button></div>
+  </div>
+</div>
+<div id="toast" class="hidden"></div>
+<script src="guandan.bundle.js"></script>
+</body>
+</html>

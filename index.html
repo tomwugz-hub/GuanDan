@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <title>掼蛋教练 v12</title>
+  <link rel="stylesheet" href="app/app.css?v=12" />
+</head>
+<body class="room">
+  <header class="hud">
+    <div class="hud-left">
+      <button type="button" class="ico" id="btnNew" title="新开局">⟲</button>
+      <span class="brand">掼蛋教练</span>
+    </div>
+    <div class="hud-right">
+      <label class="hud-item">规则
+        <select id="ruleset">
+          <option value="suqian">宿迁</option>
+          <option value="official2022">官方 2022</option>
+        </select>
+      </label>
+      <button type="button" class="hud-item" id="btnTributeMode">进贡模式</button>
+      <a class="hud-item" href="learn.html">学习中心</a>
+      <button type="button" class="hud-item" id="btnDrill">训练</button>
+      <div class="menu" id="advMenu">
+        <button type="button" class="hud-item" id="btnAdv">更多</button>
+        <div class="menu-pop">
+          <label class="chk" id="chkAuto"><i></i>关键时刻自动弹出建议</label>
+          <label class="chk" id="chkAnim"><i></i>出牌动画</label>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="felt">
+    <div class="level-badge">
+      <span>级牌</span>
+      <div class="mini-card" id="levelCard">2</div>
+      <div class="wild-hint" id="wildHint">红桃2 逢人配</div>
+    </div>
+
+    <div class="seat top" id="seat2">
+      <div class="who">
+        <div class="avatar a-mate">友</div>
+        <div>
+          <div class="name">队友</div>
+          <div class="meta">对家 · 余 <span class="cnt">27</span></div>
+        </div>
+      </div>
+      <div class="backs" id="backs2"></div>
+      <div class="play-slot" id="play2"></div>
+    </div>
+
+    <div class="seat left" id="seat1">
+      <div class="who">
+        <div class="avatar a-left">上</div>
+        <div>
+          <div class="name">上家</div>
+          <div class="meta">余 <span class="cnt">27</span></div>
+        </div>
+      </div>
+      <div class="backs vert" id="backs1"></div>
+      <div class="play-slot" id="play1"></div>
+    </div>
+
+    <div class="seat right" id="seat3">
+      <div class="who">
+        <div class="avatar a-right">下</div>
+        <div>
+          <div class="name">下家</div>
+          <div class="meta">余 <span class="cnt">27</span></div>
+        </div>
+      </div>
+      <div class="backs vert" id="backs3"></div>
+      <div class="play-slot" id="play3"></div>
+    </div>
+
+    <div class="arena">
+      <div class="trick" id="lastCards"></div>
+      <div class="clock-wrap">
+        <div class="clock" id="clock">16</div>
+      </div>
+      <button type="button" class="play-big" id="btnPlay">出牌</button>
+      <div class="room-tag">掼蛋教练场 · 级牌 <strong id="level">2</strong></div>
+      <div class="last-type" id="lastPlay">等待出牌</div>
+    </div>
+
+    <div class="me" id="seat0">
+      <div class="who me-who">
+        <div class="avatar a-me">我</div>
+        <div>
+          <div class="name">我</div>
+          <div class="meta">余 <span class="cnt">27</span></div>
+        </div>
+      </div>
+      <div class="play-slot play-me" id="play0"></div>
+      <div class="rank-strip" id="rankRow"></div>
+      <div class="hand-cols" id="hand"></div>
+    </div>
+  </div>
+
+  <footer class="dock">
+    <div class="dock-left">
+      <span class="mul">教练建议</span>
+      <span id="recMove">—</span>
+    </div>
+    <div class="suits">♠ ♥ ♣ ♦</div>
+    <div class="dock-right">
+      <button type="button" id="btnRestore">恢复</button>
+      <button type="button" id="btnSort">一键理牌</button>
+      <button type="button" id="btnHint">提示</button>
+      <button type="button" id="btnAccept">采纳建议</button>
+      <button type="button" id="btnPass">不要</button>
+    </div>
+  </footer>
+
+  <aside class="drawer" id="drawer">
+    <div class="panel">
+      <h3>实时建议</h3>
+      <p id="recReason"></p>
+      <div id="dealInfo"></div>
+    </div>
+  </aside>
+
+  <div id="tributeModal" class="tribute-modal" hidden>
+    <div class="tribute-box">
+      <h3>进贡 / 还贡</h3>
+      <div id="tributeBody"></div>
+      <button type="button" id="tributeOk">继续</button>
+    </div>
+  </div>
+  <div id="popup" class="toast" hidden>
+    <strong>关键建议</strong>
+    <p id="popText"></p>
+    <button type="button" id="popOk">采纳</button>
+    <button type="button" class="ghost" id="popNo">稍后</button>
+  </div>
+
+  <script src="app/all.js?v=12"></script>
+  <script src="app/hand-layout.js?v=12"></script>
+  <script src="app/table-plays.js?v=12"></script>
+  <script src="app/ui-pointer.js?v=12"></script>
+  <script src="app/ui.js?v=12"></script>
+</body>
+</html>

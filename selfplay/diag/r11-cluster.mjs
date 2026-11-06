@@ -1,0 +1,23 @@
+import fs from 'node:fs'; import path from 'node:path'; import v8 from 'node:v8';
+const R='/workspace/guandan-coach/selfplay'; const D=R+'/cache/r11-snap';
+const meta={}; for(const f of fs.readdirSync(D).filter(f=>f.endsWith('.bin'))) for(const s of v8.deserialize(fs.readFileSync(D+'/'+f))) if(s.ok) meta[s.id]=s;
+let rows=[]; const out=R+'/logs/r11-mc.jsonl';
+if(fs.existsSync(out)) rows=fs.readFileSync(out,'utf8').trim().split('\n').map(JSON.parse);
+else for(const l of fs.readFileSync(R+'/logs/r11-mc-ckpt.jsonl','utf8').trim().split('\n')){try{rows.push(...JSON.parse(l).r.snapmc)}catch{}}
+const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
+const recs=rows.map(r=>{const s=meta[r.id];const d=r.vals[0],l=r.vals[1];const df=l.map((v,i)=>v-d[i]);const m=mean(df),sd=Math.sqrt(mean(df.map(x=>(x-m)**2)));
+ const dc=s.dCombo,sc=s.slCombo;const bomb=c=>c&&/bomb|straightflush|rocket|joker/i.test(c.type);
+ const isP=c=>!c||c.type==='pass';const slAct=isP(sc)?'pass':bomb(sc)?'bomb':'beat'; const dAct=isP(dc)?'pass':bomb(dc)?'bomb':'beat';
+ return {id:r.id,diff:m,se:sd/Math.sqrt(df.length),act:dAct+'->'+slAct,phase:s.meta.phase,eMin:s.meta.enemyMin,pN:s.meta.partnerN,n:s.meta.n,type:(isP(dc)?sc:dc).type,ctrl:s.meta.ctrlUsed,brk:s.meta.breaksBomb||s.meta.breaksPair,slBomb:bomb(sc),lead:s.meta.leadType||s.meta.prevType};});
+fs.writeFileSync(R+'/logs/r11-cluster-recs.json',JSON.stringify(recs));
+const grp=(name,f)=>{const g={};for(const r of recs){const k=f(r);(g[k]??=[]).push(r)};console.log('\n##',name);
+ for(const [k,a] of Object.entries(g).sort()){const ds=a.map(r=>r.diff);const m=mean(ds),se=Math.sqrt(mean(ds.map(x=>(x-m)**2))/ds.length);const sig=a.filter(r=>r.diff>2*r.se).length,sigN=a.filter(r=>r.diff<-2*r.se).length;
+ console.log(k.padEnd(28),'n',String(a.length).padStart(4),'slΔ',m.toFixed(3),'±',(1.96*se).toFixed(3),'sl显著优',sig,'劣',sigN)}};
+console.log('total',recs.length,'meta keys',Object.keys(Object.values(meta)[0].meta).join(','));
+grp('act',r=>r.act); grp('act×phase',r=>r.act+' '+r.phase);
+grp('act×eMin',r=>r.act+' e'+(r.eMin<=2?'≤2':r.eMin<=5?'3-5':r.eMin<=10?'6-10':'>10'));
+grp('act×pN',r=>r.act+' p'+(r.pN<=2?'≤2':r.pN<=6?'3-6':'>6'));
+grp('act×type',r=>r.act+' '+r.type); grp('act×myN',r=>r.act+' n'+(r.n<=5?'≤5':r.n<=12?'6-12':'>12'));
+grp('act×prevSeat',r=>r.act+' '+(meta[r.id].meta.prevSeatN<=5?'prevShort':'prevLong'));
+grp('pass->* ×eMin×phase',r=>r.act.startsWith('pass')||r.act.endsWith('pass')?r.act+' '+r.phase+' e'+(r.eMin<=5?'≤5':r.eMin<=10?'6-10':'>10'):'other');
+grp('beat->pass ×ctrl/brk',r=>r.act.endsWith('pass')?r.act+' ctrl'+(!!r.ctrl)+' brk'+(!!r.brk):'other');

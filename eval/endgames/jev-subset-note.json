@@ -1,0 +1,10 @@
+{
+  "jev_subset_run": {
+    "limit": 8,
+    "decide_ok": "8/8",
+    "jev_ok": "6/8",
+    "keyDiag": "len=107 sha12=5416e5353e65",
+    "keySource": "env.NEW",
+    "note": "Live TypeSafe call succeeded with existing questions map type=choice; no API format change needed."
+  }
+}

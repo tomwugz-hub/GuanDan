@@ -1,0 +1,23 @@
+{
+  "name": "guandan-coach",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "AI 掼蛋教练",
+  "scripts": {
+    "test": "node --test",
+    "pack": "node app/pack.mjs",
+    "play": "node play/server.mjs",
+    "build:play": "node play/build.mjs",
+    "smoke:play": "node play/smoke.mjs",
+    "audit": "node selfplay/audit.mjs",
+    "audit:quick": "node selfplay/audit.mjs --deals=300 --mixed=60 --surprise=60 --out=selfplay/reports/audit-quick.md",
+    "arena": "node selfplay/arena.mjs",
+    "regress": "bash scripts/regress-all.sh",
+    "jev:pilot": "node selfplay/jevaudit.mjs --deals=20 --matchLen=5 --seed0=4000000 --out=selfplay/reports/jev-pilot.md",
+    "jev:audit": "node selfplay/jevaudit.mjs --deals=200 --matchLen=8 --seed0=4100000 --mc=200 --k=40 --out=selfplay/reports/jev-audit.md",
+    "startlux:pilot": "node selfplay/startluxaudit.mjs --deals=20 --matchLen=5 --seed0=7000000 --out=selfplay/reports/startlux-pilot.md",
+    "startlux:arena40": "node selfplay/startluxaudit.mjs --deals=40 --matchLen=5 --seed0=7000000 --out=selfplay/reports/startlux-pilot40.md",
+    "startlux:audit": "node selfplay/startluxaudit.mjs --deals=200 --matchLen=8 --seed0=7200000 --out=selfplay/reports/startlux27-arena200.md"
+  }
+}

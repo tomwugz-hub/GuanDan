@@ -1,0 +1,10 @@
+node_modules/
+backups/
+selfplay/cache/
+selfplay/ckpt/
+selfplay/logs/
+selfplay/reports/tmp/
+logs/
+userlogs/
+*.dump.json
+*-ckpt.jsonl

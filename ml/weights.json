@@ -1,0 +1,21 @@
+{
+  "bias": 0.1,
+  "w": {
+    "size": 0.35,
+    "isBomb": -1.8,
+    "isSF": -2.2,
+    "isPass": -0.2,
+    "isPairSeq": 0.9,
+    "isTripleSeq": 1.0,
+    "isStraight": 0.55,
+    "goOut": 4.5,
+    "smallLead": 0.2,
+    "control": 0.4,
+    "wasteBomb": -8.0,
+    "crushPartner": -6.0,
+    "firstLeadBomb": -7.0,
+    "exposeVsTwo": -3.5,
+    "splitStruct": -2.8,
+    "keepTrash": -2.0
+  }
+}

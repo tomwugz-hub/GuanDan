@@ -1,0 +1,478 @@
+{
+ "when": "2026-10-28T07:12:50.204Z",
+ "version": "current",
+ "metrics": {
+  "noEnemyFollow_single": {
+   "value": 0.851063829787234,
+   "n": 940
+  },
+  "noEnemyFollow_pair": {
+   "value": 2.3529411764705883,
+   "n": 425
+  },
+  "enemyPass_early": {
+   "value": 43.84862653419053,
+   "n": 6844
+  },
+  "enemyPass_mid": {
+   "value": 40.87122763894579,
+   "n": 7323
+  },
+  "enemyPass_late": {
+   "value": 28.669367404175755,
+   "n": 3209
+  },
+  "smallEnemyPass": {
+   "value": 7.216494845360824,
+   "n": 3395
+  },
+  "partnerOvertake_early": {
+   "value": 0,
+   "n": 1889
+  },
+  "partnerOvertake_mid": {
+   "value": 0.3931203931203931,
+   "n": 2035
+  },
+  "partnerOvertake_late": {
+   "value": 18.029556650246306,
+   "n": 1015
+  },
+  "bombPartner": {
+   "value": 0,
+   "n": 4367
+  },
+  "partnerTinyEnemyShort": {
+   "value": 23.52941176470588,
+   "n": 17
+  },
+  "partnerTinyEnemyShort_old": {
+   "value": 23.52941176470588,
+   "n": 17
+  },
+  "partnerTinyEnemyShort_noStruct": {
+   "value": 25,
+   "n": 16
+  },
+  "bombEarlyOrdinary": {
+   "value": 2.200825309491059,
+   "n": 1454
+  },
+  "bombOnBomb": {
+   "value": 28.934506353861195,
+   "n": 2046
+  },
+  "bombLeadEarly": {
+   "value": 1.6263736263736264,
+   "n": 2275
+  },
+  "noBombEnemyOut": {
+   "value": 4.201680672268908,
+   "n": 238
+  },
+  "wastedBombs": {
+   "value": 4.375,
+   "n": 800
+  },
+  "ctrlHeldEnd": {
+   "value": 3.875,
+   "n": 800
+  },
+  "stuckLast": {
+   "value": 0,
+   "n": 400
+  },
+  "ctrlEarlySmall": {
+   "value": 2.5540275049115913,
+   "n": 2036
+  },
+  "bigLeadEarly": {
+   "value": 0,
+   "n": 410
+  },
+  "leadBreakBomb": {
+   "value": 0.05871990604815032,
+   "n": 5109
+  },
+  "leadSingleBreakPair": {
+   "value": 0,
+   "n": 179
+  },
+  "leadPairShare": {
+   "value": 14.767616191904049,
+   "n": 1334
+  },
+  "leadSingleShare": {
+   "value": 15.967016491754125,
+   "n": 1334
+  },
+  "missedGoOut": {
+   "value": 0,
+   "n": 1004
+  },
+  "slowDecisions": {
+   "value": 0,
+   "n": 42546
+  },
+  "invariants": {
+   "value": 0,
+   "n": 592
+  },
+  "vs_Random": {
+   "value": 3,
+   "n": 48
+  },
+  "vsRandom": {
+   "value": 3,
+   "n": 48
+  },
+  "vs_Greedy": {
+   "value": 2.8541666666666665,
+   "n": 48
+  },
+  "vsGreedy": {
+   "value": 2.8541666666666665,
+   "n": 48
+  },
+  "vs_Old:pre-activity": {
+   "value": 2.1875,
+   "n": 48
+  },
+  "vs_Old:pre-round6": {
+   "value": 2.2291666666666665,
+   "n": 48
+  },
+  "returnBreaksGroup": {
+   "value": 37.46556473829201,
+   "n": 363
+  },
+  "tribResistSingle": {
+   "value": 4.109589041095891,
+   "n": 219
+  },
+  "tribResistDouble": {
+   "value": 24.489795918367346,
+   "n": 245
+  },
+  "surprise": {
+   "value": 5,
+   "n": 120
+  }
+ },
+ "red": [],
+ "surprises": [
+  {
+   "id": "self|284800198|34",
+   "seat": 3,
+   "n": 19,
+   "leading": false,
+   "prev": "tripleSeq:6",
+   "rel": "enemy",
+   "counts": [
+    15,
+    20,
+    9,
+    19
+   ],
+   "lv": "2",
+   "hand": "3D AD 4H 8S AS 4H 4S AS RJ 5D 2H 2C 2S 4D 9H 10S 5S 5S 4C",
+   "chosen": "bomb:4{4H 4H 4S 4D}",
+   "chosenMean": -0.2222222222222222,
+   "chosenTags": [],
+   "alts": [
+    {
+     "move": "pass",
+     "mean": 0.5,
+     "tags": []
+    },
+    {
+     "move": "bomb:4{4H 4H 4S 4D 4C}",
+     "mean": 1.4444444444444444,
+     "tags": [
+      "bombOversize"
+     ]
+    },
+    {
+     "move": "bomb:4{4H 4H 4S 2H}",
+     "mean": 1.5,
+     "tags": [
+      "bombWildPad"
+     ]
+    }
+   ],
+   "best": {
+    "move": "bomb:4{4H 4H 4S 2H}",
+    "diff": 1.7222222222222223,
+    "t": 4.906790468181818,
+    "n": 36
+   }
+  },
+  {
+   "id": "self|284800470|90",
+   "seat": 2,
+   "n": 9,
+   "leading": true,
+   "prev": "pass",
+   "rel": "lead",
+   "counts": [
+    2,
+    5,
+    9,
+    15
+   ],
+   "lv": "A",
+   "hand": "KC KH QS KS QS JH 6S 10C KC",
+   "chosen": "pair:Q{QS QS}",
+   "chosenMean": 0.6388888888888888,
+   "chosenTags": [
+    "feedPartnerPair",
+    "control"
+   ],
+   "alts": [
+    {
+     "move": "single:6{6S}",
+     "mean": 2.1944444444444446,
+     "tags": [
+      "holdBombLead",
+      "control"
+     ]
+    },
+    {
+     "move": "single:10{10C}",
+     "mean": 2.2222222222222223,
+     "tags": [
+      "holdBombLead",
+      "control"
+     ]
+    },
+    {
+     "move": "single:J{JH}",
+     "mean": 1.8333333333333333,
+     "tags": [
+      "holdBombLead",
+      "control"
+     ]
+    }
+   ],
+   "best": {
+    "move": "single:10{10C}",
+    "diff": 1.5833333333333333,
+    "t": 5.246640174003589,
+    "n": 36
+   }
+  },
+  {
+   "id": "self|284800197|67",
+   "seat": 1,
+   "n": 5,
+   "leading": false,
+   "prev": "single:Q",
+   "rel": "partner",
+   "counts": [
+    1,
+    5,
+    15,
+    3
+   ],
+   "lv": "A",
+   "hand": "QD AH 2H RJ KS",
+   "chosen": "pass",
+   "chosenMean": 0.2222222222222222,
+   "chosenTags": [],
+   "alts": [
+    {
+     "move": "single:RJ{RJ}",
+     "mean": -0.08333333333333333,
+     "tags": [
+      "filtered"
+     ]
+    },
+    {
+     "move": "single:K{KS}",
+     "mean": 1.6388888888888888,
+     "tags": [
+      "filtered"
+     ]
+    },
+    {
+     "move": "single:A{AH}",
+     "mean": -0.16666666666666666,
+     "tags": [
+      "filtered"
+     ]
+    }
+   ],
+   "best": {
+    "move": "single:K{KS}",
+    "diff": 1.4166666666666667,
+    "t": 4.431791590206959,
+    "n": 36
+   }
+  },
+  {
+   "id": "self|284800084|58",
+   "seat": 3,
+   "n": 20,
+   "leading": false,
+   "prev": "single:6",
+   "rel": "partner",
+   "counts": [
+    19,
+    6,
+    7,
+    20
+   ],
+   "lv": "K",
+   "hand": "10D 10D KC 4H 2S KS 9H 7C KD 10C 4D 8H 10S 8D KC 9D 2C 3D 7S 3S",
+   "chosen": "pass",
+   "chosenMean": 0.3333333333333333,
+   "chosenTags": [],
+   "alts": [
+    {
+     "move": "single:10{10D}",
+     "mean": -1,
+     "tags": [
+      "filtered"
+     ]
+    },
+    {
+     "move": "bomb:10{10D 10D 10C 10S}",
+     "mean": 1.6944444444444444,
+     "tags": [
+      "filtered"
+     ]
+    },
+    {
+     "move": "single:K{KC}",
+     "mean": 1.4166666666666667,
+     "tags": [
+      "filtered"
+     ]
+    }
+   ],
+   "best": {
+    "move": "bomb:10{10D 10D 10C 10S}",
+    "diff": 1.3611111111111112,
+    "t": 4.368735578681637,
+    "n": 36
+   }
+  },
+  {
+   "id": "self|284800466|55",
+   "seat": 1,
+   "n": 12,
+   "leading": false,
+   "prev": "single:2",
+   "rel": "enemy",
+   "counts": [
+    14,
+    12,
+    12,
+    8
+   ],
+   "lv": "8",
+   "hand": "KC JS 2H JD QH 2H 4C JC QS 2S 4H 2D",
+   "chosen": "single:K{KC}",
+   "chosenMean": 0.7222222222222222,
+   "chosenTags": [
+    "followUp",
+    "followSize",
+    "activeFollow:0"
+   ],
+   "alts": [
+    {
+     "move": "single:4{4C}",
+     "mean": 0.25,
+     "tags": [
+      "followUp",
+      "followSize",
+      "activeFollow:1"
+     ]
+    },
+    {
+     "move": "single:4{4H}",
+     "mean": 0.25,
+     "tags": [
+      "followUp",
+      "followSize",
+      "activeFollow:1"
+     ]
+    },
+    {
+     "move": "single:Q{QH}",
+     "mean": 1.7222222222222223,
+     "tags": [
+      "followUp",
+      "followSize",
+      "activeFollow:1"
+     ]
+    },
+    {
+     "move": "pass",
+     "mean": 1.0833333333333333,
+     "tags": [
+      "passiveEarly"
+     ]
+    }
+   ],
+   "best": {
+    "move": "single:Q{QH}",
+    "diff": 1,
+    "t": 3.021660931112009,
+    "n": 36
+   }
+  },
+  {
+   "id": "self|284800067|70",
+   "seat": 1,
+   "n": 13,
+   "leading": true,
+   "prev": "pass",
+   "rel": "lead",
+   "counts": [
+    1,
+    13,
+    2,
+    3
+   ],
+   "lv": "9",
+   "hand": "4C JD 10D 4S 10C 4H AD RJ 3S 4H 4S 10C BJ",
+   "chosen": "single:3{3S}",
+   "chosenMean": 1,
+   "chosenTags": [
+    "control"
+   ],
+   "alts": [
+    {
+     "move": "single:J{JD}",
+     "mean": 1.6666666666666667,
+     "tags": [
+      "control"
+     ]
+    },
+    {
+     "move": "single:A{AD}",
+     "mean": 1.7777777777777777,
+     "tags": [
+      "noLeadControl",
+      "control"
+     ]
+    },
+    {
+     "move": "single:RJ{RJ}",
+     "mean": 1.7777777777777777,
+     "tags": [
+      "noLeadControl",
+      "control"
+     ]
+    }
+   ],
+   "best": {
+    "move": "single:A{AD}",
+    "diff": 0.7777777777777778,
+    "t": 4.719399037242694,
+    "n": 36
+   }
+  }
+ ]
+}
