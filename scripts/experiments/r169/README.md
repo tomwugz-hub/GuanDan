@@ -22,6 +22,8 @@ When `GD_R169` is on, `r169Gate` **passes**, and **maxEach is strictly greater**
 
 **Logging:** set `GD_R169_LOG=1` to emit `R169TRIG` on stderr when exact-search move differs from pre-endgame best.
 
+**Lab / eval (not default):** `GD_ENDGAME_NO_WALLCLOCK=1` turns off `Date.now`-based early exit inside `solveEndgame` (world/node caps still apply) for **deterministic-budget** replays — see `VALIDITY.md`. Production: omit unless explicitly adopted.
+
 ## Orthogonality
 
 - **r34** (`GD_R34` bit1): only raises **uniform** per-seat cap E for the legacy `endgameApplies` path when r169 does not widen the gate.
@@ -29,7 +31,8 @@ When `GD_R169` is on, `r169Gate` **passes**, and **maxEach is strictly greater**
 
 ## Scripts (from repo root)
 
-- `scripts/experiments/r169/smoke-r169.sh` — serial smoke (`SMOKE_SEED` default 26990000), b0 vs unset; `verify-bits.mjs`; optional `GD_R169_LOG=1` trig sample.
+- `scripts/experiments/r169/smoke-r169.sh` — serial smoke (`SEED0` default 26990000): **A** = `BASELINE_SNAPSHOT` vs itself (no r169); **B** = `current` vs `BASELINE_SNAPSHOT` with `GD_R169=0`. Set `BASELINE_SNAPSHOT=backups/<snap>` for frozen baseline parity. Optional `GD_R169_LOG=1` trig sample.
+- `scripts/experiments/r169/VALIDITY.md` — wall-clock / load bias in `solveEndgame`, `GD_ENDGAME_NO_WALLCLOCK` lab flag.
 - `scripts/experiments/r169/run-r169-launch.sh` — smoke → gate → **R169TRIG** precheck (96 deals on baseline) → detach four `nohup` arenas with **`--ckpt`** → `watch-r169-completion.sh` (or `NO_WATCH=1`).
 - `scripts/experiments/r169/run-r169-chain.sh` — foreground four configs with checkpoint (`CKPT_DIR`).
 - `scripts/experiments/r169/verify-bits.mjs` — asserts b3 rejects / b9 accepts enemy with 6 cards.

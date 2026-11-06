@@ -44,6 +44,16 @@ test('r169 b0 exact equivalence with baseline on move 86', () => {
   delete process.env.GD_R169;
 });
 
+test('GD_R169 unset vs 0 same policy path (move 86)', () => {
+  const p = pos86();
+  delete process.env.GD_R169;
+  const u = decide(p).move ?? decide(p);
+  process.env.GD_R169 = '0';
+  const z = decide(p).move ?? decide(p);
+  assert.deepEqual(u.cards.map(formatCard), z.cards.map(formatCard));
+  delete process.env.GD_R169;
+});
+
 test('r169 decide path: higher threshold so endgame does not override heuristic', () => {
   const p = pos86();
   process.env.GD_R169 = '3';
