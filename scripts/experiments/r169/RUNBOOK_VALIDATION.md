@@ -13,6 +13,7 @@
 git worktree add ../guandan-baseline-c77 c77f3f725204027964760a8097c77eaa90f31792
 cd ../guandan-baseline-c77
 git apply /path/to/scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch
+git apply /path/to/scripts/experiments/r169/patches/gd-handplan-no-wallclock-baseline-c77f3f7.patch
 mkdir -p backups/r169-baseline-c77-nw
 cp -a policy/. backups/r169-baseline-c77-nw/
 ```
@@ -24,7 +25,7 @@ Point **candidate** checkout at the same path (or symlink `backups/r169-baseline
 From **candidate** tree (r169 branch, uncommitted ok):
 
 ```bash
-export GD_R95=5 GD_ENDGAME_NO_WALLCLOCK=1
+export GD_R95=5 GD_ENDGAME_NO_WALLCLOCK=1 GD_HANDPLAN_NO_WALLCLOCK=1
 export OLD_BASELINE_NAME=r169-baseline-c77-nw
 export BASELINE_SNAPSHOT=r169-baseline-c77-nw   # for smoke-r169.sh parity
 bash scripts/experiments/r169/validate-no-wallclock.sh
@@ -45,7 +46,7 @@ Optional **flag bits** battery (candidate only; old side ignores): `RUN_BITS=1 b
   `bash scripts/experiments/r169/arena-repeat-dump.sh` (env `A_SPEC`/`B_SPEC`/`PRE` for candidate `GD_R169=0`).  
   Compare: `node scripts/experiments/r169/compare-arena-raw.mjs run1.json run2.json`.
 - **`versionCache` (loadDecide)**: hypothesis for **parent process** prefetch before workers — still **prove with arena trace**, not only `playMatch`.
-- **Other wall-clocks**: `policy/handplan.js` still uses **`Date.now()`** caps (25ms / 30ms) independent of **`GD_ENDGAME_NO_WALLCLOCK`** — potential nondeterminism under load; flag for investigation alongside **`solveEndgame`**.
+- **Hand-plan wall-clocks (demonstrated)**: `policy/handplan.js` uses **`Date.now()`** in **`decompose`** (25ms move-loop cap) and **`decomposeCounts`** (30ms soft cap alongside node cap). Under CPU load, time checks can fire **before** the search finishes examining moves → **different decomposition / lead scoring** → different play trajectories. Local raw evidence: first differing deal key **`26991018|arenaA0|0`** (`compare-26991000-d512.json` in attachment). **Eval:** `GD_HANDPLAN_NO_WALLCLOCK=1` disables **only** those `Date.now` guards; default unset preserves production heuristics.
 - **Calling `dealFourHands()` with no deck** is not shown on the arena path used here: `play/core.js` passes `dealFourHands(shuffle(makeDeck(), g.rng))`. Treat “remove default shuffle” as **guard-only** unless a trace shows the no-arg call on that path.
 
 ## Known nondeterminism blockers (if delta ≠ 0)
@@ -59,5 +60,6 @@ Do **not** toggle extra flags on one side without the other; document pairs in l
 ## Artifacts (this repo / CI)
 
 - Baseline-only patch: **`scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch`** (copy also at **`/opt/cursor/artifacts/gd-endgame-no-wallclock-baseline-c77f3f7.patch`**)
+- Baseline-only handplan eval gate: **`scripts/experiments/r169/patches/gd-handplan-no-wallclock-baseline-c77f3f7.patch`**
 - Full candidate vs `guandan-coach`: **`/opt/cursor/artifacts/gd-r169-full.patch`** (regenerate: `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`)
-- Eval-only incremental (validity + arena trace hooks; **no engine API change**): **`/opt/cursor/artifacts/gd-r169-validity-evaltools.patch`** (regenerated each publish from `$(git merge-base origin/guandan-coach HEAD)..HEAD`)
+- **Net validitypack → eval HEAD** (see PR / agent notes): **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-8943eef.patch`** — use `git diff 60137f1..HEAD` style, not full `merge-base..HEAD` series, when parent already has r169 trunk.

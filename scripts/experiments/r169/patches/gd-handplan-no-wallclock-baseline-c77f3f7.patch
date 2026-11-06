@@ -1,0 +1,50 @@
+diff --git a/policy/handplan.js b/policy/handplan.js
+index 498e77c..d3c09f8 100644
+--- a/policy/handplan.js
++++ b/policy/handplan.js
+@@ -17,6 +17,11 @@ import { generateCandidates } from '../search/index.js';
+ const MAX_CARDS = 14;
+ const NAT = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A', 'BJ', 'RJ'];
+ 
++/** Evaluation-only: disable Date.now-based caps in decompose/decomposeCounts (CPU-load sensitive). Production default unchanged. */
++function handplanSoftClock() {
++  return typeof process === 'undefined' || process.env?.GD_HANDPLAN_NO_WALLCLOCK !== '1';
++}
++
+ export function comboKey(m) {
+   return `${m.combo?.type}:${m.combo?.rank}:${m.cards?.length}`;
+ }
+@@ -69,6 +74,7 @@ export function decompose(hand, lv = '2', cache = new Map(), opts = {}) {
+   const freeWild = !!opts.freeWild; // true: 逢人配可任意使用（用于“用/不用逢人配”的对比）；需配独立 cache
+   if (!hand?.length) return { comps: [], plays: 0, cost: 0 };
+   if (hand.length > MAX_CARDS) return null;
++  const softClock = handplanSoftClock();
+   const t0 = Date.now();
+   const cnt0 = new Map();
+   for (const x of hand) if (!isWildCard(x, lv)) cnt0.set(x.rank, (cnt0.get(x.rank) || 0) + 1);
+@@ -91,7 +97,7 @@ export function decompose(hand, lv = '2', cache = new Map(), opts = {}) {
+         ([TYPES.SINGLE, TYPES.PAIR, TYPES.TRIPLE].includes(m.combo?.type) && m.combo.rank === lv && m.cards.every((c) => c.rank === lv))));
+     let best = null;
+     for (const m of moves) {
+-      if (Date.now() - t0 > 25) break; // hard time cap
++      if (softClock && Date.now() - t0 > 25) break; // hard time cap
+       const ids = new Set(m.cards.map((c) => c.id));
+       const r = rec(h.filter((c) => !ids.has(c.id)));
+       if (!r) continue;
+@@ -152,6 +158,7 @@ export function decomposeCounts(hand, lv = '2', cache = new Map(), base = null)
+     }
+     return cost;
+   };
++  const softClock = handplanSoftClock();
+   const t0 = Date.now();
+   let nodes = 0;
+   const rec = (v) => {
+@@ -179,7 +186,7 @@ export function decomposeCounts(hand, lv = '2', cache = new Map(), base = null)
+     if (i + 1 < 13 && c >= 3 && v[i + 1] >= 3) opts.push([TYPES.TRIPLE_SEQ, SEQ[i + 1], [[i, 3], [i + 1, 3]]]);
+     let best = null;
+     for (const [type, rank, used] of opts) {
+-      if (best && (Date.now() - t0 > 30 || nodes > 20000)) break; // 时间/节点上限
++      if (best && ((softClock && Date.now() - t0 > 30) || nodes > 20000)) break; // 时间/节点上限
+       const w = v.slice();
+       for (const [j, n] of used) w[j] -= n;
+       const r = rec(w);
