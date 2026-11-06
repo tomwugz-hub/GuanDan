@@ -97,12 +97,12 @@ export function shuffle(arr, rng = Math.random) {
 
 /**
  * 发成 4 手各 27 张。
- * @param {object[]} deck 已洗好的 108 张（必须显式传入 shuffle(makeDeck(), rng)，禁止默认 Math.random）
+ * @param {object[]} [deck]
  * @returns {object[][]}
  * @throws {Error} 不是 108 张
  */
-export function dealFourHands(deck) {
-  if (!deck || deck.length !== 108) throw new Error('掼蛋必须 108 张（dealFourHands 需传入 shuffle(makeDeck(), rng) 的结果）');
+export function dealFourHands(deck = shuffle(makeDeck())) {
+  if (deck.length !== 108) throw new Error('掼蛋必须 108 张');
   return [0, 1, 2, 3].map((i) => deck.slice(i * 27, i * 27 + 27));
 }
 
