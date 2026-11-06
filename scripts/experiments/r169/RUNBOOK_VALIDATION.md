@@ -62,4 +62,6 @@ Do **not** toggle extra flags on one side without the other; document pairs in l
 - Baseline-only patch: **`scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch`** (copy also at **`/opt/cursor/artifacts/gd-endgame-no-wallclock-baseline-c77f3f7.patch`**)
 - Baseline-only handplan eval gate: **`scripts/experiments/r169/patches/gd-handplan-no-wallclock-baseline-c77f3f7.patch`**
 - Full candidate vs `guandan-coach`: **`/opt/cursor/artifacts/gd-r169-full.patch`** (regenerate: `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`)
-- **Net validitypack → eval HEAD** (see PR / agent notes): **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-8943eef.patch`** — use `git diff 60137f1..HEAD` style, not full `merge-base..HEAD` series, when parent already has r169 trunk.
+- **Net validitypack → current eval HEAD** (no engine/pool): regenerate  
+  `git diff 60137f1..HEAD > /opt/cursor/artifacts/gd-r169-net-60137f1-to-$(git rev-parse --short HEAD).patch`  
+  — not `format-patch merge-base..HEAD` when parent already has r169 trunk. Latest agent export: **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-22b32ca.patch`** (commit `22b32ca`).
