@@ -46,7 +46,7 @@ export function createMatch({
  * @returns {object}
  */
 export function createRound(match, { dealerSeat = 0, hands = null, rng } = {}) {
-  const dealt = hands || dealFourHands(shuffle(makeDeck(), rng));
+  const dealt = hands || dealFourHands(shuffle(makeDeck(), rng ?? Math.random));
   return {
     match,
     hands: dealt,

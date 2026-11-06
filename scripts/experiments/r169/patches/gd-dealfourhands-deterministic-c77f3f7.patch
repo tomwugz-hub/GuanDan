@@ -1,0 +1,50 @@
+--- a/engine/cards.js
++++ b/engine/cards.js
+@@ -97,12 +97,12 @@
+ 
+ /**
+  * 发成 4 手各 27 张。
+- * @param {object[]} [deck]
++ * @param {object[]} deck 已洗好的 108 张（必须显式传入 shuffle(makeDeck(), rng)，禁止默认 Math.random）
+  * @returns {object[][]}
+  * @throws {Error} 不是 108 张
+  */
+-export function dealFourHands(deck = shuffle(makeDeck())) {
+-  if (deck.length !== 108) throw new Error('掼蛋必须 108 张');
++export function dealFourHands(deck) {
++  if (!deck || deck.length !== 108) throw new Error('掼蛋必须 108 张（dealFourHands 需传入 shuffle(makeDeck(), rng) 的结果）');
+   return [0, 1, 2, 3].map((i) => deck.slice(i * 27, i * 27 + 27));
+ }
+ 
+--- a/engine/state.js
++++ b/engine/state.js
+@@ -46,7 +46,7 @@
+  * @returns {object}
+  */
+ export function createRound(match, { dealerSeat = 0, hands = null, rng } = {}) {
+-  const dealt = hands || dealFourHands(shuffle(makeDeck(), rng));
++  const dealt = hands || dealFourHands(shuffle(makeDeck(), rng ?? Math.random));
+   return {
+     match,
+     hands: dealt,
+--- a/test/cards.test.js
++++ b/test/cards.test.js
+@@ -1,6 +1,7 @@
+ import { describe, it } from "node:test";
+ import assert from "node:assert/strict";
+-import { makeDeck, dealFourHands, cards, parseCard } from "../engine/cards.js";
++import { makeDeck, shuffle, dealFourHands, cards, parseCard } from "../engine/cards.js";
++import { makeRng } from "../play/core.js";
+ import { singleStrength, isWildCard } from "../engine/ranks.js";
+ 
+ describe("cards", () => {
+@@ -8,7 +9,8 @@
+     assert.equal(makeDeck().length, 108);
+   });
+   it("deal 4 x 27", () => {
+-    const hs = dealFourHands();
++    const rng = makeRng(42);
++    const hs = dealFourHands(shuffle(makeDeck(), rng));
+     assert.equal(hs.length, 4);
+     assert.ok(hs.every((h) => h.length === 27));
+   });

@@ -32,10 +32,11 @@ bash scripts/experiments/r169/validate-no-wallclock.sh
 
 Optional **flag bits** battery (candidate only; old side ignores): `RUN_BITS=1 bash scripts/experiments/r169/validate-no-wallclock.sh`.
 
-## What “Δ=0” means
+## What “Δ=0” means (and what it does **not** mean)
 
-- **Self pair** `oldbaseline vs oldbaseline`: must print **A 每副净升级 0.000** (identical policy).
-- **GD_R169=0** candidate vs patched old baseline: **should** match if `endgame` + legacy gate path match; any non-zero delta indicates **remaining nondeterminism or code path drift** (not solved by one decide test).
+- **Arena `pairedStats`** averages **per-seed paired seatings**; **same policy vs itself** is **not** guaranteed to yield **mean team points = 0** for finite deals (partnership + tribute + dealing asymmetry across seatings). See `determinism-note.md`.
+- **Repeat drift** in the **point estimate** (e.g. run1 vs run2 self-self) can come from **sampling variance** (CI width) alone — use **bit-identical replay** checks for engine regression.
+- **`GD_ENDGAME_NO_WALLCLOCK`** removes wall-clock **inside** `solveEndgame` only; other hotspots addressed here: **`dealFourHands` default `Math.random`** (patches below), **`pool.mjs` ckpt key** truncation.
 
 ## Known nondeterminism blockers (if delta ≠ 0)
 
@@ -47,5 +48,11 @@ Do **not** toggle extra flags on one side without the other; document pairs in l
 
 ## Artifacts (this repo / CI)
 
-- Baseline-only patch: **`scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch`** (copy also at **`/opt/cursor/artifacts/gd-endgame-no-wallclock-baseline-c77f3f7.patch`**)
-- Full candidate vs `guandan-coach`: **`/opt/cursor/artifacts/gd-r169-full.patch`** (regenerate: `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`)
+- Baseline-only **endgame wallclock** (old policy): **`scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch`**
+- Baseline **`dealFourHands` + `createRound` + test** (remove hidden `Math.random`): **`scripts/experiments/r169/patches/gd-dealfourhands-deterministic-c77f3f7.patch`**
+- Candidate increment (after previous pack): see **`gd-r169-determinism-incremental.patch`** at `/opt/cursor/artifacts/` after publish.
+- Full candidate vs `guandan-coach`: regenerate `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`
+
+## Quick engine replay (no arena)
+
+`node --test test/playmatch-determinism.test.js` — identical `playMatch` outputs twice (greedy agents).

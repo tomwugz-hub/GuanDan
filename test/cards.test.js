@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { makeDeck, dealFourHands, cards, parseCard } from "../engine/cards.js";
+import { makeDeck, shuffle, dealFourHands, cards, parseCard } from "../engine/cards.js";
+import { makeRng } from "../play/core.js";
 import { singleStrength, isWildCard } from "../engine/ranks.js";
 
 describe("cards", () => {
@@ -8,7 +9,8 @@ describe("cards", () => {
     assert.equal(makeDeck().length, 108);
   });
   it("deal 4 x 27", () => {
-    const hs = dealFourHands();
+    const rng = makeRng(42);
+    const hs = dealFourHands(shuffle(makeDeck(), rng));
     assert.equal(hs.length, 4);
     assert.ok(hs.every((h) => h.length === 27));
   });

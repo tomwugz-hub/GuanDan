@@ -21,7 +21,8 @@ export function runTasks(tasks, n = Math.max(1, Math.min(7, os.cpus().length - 1
   }
   return new Promise((resolve, reject) => {
     const results = new Array(tasks.length);
-    const keyOf = (t) => JSON.stringify(t).length + ':' + JSON.stringify(t).slice(0, 200);
+    // Full task JSON for ckpt identity (truncated keys caused rare mismatches when resuming long runs).
+    const keyOf = (t) => JSON.stringify(t);
     let done = 0;
     if (ckpt && fs.existsSync(ckpt)) {
       for (const line of fs.readFileSync(ckpt, 'utf8').split('\n')) {
