@@ -7,6 +7,8 @@
  *   --ckpt=<file.jsonl>：检查点，中断后同一命令续跑。
  * a/b：current、backups/ 下的目录名、random、greedy、jev、startlux（并发 JEV_CONCURRENCY / STARTLUX_CONCURRENCY；bamboo 默认 3）。
  */
+import crypto from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import { runTasks, dealTasks, pairedStats } from './pool.mjs';
 import { loadDecide } from './lib.mjs';
 
@@ -77,6 +79,21 @@ export async function arena(a, b, deals = 400, seed0 = 500000, { tribute = false
   return out;
 }
 
+/** Stable key for one finished deal row (tribute: matchSeed + dealIdx; else seed). */
+export function dealSortKey(d) {
+  const ms = d.matchSeed ?? d.seed;
+  const di = d.dealIdx != null ? d.dealIdx : 0;
+  const cfg = d.cfg || '';
+  return `${ms}\t${cfg}\t${di}`;
+}
+
+/** Fingerprint over sorted deal outcomes (points + finish order). */
+export function fingerprintDeals(dealRows) {
+  const sorted = dealRows.slice().sort((a, b) => dealSortKey(a).localeCompare(dealSortKey(b)));
+  const lines = sorted.map((d) => `${dealSortKey(d)}|${(d.points || []).join(',')}|${(d.order || []).join(',')}`);
+  return crypto.createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex');
+}
+
 export function fmtArena(r) {
   const pct = (x) => (100 * x).toFixed(1);
   return `${r.a} vs ${r.b}: ${r.deals} 副（换座位配对），A 胜 ${r.wins}/${r.deals} = ${pct(r.winRate.mean)}% [95% CI ${pct(r.winRate.lo)}–${pct(r.winRate.hi)}]，` +
@@ -86,8 +103,41 @@ export function fmtArena(r) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const t0 = Date.now();
+  const tribute = args.tribute != null && args.tribute !== '0';
+  const matchLen = Number(args.matchLen || 8);
+  const ckpt = args.ckpt || null;
+  const collect = args.collect != null && args.collect !== '0';
+  const threads = args.threads != null && args.threads !== '' ? Number(args.threads) : undefined;
+  const rawOut = args.rawOut || args['dump-raw'] || null;
   const r = await arena(args.a || 'current', args.b || 'pre-selfplay-audit', Number(args.deals || 400), Number(args.seed0 || 500000),
-    { tribute: args.tribute != null && args.tribute !== '0', matchLen: Number(args.matchLen || 8), ckpt: args.ckpt || null });
+    { tribute, matchLen, ckpt, collect: collect || !!rawOut, threads });
   console.log(fmtArena(r));
   console.log(`用时 ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  if (rawOut) {
+    const allDeals = (r.raw || []).flatMap((w) => w.deals || []);
+    const fp = fingerprintDeals(allDeals);
+    const payload = {
+      meta: {
+        a: args.a || 'current',
+        b: args.b || 'pre-selfplay-audit',
+        deals: Number(args.deals || 400),
+        seed0: Number(args.seed0 || 500000),
+        tribute,
+        matchLen,
+        threads: threads ?? null,
+        ckpt: ckpt || null,
+        fingerprint: fp,
+        env: {
+          GD_R95: process.env.GD_R95 ?? null,
+          GD_R169: process.env.GD_R169 ?? null,
+          GD_ENDGAME_NO_WALLCLOCK: process.env.GD_ENDGAME_NO_WALLCLOCK ?? null,
+        },
+      },
+      summary: fmtArena(r),
+      deals: allDeals.slice().sort((x, y) => dealSortKey(x).localeCompare(dealSortKey(y))),
+      rawWorkers: r.raw,
+    };
+    writeFileSync(rawOut, JSON.stringify(payload));
+    console.error(`[arena] wrote raw dump: ${rawOut} (deals=${allDeals.length} fingerprint=${fp})`);
+  }
 }

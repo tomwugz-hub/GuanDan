@@ -42,5 +42,5 @@ for ((r = 1; r <= RUNS; r++)); do
 done
 
 echo ""
-echo "Done. Expect net level delta 0.000 on self-pair; b0 pair should match within floating noise."
-echo "Single-position unit tests do not prove full-match validity — see RUNBOOK_VALIDATION.md"
+echo "Done. See RUNBOOK_VALIDATION.md: self-paired arena summaries are not identical-run fingerprints;"
+echo "use scripts/experiments/r169/arena-repeat-dump.sh for raw per-deal reproducibility checks."
