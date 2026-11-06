@@ -64,4 +64,4 @@ Do **not** toggle extra flags on one side without the other; document pairs in l
 - Full candidate vs `guandan-coach`: **`/opt/cursor/artifacts/gd-r169-full.patch`** (regenerate: `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`)
 - **Net validitypack → current eval HEAD** (no engine/pool): regenerate  
   `git diff 60137f1..HEAD > /opt/cursor/artifacts/gd-r169-net-60137f1-to-$(git rev-parse --short HEAD).patch`  
-  — not `format-patch merge-base..HEAD` when parent already has r169 trunk. Latest agent export: **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-7920408.patch`** (validitypack→HEAD net diff).
+  — not `format-patch merge-base..HEAD` when parent already has r169 trunk. Latest agent export: **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-6066787.patch`** (validitypack→HEAD net diff).
