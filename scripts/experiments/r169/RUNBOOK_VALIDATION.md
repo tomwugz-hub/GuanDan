@@ -62,6 +62,6 @@ Do **not** toggle extra flags on one side without the other; document pairs in l
 - Baseline-only patch: **`scripts/experiments/r169/patches/gd-endgame-no-wallclock-baseline-c77f3f7.patch`** (copy also at **`/opt/cursor/artifacts/gd-endgame-no-wallclock-baseline-c77f3f7.patch`**)
 - Baseline-only handplan eval gate: **`scripts/experiments/r169/patches/gd-handplan-no-wallclock-baseline-c77f3f7.patch`**
 - Full candidate vs `guandan-coach`: **`/opt/cursor/artifacts/gd-r169-full.patch`** (regenerate: `git format-patch $(git merge-base origin/guandan-coach HEAD)..HEAD --stdout`)
-- **Net validitypack → current eval HEAD** (no engine/pool): regenerate  
+- **Net validitypack → current eval HEAD** (no engine/pool): from repo root run  
   `git diff 60137f1..HEAD > /opt/cursor/artifacts/gd-r169-net-60137f1-to-$(git rev-parse --short HEAD).patch`  
-  — not `format-patch merge-base..HEAD` when parent already has r169 trunk. Latest agent export: **`/opt/cursor/artifacts/gd-r169-net-60137f1-to-c5e80aa.patch`** (validitypack→HEAD net diff).
+  — not `format-patch merge-base..HEAD` when parent already has r169 trunk. Do **not** embed a fixed short SHA in docs (it moves every doc commit).
