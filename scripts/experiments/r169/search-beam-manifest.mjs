@@ -13,6 +13,6 @@ export function sharedSearchManifest() {
   return {
     path: 'search/index.js',
     sha256,
-    evalGates: ['GD_SEARCH_NO_WALLCLOCK', 'GD_SEARCH_BEAM_FIXED_NODES', 'GD_EVAL_BEAM_TIMEMS', 'GD_EVAL_BEAM_WORK_TRACE'],
+    evalGates: ['GD_SEARCH_NO_WALLCLOCK', 'GD_SEARCH_BEAM_FIXED_NODES', 'GD_EVAL_BEAM_TIMEMS', 'GD_EVAL_BEAM_WORK_TRACE', 'GD_EVAL_BEAM_WORK_COLLECT'],
   };
 }

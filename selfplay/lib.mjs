@@ -186,6 +186,9 @@ export function playDeal(seed, agents, { onDecision = null, stopAt = null, level
     if (!!ctx.partnerCombo !== !!tableIsPartner) viol('partnerDetect', step, `ctx.partnerCombo=${!!ctx.partnerCombo} table=${!!tableIsPartner}`);
     if (!leading && lastT && lastT.seat !== r.lastPlayer) viol('lastPlayer', step, `trickPlays last ${lastT.seat} vs lastPlayer ${r.lastPlayer}`);
     const t0 = performance.now();
+    if (process.env.GD_EVAL_BEAM_WORK_COLLECT === '1' || process.env.GD_EVAL_BEAM_WORK_TRACE === '1') {
+      try { delete globalThis.__GD_SEARCH_BEAM_WORK__; } catch { /* eval */ }
+    }
     const rec = agents[seat].act(g, seat);
     const ms = rec.ms ?? performance.now() - t0;
     const move = rec.move;

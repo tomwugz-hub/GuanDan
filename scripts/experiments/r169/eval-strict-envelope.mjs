@@ -48,6 +48,7 @@ export function strictEnvelopeRecord(env = process.env) {
       GD_SEARCH_NO_WALLCLOCK: 'unset → production wallMs beam; 1 → fixed root-candidate cap (no Date.now in beam loop)',
       GD_SEARCH_BEAM_FIXED_NODES: `optional root-candidate cap; default ${SEARCH_BEAM_NODE_CAP} when NO_WALLCLOCK=1`,
       GD_EVAL_BEAM_TIMEMS: 'eval/instrumented only; forces wall path for sensitivity tests',
+      GD_EVAL_BEAM_WORK_COLLECT: '1 → attach searchBeamWork on each arena raw decision (worker path)',
     },
     budgetSemantics: {
       beamBudgetUnit: 'rootCandidatesScored',
