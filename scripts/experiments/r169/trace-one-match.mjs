@@ -112,12 +112,33 @@ async function main() {
     const c = compareActionTraces(outs[0].actions, outs[1].actions, { dealSeed: ds });
     priorDeals.push({ dealIdx: di, dealSeed: ds, prefixIdentical: c.prefixIdentical, firstDiff: c.firstDiff?.kind || null });
   }
+  const fixtureAtDiff = cmp.firstDiff?.kind === 'action' ? {
+    id: `${cfg}|${dealSeed}|${cmp.firstDiff.step}`,
+    step: cmp.firstDiff.step,
+    spec: cmp.firstDiff.spec,
+    seat: cmp.firstDiff.seat,
+    ctxA: cmp.firstDiff.ctxA,
+    ctxB: cmp.firstDiff.ctxB,
+    rawA: cmp.firstDiff.rawA,
+    rawB: cmp.firstDiff.rawB,
+  } : null;
   const report = {
     matchSeed,
     cfg,
     dealIdx,
     dealSeed,
     specs,
+    runSummaries: outs.map((o, i) => ({
+      run: i + 1,
+      actionCount: o.actions.length,
+      dealSeedScopedCount: o.actions.filter((a) => a.dealSeed === dealSeed).length,
+      points: o.dealPoints,
+      steps: o.dealSteps,
+      order: o.dealOrder,
+    })),
+    /** Full per-decide records for worker inspection (ms omitted from compare fingerprint only). */
+    actionTraces: outs.map((o, i) => ({ run: i + 1, actions: o.actions })),
+    ctxFixtureAtFirstDiff: fixtureAtDiff,
     excludedMechanisms: [
       'no --ckpt on cap2 trace',
       'deal seeds: dealSeedOf(matchSeed,i)=matchSeed*16+i (explicit)',
