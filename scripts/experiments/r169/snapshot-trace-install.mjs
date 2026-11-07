@@ -113,5 +113,20 @@ if (!hp.includes('__GD_HANDPLAN_BUDGET__')) {
   fs.writeFileSync(path.join(dstDir, 'handplan.js'), hp);
 }
 
+let hp2 = fs.readFileSync(path.join(dstDir, 'handplan.js'), 'utf8');
+if (!hp2.includes('decomposeCounts') || !hp2.includes('hit30ms')) {
+  hp2 = hp2.replace(
+    '      if (best && ((softClock && Date.now() - t0 > 30) || nodes > 20000)) break; // 时间/节点上限',
+    `      if (best && ((softClock && Date.now() - t0 > 30) || nodes > 20000)) {
+        if (typeof process !== 'undefined' && process.env.GD_EVAL_DECIDE_TRACE === '1' && globalThis.__GD_EVAL_DECIDE_TRACE_ACTIVE__) {
+          globalThis.__GD_HANDPLAN_BUDGET__ = globalThis.__GD_HANDPLAN_BUDGET__ || {};
+          globalThis.__GD_HANDPLAN_BUDGET__.decomposeCounts = { hit30msOrNodes: true, nodes, elapsed: Date.now() - t0, softClock };
+        }
+        break; // 时间/节点上限
+      }`,
+  );
+  fs.writeFileSync(path.join(dstDir, 'handplan.js'), hp2);
+}
+
 fs.writeFileSync(path.join(dstDir, '.eval-trace-stamp'), `src=${src}\ninstrumented=decide-trace\n`);
 console.log(`instrumented snapshot: backups/${dst}`);

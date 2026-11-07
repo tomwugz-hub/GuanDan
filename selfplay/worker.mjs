@@ -293,5 +293,12 @@ async function runSurprise() {
   return { surprises: results };
 }
 
-const fn = task.kind === 'surprise' ? runSurprise : task.kind === 'jevmc' ? runJevMC : task.kind === 'snapmc' ? runSnapMC : runDeals;
+/** Eval-only: prefix jobs + stopAt target decide trace (worker_threads path). */
+async function runTraceTarget() {
+  const { runTraceTarget: run } = await import('../scripts/experiments/r169/trace-target-core.mjs');
+  return run(task);
+}
+
+const fn = task.kind === 'traceTarget' ? runTraceTarget
+  : task.kind === 'surprise' ? runSurprise : task.kind === 'jevmc' ? runJevMC : task.kind === 'snapmc' ? runSnapMC : runDeals;
 fn().then((r) => parentPort.postMessage(r)).catch((e) => parentPort.postMessage({ error: String(e && e.stack || e) }));
