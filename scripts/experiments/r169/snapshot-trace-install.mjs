@@ -96,6 +96,18 @@ if (!idx.includes('__evalEmitDecideTrace')) {
   });
   if (typeof process !== 'undefined' && process.env?.DECIDE_DEBUG)`,
   );
+  const beamNeedle = '  const beam = beamW ? beamSearch(full, { beam: 10, timeMs: 20 }) : [];';
+  if (idx.includes(beamNeedle) && !idx.includes('GD_EVAL_BEAM_TIMEMS')) {
+    idx = idx.replace(
+      beamNeedle,
+      `  const __beamTimeMs = (typeof process !== 'undefined' && process.env.GD_EVAL_BEAM_TIMEMS) ? Number(process.env.GD_EVAL_BEAM_TIMEMS) : 20;
+  const __beamT0 = Date.now();
+  const beam = beamW ? beamSearch(full, { beam: 10, timeMs: __beamTimeMs }) : [];
+  if (typeof process !== 'undefined' && process.env.GD_EVAL_DECIDE_TRACE === '1' && globalThis.__GD_EVAL_DECIDE_TRACE_ACTIVE__) {
+    globalThis.__GD_BEAM_PROBE__ = { timeMs: __beamTimeMs, beamLen: beam.length, elapsedMs: Date.now() - __beamT0, legalN: cands.length };
+  }`,
+    );
+  }
   fs.writeFileSync(path.join(dstDir, 'index.js'), idx);
 }
 
@@ -109,6 +121,15 @@ if (!hp.includes('__GD_HANDPLAN_BUDGET__')) {
         }
         break; // hard time cap
       }`,
+  );
+  hp = hp.replace(
+    '  const softClock = handplanSoftClock();\n  const t0 = Date.now();',
+    `  const softClock = handplanSoftClock();
+  const t0 = Date.now();
+  if (typeof process !== 'undefined' && process.env.GD_EVAL_DECIDE_TRACE === '1' && globalThis.__GD_EVAL_DECIDE_TRACE_ACTIVE__) {
+    globalThis.__GD_HANDPLAN_BUDGET__ = globalThis.__GD_HANDPLAN_BUDGET__ || {};
+    globalThis.__GD_HANDPLAN_BUDGET__.decomposeEntry = { softClock, noWallclock: process.env.GD_HANDPLAN_NO_WALLCLOCK === '1' };
+  }`,
   );
   fs.writeFileSync(path.join(dstDir, 'handplan.js'), hp);
 }

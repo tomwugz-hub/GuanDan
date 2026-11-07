@@ -78,6 +78,7 @@ export async function runTraceTarget({
     recordedSubsetAtStep: subsetActions.find((a) => a.step === step && a.seat === seat) || null,
     env: envAndModules([...specs, `decide@${instrumentedVer}`]),
     budgetCaps: globalThis.__GD_HANDPLAN_BUDGET__ || null,
+    beamProbe: globalThis.__GD_BEAM_PROBE__ || null,
     decide: {
       moveKey: fin?.best?.key ?? null,
       tags: rec?.tags,
