@@ -1,7 +1,6 @@
 /**
  * 自对局公用：与网页版完全相同的对局逻辑（play/core.js），多种对手，不变量检查，局面复现，确定化 rollout。
  */
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -20,21 +19,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 export { ROOT, formatCard, snapshot, ctxFor, isLeading, sortHand };
 
-/** SHA256 over sorted policy/*.js (or backups/<name>/*.js) file bodies — eval reproducibility meta. */
-export function policySourceManifest(name = 'current') {
-  const dir = name === 'current' ? path.join(ROOT, 'policy') : path.join(ROOT, 'backups', name);
-  if (!fs.existsSync(path.join(dir, 'index.js'))) return { name, dir: null, sha256: null, files: {} };
-  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.js') && f !== 'search-index.js').sort();
-  const perFile = {};
-  const roll = crypto.createHash('sha256');
-  for (const f of files) {
-    const buf = fs.readFileSync(path.join(dir, f));
-    const h = crypto.createHash('sha256').update(buf).digest('hex');
-    perFile[f] = h;
-    roll.update(`${f}\0${h}\0`);
-  }
-  return { name, dir, sha256: roll.digest('hex'), files: perFile };
-}
+export { policySourceManifest } from '../scripts/experiments/r169/eval-meta.mjs';
 
 export function loadDecideStamp(name = 'current') {
   if (name === 'current') return null;

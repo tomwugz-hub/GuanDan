@@ -46,14 +46,28 @@ function main() {
     }
     return Object.keys(diff).length ? diff : null;
   })();
+  const same = (x, y) => x === y;
+  const configParityOk = same(A.meta?.a, B.meta?.a)
+    && same(A.meta?.b, B.meta?.b)
+    && same(A.meta?.seed0, B.meta?.seed0)
+    && same(A.meta?.deals, B.meta?.deals)
+    && same(A.meta?.policySource?.a?.sha256, B.meta?.policySource?.a?.sha256)
+    && same(A.meta?.policySource?.b?.sha256, B.meta?.policySource?.b?.sha256)
+    && same(A.meta?.node, B.meta?.node)
+    && envDiff == null;
   const metaParity = {
+    configParityOk,
     aSpec: { runA: A.meta?.a, runB: B.meta?.a },
     bSpec: { runA: A.meta?.b, runB: B.meta?.b },
+    seed0: { runA: A.meta?.seed0, runB: B.meta?.seed0 },
     policyShaA: { runA: A.meta?.policySource?.a?.sha256, runB: B.meta?.policySource?.a?.sha256 },
     policyShaB: { runA: A.meta?.policySource?.b?.sha256, runB: B.meta?.policySource?.b?.sha256 },
-    wallMs: { runA: A.meta?.wallMs, runB: B.meta?.wallMs },
-    node: { runA: A.meta?.node, runB: B.meta?.node },
     envDiff,
+    node: { runA: A.meta?.node, runB: B.meta?.node },
+    informational: {
+      wallMs: { runA: A.meta?.wallMs, runB: B.meta?.wallMs },
+      pid: { runA: A.meta?.pid, runB: B.meta?.pid },
+    },
   };
   const out = {
     fpA: A.meta?.fingerprint,

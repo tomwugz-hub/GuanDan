@@ -10,7 +10,8 @@
 import crypto from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { runTasks, dealTasks, pairedStats } from './pool.mjs';
-import { loadDecide, loadDecideStamp, policySourceManifest } from './lib.mjs';
+import { loadDecide } from './lib.mjs';
+import { buildArenaDumpMeta } from '../scripts/experiments/r169/eval-meta.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((s) => { const [k, v] = s.replace(/^--/, '').split(/=(.*)/s); return [k, v ?? '1']; }));
 const spec = (x0) => {
@@ -94,46 +95,7 @@ export function fingerprintDeals(dealRows) {
   return crypto.createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex');
 }
 
-/** All GD_* entries from process.env (eval audit; no secrets). */
-export function collectGdEnv(env = process.env) {
-  return Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith('GD_')).sort(([a], [b]) => a.localeCompare(b)));
-}
-
-export function policySpecBackupName(spec0 = 'current') {
-  const x = spec0.split('#')[0];
-  if (x === 'current') return 'current';
-  if (['random', 'greedy', 'jev', 'startlux'].includes(x)) return null;
-  return x;
-}
-
-export function buildArenaDumpMeta({ a, b, deals, seed0, tribute, matchLen, threads, ckpt, fingerprint, wallMs, env = process.env }) {
-  const gd = collectGdEnv(env);
-  const aName = policySpecBackupName(a);
-  const bName = policySpecBackupName(b);
-  return {
-    a,
-    b,
-    deals,
-    seed0,
-    tribute,
-    matchLen,
-    threads: threads ?? null,
-    ckpt: ckpt || null,
-    fingerprint,
-    wallMs: wallMs ?? null,
-    node: process.version,
-    pid: process.pid,
-    policySource: {
-      ...(aName ? { a: policySourceManifest(aName) } : {}),
-      ...(bName ? { b: policySourceManifest(bName) } : {}),
-    },
-    versionsStamp: {
-      ...(aName && aName !== 'current' ? { a: loadDecideStamp(aName) } : {}),
-      ...(bName && bName !== 'current' ? { b: loadDecideStamp(bName) } : {}),
-    },
-    env: gd,
-  };
-}
+export { collectGdEnv, buildArenaDumpMeta } from '../scripts/experiments/r169/eval-meta.mjs';
 
 export function fmtArena(r) {
   const pct = (x) => (100 * x).toFixed(1);

@@ -14,7 +14,6 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 cd "$ROOT"
 export GD_R95="${GD_R95:-5}"
 export GD_ENDGAME_NO_WALLCLOCK="${GD_ENDGAME_NO_WALLCLOCK:-1}"
-export GD_HANDPLAN_NO_WALLCLOCK="${GD_HANDPLAN_NO_WALLCLOCK:-1}"
 
 OLD="${OLD_BASELINE_NAME:-r169-baseline-c77-nw}"
 SEED0="${SEED0:-26990000}"
