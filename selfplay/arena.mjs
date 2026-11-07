@@ -10,7 +10,7 @@
 import crypto from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { runTasks, dealTasks, pairedStats } from './pool.mjs';
-import { loadDecide } from './lib.mjs';
+import { loadDecide, loadDecideStamp, policySourceManifest } from './lib.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((s) => { const [k, v] = s.replace(/^--/, '').split(/=(.*)/s); return [k, v ?? '1']; }));
 const spec = (x0) => {
@@ -94,6 +94,47 @@ export function fingerprintDeals(dealRows) {
   return crypto.createHash('sha256').update(lines.join('\n'), 'utf8').digest('hex');
 }
 
+/** All GD_* entries from process.env (eval audit; no secrets). */
+export function collectGdEnv(env = process.env) {
+  return Object.fromEntries(Object.entries(env).filter(([k]) => k.startsWith('GD_')).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+export function policySpecBackupName(spec0 = 'current') {
+  const x = spec0.split('#')[0];
+  if (x === 'current') return 'current';
+  if (['random', 'greedy', 'jev', 'startlux'].includes(x)) return null;
+  return x;
+}
+
+export function buildArenaDumpMeta({ a, b, deals, seed0, tribute, matchLen, threads, ckpt, fingerprint, wallMs, env = process.env }) {
+  const gd = collectGdEnv(env);
+  const aName = policySpecBackupName(a);
+  const bName = policySpecBackupName(b);
+  return {
+    a,
+    b,
+    deals,
+    seed0,
+    tribute,
+    matchLen,
+    threads: threads ?? null,
+    ckpt: ckpt || null,
+    fingerprint,
+    wallMs: wallMs ?? null,
+    node: process.version,
+    pid: process.pid,
+    policySource: {
+      ...(aName ? { a: policySourceManifest(aName) } : {}),
+      ...(bName ? { b: policySourceManifest(bName) } : {}),
+    },
+    versionsStamp: {
+      ...(aName && aName !== 'current' ? { a: loadDecideStamp(aName) } : {}),
+      ...(bName && bName !== 'current' ? { b: loadDecideStamp(bName) } : {}),
+    },
+    env: gd,
+  };
+}
+
 export function fmtArena(r) {
   const pct = (x) => (100 * x).toFixed(1);
   return `${r.a} vs ${r.b}: ${r.deals} 副（换座位配对），A 胜 ${r.wins}/${r.deals} = ${pct(r.winRate.mean)}% [95% CI ${pct(r.winRate.lo)}–${pct(r.winRate.hi)}]，` +
@@ -116,28 +157,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (rawOut) {
     const allDeals = (r.raw || []).flatMap((w) => w.deals || []);
     const fp = fingerprintDeals(allDeals);
+    const wallMs = Date.now() - t0;
     const payload = {
-      meta: {
+      meta: buildArenaDumpMeta({
         a: args.a || 'current',
         b: args.b || 'pre-selfplay-audit',
         deals: Number(args.deals || 400),
         seed0: Number(args.seed0 || 500000),
         tribute,
         matchLen,
-        threads: threads ?? null,
-        ckpt: ckpt || null,
+        threads,
+        ckpt,
         fingerprint: fp,
-        env: {
-          GD_R95: process.env.GD_R95 ?? null,
-          GD_R169: process.env.GD_R169 ?? null,
-          GD_ENDGAME_NO_WALLCLOCK: process.env.GD_ENDGAME_NO_WALLCLOCK ?? null,
-        },
-      },
+        wallMs,
+      }),
       summary: fmtArena(r),
       deals: allDeals.slice().sort((x, y) => dealSortKey(x).localeCompare(dealSortKey(y))),
       rawWorkers: r.raw,
     };
     writeFileSync(rawOut, JSON.stringify(payload));
-    console.error(`[arena] wrote raw dump: ${rawOut} (deals=${allDeals.length} fingerprint=${fp})`);
+    console.error(`[arena] wrote raw dump: ${rawOut} (deals=${allDeals.length} fingerprint=${fp} wallMs=${wallMs} gdFlags=${Object.keys(payload.meta.env).length})`);
   }
 }

@@ -22,15 +22,32 @@ SEED0="${SEED0:-26991000}"
 DEALS="${DEALS:-512}"
 RUNS="${RUNS:-2}"
 OUTDIR="${OUTDIR:-$ROOT/selfplay/logs/r169-arena-trace}"
+# Eval defaults (override in PRE; do not rely on inherited shell after VM fork / resume).
+export GD_R95="${GD_R95:-5}"
+export GD_ENDGAME_NO_WALLCLOCK="${GD_ENDGAME_NO_WALLCLOCK:-1}"
+export GD_HANDPLAN_NO_WALLCLOCK="${GD_HANDPLAN_NO_WALLCLOCK:-1}"
+export GD_R169="${GD_R169:-0}"
+export GD_R170="${GD_R170:-0}"
+# ARENA_ENV_STRICT=1 mirrors resume-cap2: env -i + only listed GD_* (clears stale inherited flags).
+ARENA_ENV_STRICT="${ARENA_ENV_STRICT:-0}"
 mkdir -p "$OUTDIR"
 
 run_arena() {
   local tag="$1"
   local raw="$OUTDIR/arena-${tag}-${SEED0}-d${DEALS}.json"
   echo "=== $tag A=$A_SPEC B=$B_SPEC raw -> $raw ==="
-  # shellcheck disable=SC2086
-  ( eval "$PRE" node selfplay/arena.mjs --a="$A_SPEC" --b="$B_SPEC" --deals="$DEALS" --seed0="$SEED0" \
+  local -a cmd=( node selfplay/arena.mjs --a="$A_SPEC" --b="$B_SPEC" --deals="$DEALS" --seed0="$SEED0" \
       --tribute --matchLen=8 --threads=1 --collect=1 --dump-raw="$raw" )
+  if [[ "$ARENA_ENV_STRICT" == "1" ]]; then
+    # shellcheck disable=SC2086
+    ( eval "$PRE" env -i HOME="$HOME" PATH="$PATH" USER="${USER:-}" LANG="${LANG:-C.UTF-8}" \
+        GD_R95="$GD_R95" GD_ENDGAME_NO_WALLCLOCK="$GD_ENDGAME_NO_WALLCLOCK" \
+        GD_HANDPLAN_NO_WALLCLOCK="$GD_HANDPLAN_NO_WALLCLOCK" GD_R169="$GD_R169" GD_R170="$GD_R170" \
+        "${cmd[@]}" )
+  else
+    # shellcheck disable=SC2086
+    ( eval "$PRE" "${cmd[@]}" )
+  fi
 }
 
 for ((r = 1; r <= RUNS; r++)); do

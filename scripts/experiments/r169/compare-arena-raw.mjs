@@ -36,10 +36,30 @@ function main() {
   }
   const A = load(pa);
   const B = load(pb);
+  const envDiff = (() => {
+    const ea = A.meta?.env || {};
+    const eb = B.meta?.env || {};
+    const keys = [...new Set([...Object.keys(ea), ...Object.keys(eb)])].sort();
+    const diff = {};
+    for (const k of keys) {
+      if (ea[k] !== eb[k]) diff[k] = { a: ea[k] ?? null, b: eb[k] ?? null };
+    }
+    return Object.keys(diff).length ? diff : null;
+  })();
+  const metaParity = {
+    aSpec: { runA: A.meta?.a, runB: B.meta?.a },
+    bSpec: { runA: A.meta?.b, runB: B.meta?.b },
+    policyShaA: { runA: A.meta?.policySource?.a?.sha256, runB: B.meta?.policySource?.a?.sha256 },
+    policyShaB: { runA: A.meta?.policySource?.b?.sha256, runB: B.meta?.policySource?.b?.sha256 },
+    wallMs: { runA: A.meta?.wallMs, runB: B.meta?.wallMs },
+    node: { runA: A.meta?.node, runB: B.meta?.node },
+    envDiff,
+  };
   const out = {
     fpA: A.meta?.fingerprint,
     fpB: B.meta?.fingerprint,
     sameFingerprint: A.meta?.fingerprint === B.meta?.fingerprint,
+    metaParity,
     firstDiffs: [],
   };
   const keys = [...new Set([...A.deals.keys(), ...B.deals.keys()])].sort();
@@ -57,7 +77,15 @@ function main() {
     const oa = (da.order || []).join(',');
     const ob = (db.order || []).join(',');
     if (pa !== pb || oa !== ob) {
-      out.firstDiffs.push({ key: k, pointsA: da.points, pointsB: db.points, orderA: da.order, orderB: db.order });
+      out.firstDiffs.push({
+        key: k,
+        pointsA: da.points,
+        pointsB: db.points,
+        orderA: da.order,
+        orderB: db.order,
+        stepsA: da.steps ?? null,
+        stepsB: db.steps ?? null,
+      });
       if (++n >= limit) break;
     }
   }
