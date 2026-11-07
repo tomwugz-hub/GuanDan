@@ -19,6 +19,17 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 export { ROOT, formatCard, snapshot, ctxFor, isLeading, sortHand };
 
+export { policySourceManifest } from '../scripts/experiments/r169/eval-meta.mjs';
+
+export function loadDecideStamp(name = 'current') {
+  if (name === 'current') return null;
+  try {
+    return fs.readFileSync(path.join(HERE, '.versions', name, '.stamp'), 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 // ---------- policy 版本 ----------
 const versionCache = new Map();
 /** 'current' 或 backups/ 下的目录名（如 pre-activity）。旧版复制到 selfplay/.versions/<name>/ 并改写相对导入。 */
@@ -175,6 +186,9 @@ export function playDeal(seed, agents, { onDecision = null, stopAt = null, level
     if (!!ctx.partnerCombo !== !!tableIsPartner) viol('partnerDetect', step, `ctx.partnerCombo=${!!ctx.partnerCombo} table=${!!tableIsPartner}`);
     if (!leading && lastT && lastT.seat !== r.lastPlayer) viol('lastPlayer', step, `trickPlays last ${lastT.seat} vs lastPlayer ${r.lastPlayer}`);
     const t0 = performance.now();
+    if (process.env.GD_EVAL_BEAM_WORK_COLLECT === '1' || process.env.GD_EVAL_BEAM_WORK_TRACE === '1') {
+      try { delete globalThis.__GD_SEARCH_BEAM_WORK__; } catch { /* eval */ }
+    }
     const rec = agents[seat].act(g, seat);
     const ms = rec.ms ?? performance.now() - t0;
     const move = rec.move;

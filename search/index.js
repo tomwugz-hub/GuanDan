@@ -110,6 +110,8 @@ function cloneCtx(ctx, move) {
 
 /**
  * 短 rollout：只前进几步启发式，不改变策略层结论权重。
+ * Eval note: no Date.now() or env gates — bounded only by caller `depth` and legal `generateCandidates` size per step.
+ * beamSearch always passes depth=1 (one reply-ply heuristic sweep per root candidate).
  * @param {object} ctx
  * @param {{ cards: object[], combo: object }} move
  * @param {number} [depth]
@@ -138,21 +140,69 @@ export function shortRollout(ctx, move, depth = 2) {
 }
 
 /**
+ * Eval-only beam budget (default production: wall clock).
+ * Budget unit: **root legal candidates scored** (one shortRollout per candidate), not inner rollout nodes.
+ * GD_SEARCH_NO_WALLCLOCK=1 → fixed cap on scored candidates; GD_SEARCH_BEAM_FIXED_NODES overrides.
+ * GD_EVAL_BEAM_TIMEMS forces wall path for sensitivity tests only.
+ */
+const EVAL_SEARCH_BEAM_NODE_CAP = 128;
+
+function resolveBeamWorkBudget({ beam = 8, timeMs = 35 } = {}) {
+  if (typeof process === 'undefined') return { mode: 'wallMs', timeMs, maxNodes: null };
+  const fixed = process.env.GD_SEARCH_BEAM_FIXED_NODES;
+  const noWall = process.env.GD_SEARCH_NO_WALLCLOCK === '1';
+  if (fixed != null && fixed !== '') {
+    const n = Math.max(1, Number(fixed) || beam);
+    return { mode: 'fixedNodes', maxNodes: n, timeMs: null };
+  }
+  if (noWall) return { mode: 'fixedNodes', maxNodes: EVAL_SEARCH_BEAM_NODE_CAP, timeMs: null };
+  return { mode: 'wallMs', timeMs, maxNodes: null };
+}
+
+function emitBeamWorkMeta(payload) {
+  if (typeof process === 'undefined' || process.env.GD_EVAL_BEAM_WORK_TRACE !== '1') return;
+  try { globalThis.__GD_SEARCH_BEAM_WORK__ = payload; } catch { /* eval */ }
+}
+
+/**
  * 窄束搜索，返回按启发式排序的前 beam 着。
  * @param {object} ctx
  * @param {{ beam?: number, timeMs?: number }} [opts]
  * @returns {{ move: object, value: number }[]}
  */
 export function beamSearch(ctx, { beam = 8, timeMs = 35 } = {}) {
-  const t0 = Date.now();
+  const effectiveTimeMs = (typeof process !== 'undefined' && process.env.GD_EVAL_BEAM_TIMEMS)
+    ? Number(process.env.GD_EVAL_BEAM_TIMEMS)
+    : timeMs;
+  const budget = resolveBeamWorkBudget({ beam, timeMs: effectiveTimeMs });
+  const t0 = budget.mode === 'wallMs' ? Date.now() : 0;
   const cands = generateCandidates(ctx);
   const scored = [];
+  let nodes = 0;
   for (const m of cands) {
-    if (Date.now() - t0 > timeMs) break;
+    if (budget.mode === 'wallMs') {
+      if (Date.now() - t0 > budget.timeMs) break;
+    } else if (nodes >= budget.maxNodes) break;
     scored.push({ move: m, value: shortRollout(ctx, m, 1) });
+    nodes++;
   }
   scored.sort((a, b) => b.value - a.value);
-  return scored.slice(0, beam);
+  const out = scored.slice(0, beam);
+  emitBeamWorkMeta({
+    mode: budget.mode,
+    beam,
+    timeMs: budget.timeMs ?? effectiveTimeMs,
+    maxNodes: budget.maxNodes,
+    budgetUnit: 'rootCandidatesScored',
+    shortRolloutDepth: 1,
+    shortRolloutWallClock: false,
+    candidateN: cands.length,
+    scoredN: scored.length,
+    returnedN: out.length,
+    wallCutoff: budget.mode === 'wallMs' && scored.length < cands.length,
+    nodeCutoff: budget.mode === 'fixedNodes' && scored.length < cands.length,
+  });
+  return out;
 }
 
 /**

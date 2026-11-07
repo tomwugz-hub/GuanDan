@@ -29,7 +29,7 @@ import { minPlays, restAfter, usesWild, wildFillers } from './shape.js';
 import { r42SfPotential } from './tribute.js';
 import { moveFinish, feedAfter, winProb, finishLine, safety } from './lookahead.js';
 import { decompose, decomposeCounts, comboKey } from './handplan.js';
-import { endgameApplies, solveEndgame, mkey as egKey } from './endgame.js';
+import { endgameApplies, solveEndgame, r169Gate, mkey as egKey } from './endgame.js';
 const LA_CACHE = new WeakMap();
 function laCache(ctx) { let c = LA_CACHE.get(ctx); if (!c) { c = new Map(); LA_CACHE.set(ctx, c); } return c; }
 
@@ -4249,12 +4249,26 @@ export function decide(ctx = {}) {
   }
   // r19 修正 F：残局（在打座位都 ≤3 张）用穷举/完全信息搜索覆盖启发式，只在严格更好时改
   // r156（GD_R156，默认 0）：自创正交轴「残局穷举加预算」——异于 r34（只改门槛 E）。bit1 maxWorlds 120→300、nodeBudget 4e4→1.2e5、timeMs 60→160、minWorlds 6→12；bit2 再加倍 timeMs/nodeBudget；bit4 门槛每座≤4（仅与加预算同开）；bit8 改走阈值 0.01→0.05（少改启发式）。保留 sticky GD_R95=5。
+  // r169（GD_R169，默认 0）：非对称更早残局穷举 —— 本方/搭档短手 + 敌手上界（见 r169Gate）；与 r34/r156 正交；bit1 K=5，bit2 敌 E=5，bit4 侧向门控，bit8 敌上界 +GD_R169X_E8（默认 +2）。仅当 egMax 宽于 baseEgMax 时用 GD_R169X_* 紧预算；原残局区域（maxEach≤baseEgMax）仍用默认 solveEndgame 参数。GD_R169X_* 不改 r95 过牌/压牌成本。
   const m156 = (() => { const v = typeof process !== 'undefined' ? process.env?.GD_R156 : undefined; return v == null ? 0 : Number(v) || 0; })();
-  if (R7('GD_R19F', 1) && endgameApplies(full, (m156 & 1) && (m156 & 4) ? 4 : (r34Mode() & 1 ? R34('E', 4) : 3))) {
+  const m169 = (() => { const v = typeof process !== 'undefined' ? process.env?.GD_R169 : undefined; return v == null ? 0 : Number(v) || 0; })();
+  const baseEgMax = (m156 & 1) && (m156 & 4) ? 4 : (r34Mode() & 1 ? R34('E', 4) : 3);
+  let r169Active = false;
+  let egMax = baseEgMax;
+  if (m169) {
+    const g = r169Gate(full, m169);
+    if (g.ok) { r169Active = true; egMax = g.maxEach; }
+  }
+  // Only use r169 tighter solveEndgame budgets when the gate widens maxEach above the legacy path (baseEgMax). Same region as classic ≤3/≤4: keep default solver params — avoids surprise cost on unchanged territory.
+  const r169Widened = r169Active && egMax > baseEgMax;
+  if (R7('GD_R19F', 1) && endgameApplies(full, egMax)) {
     const all = uniqueByCards(cands);
-    const eg = (m156 & 1) ? solveEndgame(full, all, { maxWorlds: 300, nodeBudget: (m156 & 2) ? 240000 : 120000, timeMs: (m156 & 2) ? 320 : 160, minWorlds: 12 }) : solveEndgame(full, all);
+    const r169B = { maxWorlds: Number(process.env?.GD_R169X_MAXW ?? 180), nodeBudget: Number(process.env?.GD_R169X_NODES ?? 80000), timeMs: Number(process.env?.GD_R169X_MS ?? 110), minWorlds: Number(process.env?.GD_R169X_MINW ?? 4) };
+    const eg = (m156 & 1) ? solveEndgame(full, all, { maxWorlds: 300, nodeBudget: (m156 & 2) ? 240000 : 120000, timeMs: (m156 & 2) ? 320 : 160, minWorlds: 12 }) : (r169Widened ? solveEndgame(full, all, r169B) : solveEndgame(full, all));
     if (m156 && eg && eg.best && process.env?.GD_R156_LOG && !sameMove(eg.best, best)) process.stderr.write('R156TRIG\n');
-    if (eg && eg.best && eg.bestValue > (eg.values.get(egKey(best)) ?? -1e9) + ((m156 & 8) ? 0.05 : 0.01)) {
+    if (r169Widened && eg && eg.best && process.env?.GD_R169_LOG && !sameMove(eg.best, best)) process.stderr.write('R169TRIG\n');
+    const thrDelta = ((m156 & 8) ? 0.05 : 0.01) + (r169Widened ? Number(process.env?.GD_R169X_THR ?? 0) : 0);
+    if (eg && eg.best && eg.bestValue > (eg.values.get(egKey(best)) ?? -1e9) + thrDelta) {
       const before = eg.values.get(egKey(best));
       best = eg.best;
       bestTags = ['endgame'];
