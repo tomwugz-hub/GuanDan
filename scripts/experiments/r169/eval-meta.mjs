@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sharedSearchManifest } from './search-beam-manifest.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const EVAL_META_ROOT = path.resolve(HERE, '../../..');
@@ -146,5 +147,6 @@ export function buildArenaDumpMeta({ a, b, deals, seed0, tribute, matchLen, thre
       ...(bName && bName !== 'current' ? { b: readVersionsStamp(bName) } : {}),
     },
     env: gd,
+    sharedSearch: sharedSearchManifest(),
   };
 }

@@ -1,6 +1,7 @@
 /** Shared eval trace target replay (main thread or worker). */
 import { playMatch, playDeal, makeAgent, loadDecide, dealSeedOf, nextPre, ctxFor } from '../../../selfplay/lib.mjs';
 import { captureLiveCtx, envAndModules } from './live-ctx-capture.mjs';
+import { sharedSearchManifest } from './search-beam-manifest.mjs';
 import { fingerprintTrace } from './decide-trace-emit.mjs';
 import { recordDecision } from './match-action-record.mjs';
 
@@ -8,17 +9,8 @@ function parseVer(spec) {
   return spec.includes('@') ? spec.split('@')[1] : 'current';
 }
 
-export async function runTraceTarget({
-  prefixJobs = [],
-  target,
-  instrumentedVer,
-  warm = 'arena',
-}) {
+export async function buildHaltedState({ prefixJobs = [], target, warm = 'arena' }) {
   const { matchSeed, cfg, dealIdx, step, seat, specs } = target;
-  delete globalThis.__GD_HANDPLAN_BUDGET__;
-  const allSpecs = [...new Set([...specs, ...prefixJobs.flatMap((j) => j.specs), `decide@${instrumentedVer}`])];
-  for (const s of allSpecs) await loadDecide(parseVer(s));
-
   const tributeRows = [];
   let pre;
 
@@ -55,6 +47,21 @@ export async function runTraceTarget({
     stopAt: step,
     onDecision: (d) => subsetActions.push(recordDecision(cfg, { ...d, dealSeed: ds, dealIdx })),
   });
+  return { halted, pre, tributeRows, dealSeed: ds, subsetActions, agents };
+}
+
+export async function runTraceTarget({
+  prefixJobs = [],
+  target,
+  instrumentedVer,
+  warm = 'arena',
+}) {
+  const { matchSeed, cfg, dealIdx, step, seat, specs } = target;
+  delete globalThis.__GD_HANDPLAN_BUDGET__;
+  const allSpecs = [...new Set([...specs, ...prefixJobs.flatMap((j) => j.specs), `decide@${instrumentedVer}`])];
+  for (const s of allSpecs) await loadDecide(parseVer(s));
+
+  const { halted, tributeRows, dealSeed: ds, subsetActions } = await buildHaltedState({ prefixJobs, target, warm });
   const liveCtx = captureLiveCtx(halted.g, seat);
   process.env.GD_EVAL_DECIDE_TRACE = '1';
   process.env.GD_EVAL_TRACE_META = `${matchSeed}:${dealIdx}:${step}:${seat}`;
@@ -79,6 +86,8 @@ export async function runTraceTarget({
     env: envAndModules([...specs, `decide@${instrumentedVer}`]),
     budgetCaps: globalThis.__GD_HANDPLAN_BUDGET__ || null,
     beamProbe: globalThis.__GD_BEAM_PROBE__ || null,
+    searchBeamWork: globalThis.__GD_SEARCH_BEAM_WORK__ || null,
+    sharedSearch: sharedSearchManifest(),
     decide: {
       moveKey: fin?.best?.key ?? null,
       tags: rec?.tags,

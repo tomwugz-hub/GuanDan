@@ -1,12 +1,11 @@
 #!/usr/bin/env node
 /**
- * Single-variable differential: live search/index.js beamSearch timeMs (Date.now, not NW-gated).
- *
- *   node scripts/experiments/r169/trace-beam-differential.mjs [--warm=match|arena]
+ * Frozen-fixture beam time sweep: identical handIds + candidate order per row.
  */
 import { writeFileSync } from 'node:fs';
-import { runTraceTarget } from './trace-target-core.mjs';
 import { buildTributeArenaJobs, slicePrefixJobs, arenaSpec } from './arena-jobs.mjs';
+import { buildFrozenBeamFixture, decideOnFrozenFixture } from './beam-fixture.mjs';
+import { sharedSearchManifest } from './search-beam-manifest.mjs';
 
 const args = Object.fromEntries(process.argv.slice(2).map((s) => {
   const m = s.replace(/^--/, '').match(/^([^=]+)=(.*)$/s);
@@ -33,59 +32,69 @@ const prefixJobs = warm === 'arena'
   : [];
 
 const beamTimes = (args.beamTimes || '1,3,5,10,15,20,40,80,200').split(',').map(Number);
+const baseEnv = {
+  GD_R95: '5',
+  GD_ENDGAME_NO_WALLCLOCK: '1',
+  GD_HANDPLAN_NO_WALLCLOCK: '1',
+  GD_R169: '0',
+  GD_R170: '0',
+  GD_EVAL_BEAM_WORK_TRACE: '1',
+};
 
-function bombRankFromReport(r) {
-  const k = r?.decide?.moveKey || r?.trace?.final?.best?.key;
-  const m = k?.match(/^bomb:([^:{]+)/);
-  return m ? m[1] : null;
+function bombRank(key) {
+  const m = key?.match(/^bomb:([^:{]+)/);
+  return m?.[1] ?? null;
 }
 
-function bombScores(r) {
-  const bs = r?.trace?.final?.bombs || [];
+function bombScores(trace) {
+  const bs = trace?.final?.bombs || [];
   const j = bs.find((x) => x.key.startsWith('bomb:J:'));
-  const kk = bs.find((x) => /^bomb:K:\{[^,]+,[^,]+,[^,]+,[^}]+\}$/.test(x.key));
-  return { J: j?.score ?? null, K: kk?.score ?? null, top: r?.trace?.final?.best };
-}
-
-async function runOne(timeMs, cpuSpinMs = 0) {
-  delete globalThis.__GD_BEAM_PROBE__;
-  delete globalThis.__GD_HANDPLAN_BUDGET__;
-  process.env.GD_EVAL_BEAM_TIMEMS = String(timeMs);
-  if (cpuSpinMs > 0) {
-    const end = Date.now() + cpuSpinMs;
-    while (Date.now() < end) { /* eval load */ }
-  }
-  const r = await runTraceTarget({ prefixJobs, target, instrumentedVer: instrumented, warm });
-  return {
-    timeMs,
-    cpuSpinMs,
-    bombRank: bombRankFromReport(r),
-    scores: bombScores(r),
-    beamProbe: globalThis.__GD_BEAM_PROBE__ || null,
-    budget: globalThis.__GD_HANDPLAN_BUDGET__ || null,
-    decideMs: r.decide?.ms,
-  };
+  const k = bs.find((x) => /^bomb:K:\{[^,]+,[^,]+,[^,]+,[^}]+\}$/.test(x.key));
+  return { J: j?.score ?? null, K: k?.score ?? null, top: trace?.final?.best };
 }
 
 async function main() {
+  const frozen = await buildFrozenBeamFixture({
+    target, prefixJobs, warm, instrumentedVer: instrumented, cardIdStart: 1,
+  });
   const sweep = [];
-  for (const t of beamTimes) sweep.push(await runOne(t));
-  const strictObs = { run1_c6e0: { move: 'bomb:K', ms: 29.5, wallMs: 2390728 }, run2_5d36: { move: 'bomb:J', ms: 10.3, wallMs: 455990 } };
+  for (const timeMs of beamTimes) {
+    const row = await decideOnFrozenFixture(frozen, instrumented, {
+      envPatch: { ...baseEnv, GD_EVAL_BEAM_TIMEMS: String(timeMs) },
+    });
+    sweep.push({
+      timeMs,
+      bombRank: bombRank(row.bestKey),
+      bestKey: row.bestKey,
+      bestScore: row.bestScore,
+      scores: bombScores(row.trace),
+      beamProbe: row.beamProbe,
+      searchBeamWork: row.searchBeamWork,
+      budgetCaps: row.budgetCaps,
+      parity: row.parity,
+      decideMs: row.decide?.ms,
+    });
+  }
   const flip = sweep.filter((s) => s.bombRank === 'K');
+  const allParity = sweep.every((s) => s.parity.handIdsMatch && s.parity.candidateOrderMatch);
+  const budgetObserved = sweep.some((s) => s.budgetCaps != null);
+  const deficiencies = [];
+  if (!allParity) deficiencies.push('handIds or candidate order diverged across sweep rows');
+  if (!budgetObserved) deficiencies.push('handplan budget/clock-entry not observed (may be inactive under NW=1)');
+  deficiencies.push('historic strict run1 beam truncation at step not directly logged; flip correlation is not wall-clock proof');
   const report = {
-    hypothesis: 'live search/index.js beamSearch(Date.now, timeMs:20) partial scoring under CPU delay inverts bomb ranks; handplan/endgame NW-gated',
-    target: { matchSeed, cfg, dealIdx, step, seat, dealSeed: matchSeed * 16 + dealIdx },
-    ungatedDeps: [{ module: 'search/index.js', fn: 'beamSearch', gate: 'none (not GD_*_NO_WALLCLOCK)' }],
-    strictParityObserved: strictObs,
+    hypothesis: 'beamSearch wallMs truncates shortRollout scoring order → K/J invert at low effective timeMs',
+    fixture: frozen.fixture,
+    sharedSearch: sharedSearchManifest(),
+    strictParityObserved: { run1_c6e0: { move: 'bomb:K', ms: 29.5 }, run2_5d36: { move: 'bomb:J', ms: 10.3 } },
     sweep,
     flipToK: flip,
-    result: flip.length
-      ? `K chosen when beamTimeMs in [${flip.map((f) => f.timeMs).join(',')}]`
-      : 'No K in sweep; beam time alone did not flip (blocker or needs concurrent load)',
-    methodDeficiency: flip.length ? null : 'Sweep uses isolated process; may need in-decide contention not just pre-spin',
+    fixtureParityOk: allParity,
+    result: flip.length ? `K when timeMs in [${flip.map((f) => f.timeMs).join(',')}] on frozen ctx` : 'no K in sweep',
+    methodDeficiency: deficiencies,
   };
   writeFileSync(out, JSON.stringify(report, null, 2));
-  console.log(JSON.stringify({ out, flip: flip.map((f) => ({ t: f.timeMs, rank: f.bombRank, probe: f.beamProbe })) }, null, 2));
+  console.log(JSON.stringify({ out, fixtureParityOk: allParity, flip: flip.map((f) => f.timeMs), handIds: frozen.fixture.handIds }, null, 2));
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });
