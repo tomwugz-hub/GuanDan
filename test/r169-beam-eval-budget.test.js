@@ -6,6 +6,8 @@ import assert from 'node:assert/strict';
 import { arenaSpec } from '../scripts/experiments/r169/arena-jobs.mjs';
 import { sharedSearchManifest } from '../scripts/experiments/r169/search-beam-manifest.mjs';
 import { buildFrozenBeamFixture, decideOnFrozenFixture } from '../scripts/experiments/r169/beam-fixture.mjs';
+import { STRICT_EVAL_SEARCH, SEARCH_BEAM_NODE_CAP } from '../scripts/experiments/r169/eval-strict-envelope.mjs';
+import { beamSearch } from '../search/index.js';
 
 const a = 'r169-cap2-current';
 const b = 'r169-cap2-base';
@@ -75,22 +77,82 @@ test('26991027: fixed nodes重复 decide same bestKey and scores', async () => {
   assert.equal(bombRank(r1.bestKey), 'J');
 });
 
-test('26991017 step29: frozen FH8 under fixed nodes; wall ms can diverge', async () => {
+function rankIndex(ranked, keyPrefix) {
+  return ranked?.findIndex((r) => r.key === keyPrefix || r.key.startsWith(`${keyPrefix}:`)) ?? -1;
+}
+
+test('production beam default: wallMs path when GD_SEARCH_* unset', () => {
+  const saved = {};
+  for (const k of ['GD_SEARCH_NO_WALLCLOCK', 'GD_SEARCH_BEAM_FIXED_NODES', 'GD_EVAL_BEAM_WORK_TRACE']) {
+    saved[k] = process.env[k];
+    delete process.env[k];
+  }
+  process.env.GD_EVAL_BEAM_WORK_TRACE = '1';
+  delete globalThis.__GD_SEARCH_BEAM_WORK__;
+  const hand = [{ id: 1, rank: '3', suit: 'S' }];
+  beamSearch({ hand, leading: true, levelRank: '2' }, { beam: 3, timeMs: 30 });
+  assert.equal(globalThis.__GD_SEARCH_BEAM_WORK__?.mode, 'wallMs');
+  for (const k of Object.keys(saved)) {
+    if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
+});
+
+test('strict eval envelope: fixed nodes cap 128 (not per-fixture tune)', () => {
+  const saved = {};
+  for (const k of ['GD_SEARCH_NO_WALLCLOCK', 'GD_SEARCH_BEAM_FIXED_NODES', 'GD_EVAL_BEAM_WORK_TRACE']) {
+    saved[k] = process.env[k];
+  }
+  process.env.GD_SEARCH_NO_WALLCLOCK = '1';
+  delete process.env.GD_SEARCH_BEAM_FIXED_NODES;
+  process.env.GD_EVAL_BEAM_WORK_TRACE = '1';
+  delete globalThis.__GD_SEARCH_BEAM_WORK__;
+  const hand = [{ id: 1, rank: '3', suit: 'S' }];
+  beamSearch({ hand, leading: true, levelRank: '2' }, { beam: 3, timeMs: 30 });
+  assert.equal(globalThis.__GD_SEARCH_BEAM_WORK__?.mode, 'fixedNodes');
+  assert.equal(globalThis.__GD_SEARCH_BEAM_WORK__?.maxNodes, SEARCH_BEAM_NODE_CAP);
+  for (const k of Object.keys(saved)) {
+    if (saved[k] === undefined) delete process.env[k];
+    else process.env[k] = saved[k];
+  }
+});
+
+test('26991017 step29: wall picks single:J@rank0; unified envelope keeps FH8', async () => {
   const frozen = await buildFrozenBeamFixture({
     target: fhTarget, warm: 'match', instrumentedVer: 'r169-cap2-current-instrumented', cardIdStart: 1,
   });
-  const def = await decideOnFrozenFixture(frozen, 'r169-cap2-current-instrumented', { envPatch: { ...baseEnv } });
   const wall = await decideOnFrozenFixture(frozen, 'r169-cap2-current-instrumented', {
     envPatch: { ...baseEnv, GD_EVAL_BEAM_TIMEMS: '1' },
   });
-  const fixed = await decideOnFrozenFixture(frozen, 'r169-cap2-current-instrumented', {
-    envPatch: {
-      ...baseEnv, GD_EVAL_BEAM_TIMEMS: '1', GD_SEARCH_NO_WALLCLOCK: '1', GD_SEARCH_BEAM_FIXED_NODES: '34',
-    },
+  const envelope = await decideOnFrozenFixture(frozen, 'r169-cap2-current-instrumented', {
+    envPatch: { ...baseEnv, ...STRICT_EVAL_SEARCH },
   });
-  assert.equal(def.parity.handIdsMatch, true);
-  assert.equal(leadType(def.bestKey), 'fullhouse');
-  assert.equal(leadType(fixed.bestKey), 'fullhouse');
-  assert.equal(def.bestKey, fixed.bestKey);
-  assert.notEqual(leadType(wall.bestKey), 'fullhouse');
+  const envRepeat = await decideOnFrozenFixture(frozen, 'r169-cap2-current-instrumented', {
+    envPatch: { ...baseEnv, ...STRICT_EVAL_SEARCH }, cpuSpinMs: 25,
+  });
+  const fullRanked = wall.trace?.final?.rankedTop8;
+  assert.equal(wall.parity.handIdsMatch, true);
+  assert.equal(leadType(wall.bestKey), 'single');
+  assert.ok(wall.bestKey.startsWith('single:J'));
+  assert.equal(rankIndex(fullRanked, 'single:J'), 0);
+  assert.equal(leadType(envelope.bestKey), 'fullhouse');
+  assert.equal(envelope.bestKey, envRepeat.bestKey);
+  assert.equal(envelope.searchBeamWork.mode, 'fixedNodes');
+  assert.equal(envelope.searchBeamWork.maxNodes, SEARCH_BEAM_NODE_CAP);
+  assert.equal(envelope.searchBeamWork.wallCutoff, false);
+});
+
+test('26991027: unified envelope stable J bomb (symmetric cap)', async () => {
+  const frozen = await buildFrozenBeamFixture({
+    target: bombTarget, warm: 'match', instrumentedVer: 'r169-cap2-base-instrumented', cardIdStart: 1,
+  });
+  const r1 = await decideOnFrozenFixture(frozen, 'r169-cap2-base-instrumented', {
+    envPatch: { ...baseEnv, ...STRICT_EVAL_SEARCH },
+  });
+  const r2 = await decideOnFrozenFixture(frozen, 'r169-cap2-base-instrumented', {
+    envPatch: { ...baseEnv, ...STRICT_EVAL_SEARCH }, cpuSpinMs: 30,
+  });
+  assert.equal(bombRank(r1.bestKey), 'J');
+  assert.equal(r1.bestKey, r2.bestKey);
+  assert.equal(r1.bestScore, r2.bestScore);
 });

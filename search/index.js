@@ -110,6 +110,8 @@ function cloneCtx(ctx, move) {
 
 /**
  * 短 rollout：只前进几步启发式，不改变策略层结论权重。
+ * Eval note: no Date.now() or env gates — bounded only by caller `depth` and legal `generateCandidates` size per step.
+ * beamSearch always passes depth=1 (one reply-ply heuristic sweep per root candidate).
  * @param {object} ctx
  * @param {{ cards: object[], combo: object }} move
  * @param {number} [depth]
@@ -138,9 +140,13 @@ export function shortRollout(ctx, move, depth = 2) {
 }
 
 /**
- * Eval-only beam budget (default production: wall clock). GD_SEARCH_NO_WALLCLOCK=1 disables Date.now
- * and uses a fixed candidate-node cap; GD_SEARCH_BEAM_FIXED_NODES overrides cap (symmetric validation).
+ * Eval-only beam budget (default production: wall clock).
+ * Budget unit: **root legal candidates scored** (one shortRollout per candidate), not inner rollout nodes.
+ * GD_SEARCH_NO_WALLCLOCK=1 → fixed cap on scored candidates; GD_SEARCH_BEAM_FIXED_NODES overrides.
+ * GD_EVAL_BEAM_TIMEMS forces wall path for sensitivity tests only.
  */
+const EVAL_SEARCH_BEAM_NODE_CAP = 128;
+
 function resolveBeamWorkBudget({ beam = 8, timeMs = 35 } = {}) {
   if (typeof process === 'undefined') return { mode: 'wallMs', timeMs, maxNodes: null };
   const fixed = process.env.GD_SEARCH_BEAM_FIXED_NODES;
@@ -149,7 +155,7 @@ function resolveBeamWorkBudget({ beam = 8, timeMs = 35 } = {}) {
     const n = Math.max(1, Number(fixed) || beam);
     return { mode: 'fixedNodes', maxNodes: n, timeMs: null };
   }
-  if (noWall) return { mode: 'fixedNodes', maxNodes: Math.max(beam, 8), timeMs: null };
+  if (noWall) return { mode: 'fixedNodes', maxNodes: EVAL_SEARCH_BEAM_NODE_CAP, timeMs: null };
   return { mode: 'wallMs', timeMs, maxNodes: null };
 }
 
@@ -187,6 +193,9 @@ export function beamSearch(ctx, { beam = 8, timeMs = 35 } = {}) {
     beam,
     timeMs: budget.timeMs ?? effectiveTimeMs,
     maxNodes: budget.maxNodes,
+    budgetUnit: 'rootCandidatesScored',
+    shortRolloutDepth: 1,
+    shortRolloutWallClock: false,
     candidateN: cands.length,
     scoredN: scored.length,
     returnedN: out.length,

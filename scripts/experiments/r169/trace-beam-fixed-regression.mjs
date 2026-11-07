@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { arenaSpec } from './arena-jobs.mjs';
 import { sharedSearchManifest } from './search-beam-manifest.mjs';
 import { buildFrozenBeamFixture, decideOnFrozenFixture } from './beam-fixture.mjs';
+import { STRICT_EVAL_SEARCH } from './eval-strict-envelope.mjs';
 
 const a = 'r169-cap2-current';
 const b = 'r169-cap2-base';
@@ -27,9 +28,10 @@ async function main() {
     },
     lead26991017: {
       wall1ms: pack(await decideOnFrozenFixture(fhFx, 'r169-cap2-current-instrumented', { envPatch: { ...base, GD_EVAL_BEAM_TIMEMS: '1' } })),
-      fixed34: pack(await decideOnFrozenFixture(fhFx, 'r169-cap2-current-instrumented', {
-        envPatch: { ...base, GD_EVAL_BEAM_TIMEMS: '1', GD_SEARCH_NO_WALLCLOCK: '1', GD_SEARCH_BEAM_FIXED_NODES: '34' },
+      strictEnvelope128: pack(await decideOnFrozenFixture(fhFx, 'r169-cap2-current-instrumented', {
+        envPatch: { ...base, ...STRICT_EVAL_SEARCH },
       }, { cpuSpinMs: 50 })),
+      wallRankedNote: 'under GD_EVAL_BEAM_TIMEMS=1 best is single:J @ ranked #0 (beam scoredN<34); FH8 needs full candidate scoring — historic truncation inference only',
     },
     methodDeficiency: ['historic beam cutoff not logged in strict raw', 'handplan budget often null under NW=1'],
   };
