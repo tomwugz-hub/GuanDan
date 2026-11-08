@@ -311,24 +311,58 @@ function afterMove(res) {
 
 function scheduleBots() {
   const my = token;
-  if (isOver(G) || G.round.currentSeat === HUMAN) { botBusy = false; render(); return; }
+  if (isOver(G) || tribMode || tributePending(G) || G.round.currentSeat === HUMAN) {
+    botBusy = false;
+    render();
+    return;
+  }
   botBusy = true;
   render();
+  const delay = Math.max(0, Number($('speed').value) || 400);
   setTimeout(async () => {
     if (my !== token) return;
     let res;
-    if (engineMode() === 'jev') res = await botStepJev(my);
-    else res = botStepDecide(G);
-    if (my !== token || !res) return;
-    botBusy = false;
-    afterMove(res);
-  }, Number($('speed').value));
+    try {
+      try {
+        if (engineMode() === 'jev') res = await botStepJev(my);
+        else res = botStepDecide(G);
+      } catch (err) {
+        console.error('[guandan-play] bot step error', err);
+        try { res = botStepDecide(G); } catch { res = null; }
+      }
+      if (my !== token) return;
+      if (!res?.ok) {
+        const seat = G.round.currentSeat;
+        const fb = isLeading(G) ? [sortHand(G.round.hands[seat], G.match.levelRank).slice(-1)[0]] : [];
+        res = play(G, seat, fb, { by: 'decide', reason: 'bot recovery' });
+      }
+      if (my !== token || !res?.ok) {
+        if (my === token) {
+          botBusy = false;
+          toast(res?.reason || '机器人出牌失败');
+          render();
+        }
+        return;
+      }
+      botBusy = false;
+      afterMove(res);
+    } catch (err) {
+      console.error('[guandan-play] bot schedule error', err);
+      if (my === token) { botBusy = false; render(); }
+    }
+  }, delay);
 }
 
 async function botStepJev(my) {
   const seat = G.round.currentSeat;
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 12_000);
   try {
-    const resp = await fetch('api/jev', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot(G, seat)) });
+    const resp = await fetch('api/jev', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(snapshot(G, seat)),
+      signal: ac.signal,
+    });
     const out = await resp.json();
     if (my !== token) return null;
     const cards = cardsFromStrings(G.round.hands[seat], out.cards);
@@ -337,7 +371,7 @@ async function botStepJev(my) {
       const res = play(G, seat, cards, { by: 'jev', coach: c, reason: out.label || '', preferCombo: { type: out.type } });
       if (res.ok) return res;
     }
-  } catch (e) { /* 回退 decide */ }
+  } catch (e) { /* 回退 decide */ } finally { clearTimeout(t); }
   if (my !== token) return null;
   return botStepDecide(G);
 }
