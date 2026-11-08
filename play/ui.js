@@ -1,6 +1,6 @@
 /** 浏览器界面：玩家坐南（座位 0），其余三家由 decide（或 Jev）出牌。 */
 import {
-  newGame, startDeal, play, botStepDecide, coachMove, snapshot, isLeading, isOver, sortHand,
+  newGame, startDeal, play, botStepDecide, recoverBotPlay, coachMove, snapshot, isLeading, isOver, sortHand,
   moveText, moveKey, interpretPlay, cardsFromStrings, flagToCase, SEAT_NAMES, PLACE_NAMES, formatCard, labelCombo,
   tributePending, tributeGive, gameLogJsonl, archiveDeal, tributeReturn, autoTribute, returnChoices, botReturnCard,
 } from './core.js';
@@ -8,8 +8,11 @@ import { isWildCard } from '../engine/ranks.js';
 import {
   HUMAN_SEAT,
   shouldYieldPlayToHuman,
-  repairBotBusyForHuman,
+  repairBotBusy,
   botBusyAfterStaleCallback,
+  isBotCallbackCurrent,
+  inferTributeUiMode,
+  shouldRescheduleBotsAfterFailure,
 } from './bot-busy.js';
 
 const $ = (id) => document.getElementById(id);
@@ -23,6 +26,9 @@ let flagTarget = null;
 let flagBtn = null;
 let jevAvailable = false;
 let botBusy = false;
+/** Invalidates in-flight bot callbacks when deal/token or scheduler restarts. */
+let botScheduleGen = 0;
+let botFailureStreak = 0;
 let flags = loadFlags();
 // 进贡界面状态：null | 'give'（看/确认进贡）| 'return'（你选还贡牌）| 'summary'（显示结果，点“开始出牌”）| 'resist'
 let tribMode = null;
@@ -98,10 +104,54 @@ function abandonStaleBot(my) {
   if (!botBusy) render();
 }
 
+/** Re-open tribute UI if engine is in tribute but tribMode was lost (avoids “思考中” with no controls). */
+function repairTributeUi() {
+  if (!G || tribMode || isOver(G) || !tributePending(G)) return;
+  const mode = inferTributeUiMode({
+    tributeState: G.tributeState,
+    tributePending: true,
+    humanSeat: HUMAN,
+  });
+  if (!mode) return;
+  const ts = G.tributeState;
+  tribMode = mode;
+  if (mode === 'give') {
+    const mine = ts.plan.gives.find((g) => g.from === HUMAN);
+    giveIds = new Set(mine ? [mine.card.id] : []);
+    selected = new Set(giveIds);
+  } else if (mode === 'return') {
+    eligIds = new Set(returnChoices(G, HUMAN).map((c) => c.id));
+  }
+  renderTribute();
+}
+
+function finishBotScheduleFailure(myToken, myGen) {
+  botBusy = false;
+  if (!G) { render(); return; }
+  const state = {
+    isOver: isOver(G),
+    tribMode,
+    tributePending: tributePending(G),
+    currentSeat: G.round.currentSeat,
+    humanSeat: HUMAN,
+  };
+  if (shouldRescheduleBotsAfterFailure(state)
+    && isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })
+    && botFailureStreak < 12) {
+    botFailureStreak += 1;
+    scheduleBots();
+    return;
+  }
+  botFailureStreak = 0;
+  if (shouldRescheduleBotsAfterFailure(state)) toast('机器人出牌异常，请刷新或开始新比赛');
+  render();
+}
+
 function render() {
   const r = G.round;
   const m = G.match;
-  botBusy = repairBotBusyForHuman({
+  repairTributeUi();
+  botBusy = repairBotBusy({
     isOver: isOver(G),
     tribMode,
     tributePending: tributePending(G),
@@ -332,13 +382,15 @@ function doHuman(cards) {
 }
 
 function afterMove(res) {
+  botFailureStreak = 0;
   render();
   if (res.finished) { archiveDeal(G); persistGame(); showEnd(); return; }
   scheduleBots();
 }
 
 function scheduleBots() {
-  const my = token;
+  const myToken = token;
+  const myGen = ++botScheduleGen;
   if (shouldYieldPlayToHuman({
     isOver: isOver(G),
     tribMode,
@@ -354,42 +406,43 @@ function scheduleBots() {
   render();
   const delay = Math.max(0, Number($('speed').value) || 400);
   setTimeout(async () => {
-    if (my !== token) { abandonStaleBot(my); return; }
+    if (!isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })) {
+      abandonStaleBot(myToken);
+      return;
+    }
     let res;
     try {
       try {
-        if (engineMode() === 'jev') res = await botStepJev(my);
+        if (engineMode() === 'jev') res = await botStepJev(myToken, myGen);
         else res = botStepDecide(G);
       } catch (err) {
         console.error('[guandan-play] bot step error', err);
-        try { res = botStepDecide(G); } catch { res = null; }
+        try { res = recoverBotPlay(G, { detail: String(err?.message || err) }); } catch { res = null; }
       }
-      if (my !== token) { abandonStaleBot(my); return; }
+      if (!isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })) {
+        abandonStaleBot(myToken);
+        return;
+      }
+      if (!res?.ok) res = recoverBotPlay(G, { detail: res?.reason || 'bot recovery' });
+      if (!isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })) {
+        abandonStaleBot(myToken);
+        return;
+      }
       if (!res?.ok) {
-        const seat = G.round.currentSeat;
-        const fb = isLeading(G) ? [sortHand(G.round.hands[seat], G.match.levelRank).slice(-1)[0]] : [];
-        res = play(G, seat, fb, { by: 'decide', reason: 'bot recovery' });
-      }
-      if (my !== token || !res?.ok) {
-        if (my === token) {
-          botBusy = false;
-          toast(res?.reason || '机器人出牌失败');
-          render();
-        } else {
-          abandonStaleBot(my);
-        }
+        toast(res?.reason || '机器人出牌失败');
+        finishBotScheduleFailure(myToken, myGen);
         return;
       }
       botBusy = false;
       afterMove(res);
     } catch (err) {
       console.error('[guandan-play] bot schedule error', err);
-      if (my === token) { botBusy = false; render(); }
+      finishBotScheduleFailure(myToken, myGen);
     }
   }, delay);
 }
 
-async function botStepJev(my) {
+async function botStepJev(myToken, myGen) {
   const seat = G.round.currentSeat;
   const ac = new AbortController();
   const t = setTimeout(() => ac.abort(), 12_000);
@@ -400,7 +453,7 @@ async function botStepJev(my) {
       signal: ac.signal,
     });
     const out = await resp.json();
-    if (my !== token) return null;
+    if (!isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })) return null;
     const cards = cardsFromStrings(G.round.hands[seat], out.cards);
     if (cards && out.engine === 'jev') {
       const c = coachMove(G, seat);
@@ -408,7 +461,7 @@ async function botStepJev(my) {
       if (res.ok) return res;
     }
   } catch (e) { /* 回退 decide */ } finally { clearTimeout(t); }
-  if (my !== token) return null;
+  if (!isBotCallbackCurrent({ scheduleGen: botScheduleGen, capturedGen: myGen, token, capturedToken: myToken })) return null;
   return botStepDecide(G);
 }
 
@@ -691,6 +744,7 @@ function closeMenu() { $('menu').classList.remove('open'); $('topbar').classList
 function startNew() {
   persistGame();
   token += 1;
+  botScheduleGen += 1;
   botBusy = false;
   // ?seed=N：可复现的比赛（测试/复盘用，只对打开页面后的第一场生效）
   const qs = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
@@ -708,6 +762,7 @@ function nextDeal() {
   $('endModal').classList.add('hidden');
   if (G.lastResult?.matchOver) { startNew(); return; }
   token += 1;
+  botScheduleGen += 1;
   botBusy = false;
   G.progression = $('progression').checked;
   G.tribute = G.progression;

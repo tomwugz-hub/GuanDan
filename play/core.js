@@ -8,6 +8,7 @@ import { beats } from '../engine/compare.js';
 import { createMatch, createRound } from '../engine/state.js';
 import { singleStrength, isWildCard, parseLevel } from '../engine/ranks.js';
 import { decide, labelCombo } from '../policy/index.js';
+import { legalMoves } from '../engine/legal.js';
 import { newStdMatch, applyStdResult, planTribute, applyGives, returnOptions, isLegalReturn, minReturn } from '../engine/tributeStd.js';
 import { chooseReturn as policyReturn } from '../policy/tribute.js';
 
@@ -509,12 +510,35 @@ export function botStepDecide(g) {
   const seat = g.round.currentSeat;
   const c = coachMove(g, seat);
   const res = play(g, seat, c.move.cards || [], { by: 'decide', coach: c, reason: c.reason, preferCombo: c.move.combo });
-  if (!res.ok) {
-    // 兜底：理论上不会发生；改为过牌或出最小单张
-    const fb = isLeading(g) ? [sortHand(g.round.hands[seat], g.match.levelRank).slice(-1)[0]] : [];
-    return play(g, seat, fb, { by: 'decide', coach: c, reason: `兜底（${res.reason}）` });
-  }
+  if (!res.ok) return recoverBotPlay(g, { coach: c, detail: res.reason });
   return res;
+}
+
+/**
+ * Last-resort bot play so scheduleBots never stalls on a bot seat (used by ui + decide fallback).
+ * @returns {{ ok: boolean, reason?: string, entry?: object, finished?: boolean }}
+ */
+export function recoverBotPlay(g, { coach = null, detail = '' } = {}) {
+  const seat = g.round.currentSeat;
+  const lv = g.match.levelRank;
+  const leading = isLeading(g);
+  if (isOver(g) || tributePending(g) || seat !== g.round.currentSeat) {
+    return { ok: false, reason: '无法兜底：不在可出牌阶段' };
+  }
+  const label = detail ? `兜底（${detail}）` : '兜底';
+  const lm = legalMoves(g.round.hands[seat], leading ? null : g.round.lastCombo, lv, leading);
+  if (lm.length) {
+    const m = lm[lm.length - 1];
+    const res = play(g, seat, m.cards || [], {
+      by: 'decide',
+      coach,
+      reason: label,
+      preferCombo: m.combo,
+    });
+    if (res.ok) return res;
+  }
+  const fb = leading ? [sortHand(g.round.hands[seat], lv).slice(-1)[0]].filter(Boolean) : [];
+  return play(g, seat, fb, { by: 'decide', coach, reason: label });
 }
 
 /** 由牌面字符串在手牌中找到对应的牌对象。 */

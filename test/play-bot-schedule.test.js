@@ -10,6 +10,8 @@ import {
   humanPlayPhase,
   botBusyAfterStaleCallback,
   repairBotBusyForHuman,
+  repairBotBusy,
+  isBotCallbackCurrent,
 } from '../play/bot-busy.js';
 
 /** Minimal model of pre-fix scheduleBots callback (guandan-play-90568fce7f). */
@@ -132,4 +134,19 @@ test('render repair clears botBusy on human play phase', () => {
     }),
     true,
   );
+});
+
+test('repairBotBusy clears when tribMode blocks scheduler', () => {
+  const busy = repairBotBusy({
+    isOver: false,
+    tribMode: 'return',
+    tributePending: true,
+    currentSeat: HUMAN_SEAT,
+    botBusy: true,
+  });
+  assert.equal(busy, false);
+});
+
+test('stale schedule generation does not match current', () => {
+  assert.equal(isBotCallbackCurrent({ scheduleGen: 2, capturedGen: 1, token: 0, capturedToken: 0 }), false);
 });
