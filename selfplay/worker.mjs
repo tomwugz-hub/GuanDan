@@ -1,6 +1,8 @@
 /** worker_threads 入口：跑对局（采集逐手记录）或 surprise rollout。 */
 import { parentPort, workerData } from 'node:worker_threads';
 import * as L from './lib.mjs';
+import { shouldCollectBeamWork, normalizeBeamWorkForRecord } from '../scripts/experiments/r169/beam-work-record.mjs';
+import { sharedSearchManifest } from '../scripts/experiments/r169/search-beam-manifest.mjs';
 
 const { task } = workerData;
 
@@ -13,6 +15,7 @@ function comboStr(c) {
 
 async function runDeals() {
   const out = { decisions: [], deals: [], violations: [] };
+  const searchSha = shouldCollectBeamWork() ? sharedSearchManifest().sha256 : null;
   for (const job of task.jobs) {
     const agents = [];
     for (let s = 0; s < 4; s++) agents.push(await L.makeAgent(job.specs[s], job.seed * 4 + s));
@@ -91,6 +94,7 @@ async function runDeals() {
         }
         if (d.leading) r.structAvail = legal.some((m) => ['straight', 'pairSeq', 'tripleSeq'].includes(m.combo.type));
         if (d.dealIdx != null) { r.dealIdx = d.dealIdx; r.tribDeal = !!d.g.tributeState?.plan?.gives?.length; }
+        if (shouldCollectBeamWork()) r.searchBeamWork = normalizeBeamWorkForRecord(globalThis.__GD_SEARCH_BEAM_WORK__, searchSha);
         recs.push(r);
     };
     // job.match = K：进贡比赛（K 副连续，名次/级数带到下一副）；否则独立单副
@@ -293,5 +297,12 @@ async function runSurprise() {
   return { surprises: results };
 }
 
-const fn = task.kind === 'surprise' ? runSurprise : task.kind === 'jevmc' ? runJevMC : task.kind === 'snapmc' ? runSnapMC : runDeals;
+/** Eval-only: prefix jobs + stopAt target decide trace (worker_threads path). */
+async function runTraceTarget() {
+  const { runTraceTarget: run } = await import('../scripts/experiments/r169/trace-target-core.mjs');
+  return run(task);
+}
+
+const fn = task.kind === 'traceTarget' ? runTraceTarget
+  : task.kind === 'surprise' ? runSurprise : task.kind === 'jevmc' ? runJevMC : task.kind === 'snapmc' ? runSnapMC : runDeals;
 fn().then((r) => parentPort.postMessage(r)).catch((e) => parentPort.postMessage({ error: String(e && e.stack || e) }));

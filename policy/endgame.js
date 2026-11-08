@@ -30,6 +30,45 @@ export function endgameApplies(ctx, maxEach = 3) {
   return true;
 }
 
+const envNum = (k, d) => {
+  const v = typeof process !== 'undefined' ? process.env?.[k] : undefined;
+  if (v == null || v === '') return d;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+
+/**
+ * r169（GD_R169）：非对称「更早残局」门控 —— 本方/搭档一侧短手 + 敌方有上界，不要求四家都 ≤3（与 r34 统一抬高每座上限、r156 纯加预算正交）。
+ * bits：bit1 K=5，否则 K=4；bit2 敌方上限 E=5，否则 E=4；bit4 侧向短手门控（min≤K 且 max≤TEAMMAX），否则要求双方均 ≤K；bit8 敌方上限再放宽 GD_R169X_E8（默认 +2，使 b9=1+8 与 b3=1+2 不同：E=4+2=6 vs E=5）。
+ * 返回 { ok, maxEach }：ok 时 maxEach = max(队短手上界, 敌上界) 供 endgameApplies 使用。
+ */
+export function r169Gate(ctx, bits) {
+  const cnt = ctx.remainingSeatCounts;
+  if (!cnt || cnt.length !== 4) return { ok: false, maxEach: 3 };
+  const me = ctx.seat ?? 0;
+  const partner = (me + 2) % 4;
+  const e1 = (me + 1) % 4;
+  const e3 = (me + 3) % 4;
+  const K = bits & 1 ? 5 : 4;
+  const E0 = bits & 2 ? 5 : 4;
+  const dE = bits & 8 ? envNum('GD_R169X_E8', 2) : 0;
+  const Ee = E0 + dE;
+  const teamMax = bits & 4 ? envNum('GD_R169X_TEAMMAX', 8) : K;
+
+  const sm = cnt[me];
+  const sp = cnt[partner];
+  for (const s of [e1, e3]) {
+    if (cnt[s] > 0 && cnt[s] > Ee) return { ok: false, maxEach: 3 };
+  }
+  let teamOk;
+  if (bits & 4) teamOk = Math.min(sm, sp) <= K && Math.max(sm, sp) <= teamMax;
+  else teamOk = Math.max(sm, sp) <= K;
+  if (!teamOk) return { ok: false, maxEach: 3 };
+
+  const maxEach = Math.max(bits & 4 ? teamMax : K, Ee);
+  return { ok: true, maxEach };
+}
+
 /**
  * @returns {null | { values: Map<string, number>, best: object, worlds: number }}
  *   values：根着法 key → 平均本方升级分
@@ -90,16 +129,19 @@ export function solveEndgame(ctx, moves, { maxWorlds = 120, nodeBudget = 40000, 
   const handKey = (h) => h.map(keyRS).sort().join('');
   const sum = new Map();
   const t0 = Date.now();
+  // Evaluation-only: GD_ENDGAME_NO_WALLCLOCK=1 disables Date.now-based early exit inside solveEndgame
+  // (world cap maxWorlds + nodeBudget + minWorlds still bound work; production default keeps wall clock).
+  const softClock = typeof process === 'undefined' || process.env?.GD_ENDGAME_NO_WALLCLOCK !== '1';
   let done = 0;
   for (const w of list) {
-    if (done >= minWorlds && Date.now() - t0 > timeMs) break;
+    if (softClock && done >= minWorlds && Date.now() - t0 > timeMs) break;
     nodes = 0;
     const hands = [[], [], [], []];
     hands[me] = ctx.hand.slice();
     others.forEach((s, i) => { hands[s] = w[i]; });
     const memo = new Map();
     const search = (st) => {
-      if (++nodes > nodeBudget || ((nodes & 255) === 0 && Date.now() - t0 > timeMs * 2)) throw new Error('budget');
+      if (++nodes > nodeBudget || (softClock && (nodes & 255) === 0 && Date.now() - t0 > timeMs * 2)) throw new Error('budget');
       const key = st.hands.map(handKey).join('|') + st.cur + '|' + (st.last ? st.last.type + st.last.rank + ':' + st.last.size + ':' + (st.last.length ?? '') : '-') + '|' + st.lp + '|' + st.pc + '|' + st.fin.join('');
       const hit = memo.get(key); if (hit !== undefined) return hit;
       const mvs = legalMoves(st.hands[st.cur], st.last, lv, !st.last);

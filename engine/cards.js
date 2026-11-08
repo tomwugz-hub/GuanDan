@@ -5,6 +5,11 @@ import { RANKS, SUITS, JOKER_BLACK, JOKER_RED, isJokerRank } from './ranks.js';
 
 let _id = 1;
 
+/** Eval/replay: reset monotonic card id allocator (selfplay deck builds are reproducible). */
+export function resetCardIdCounter(start = 1) {
+  _id = start;
+}
+
 /**
  * 构造一张牌。
  * @param {string} rank
