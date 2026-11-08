@@ -6,7 +6,7 @@ import { formatCard, makeDeck, shuffle, dealFourHands } from '../engine/cards.js
 import { classify, interpretAs, TYPES, isBombLike } from '../engine/combos.js';
 import { beats } from '../engine/compare.js';
 import { createMatch, createRound } from '../engine/state.js';
-import { singleStrength, isWildCard } from '../engine/ranks.js';
+import { singleStrength, isWildCard, parseLevel } from '../engine/ranks.js';
 import { decide, labelCombo } from '../policy/index.js';
 import { newStdMatch, applyStdResult, planTribute, applyGives, returnOptions, isLegalReturn, minReturn } from '../engine/tributeStd.js';
 import { chooseReturn as policyReturn } from '../policy/tribute.js';
@@ -158,7 +158,7 @@ export function startDeal(g) {
   g.dealNo += 1;
   if (g.progression) {
     if (g.std.matchOver) g.std = newStdMatch('2');
-    g.match.levelRank = g.std.level;
+    g.match.levelRank = parseLevel(g.std.level);
     g.match.teamLevel = g.std.teamLevel.slice();
     g.match.matchOver = false;
     g.match.winnerTeam = null;
@@ -363,7 +363,7 @@ export function snapshot(g, seat) {
  */
 export function interpretPlay(g, seat, cards, preferCombo = null) {
   const r = g.round;
-  const lv = g.match.levelRank;
+  const lv = parseLevel(g.match.levelRank);
   const leading = isLeading(g);
   if (!cards.length) return leading ? { ok: false, reason: '领出不能过牌' } : { ok: true, combo: { type: TYPES.PASS, rank: null, size: 0 } };
   if (!cards.every((c) => r.hands[seat].some((h) => h.id === c.id))) return { ok: false, reason: '手牌中没有这些牌' };

@@ -41,7 +41,8 @@ export function isJokerRank(rank) {
  * @returns {boolean}
  */
 export function isWildCard(card, levelRank) {
-  return !isJokerRank(card.rank) && card.rank === levelRank && card.suit === 'H';
+  const lv = parseLevel(levelRank);
+  return !isJokerRank(card.rank) && String(card.rank) === lv && card.suit === 'H';
 }
 
 /**
@@ -52,10 +53,12 @@ export function isWildCard(card, levelRank) {
  * @throws {Error} 未知点数
  */
 export function singleStrength(rank, levelRank) {
-  if (rank === JOKER_RED) return 100;
-  if (rank === JOKER_BLACK) return 99;
-  if (rank === levelRank) return 80;
-  const i = RANKS.indexOf(rank);
+  const r = String(rank);
+  const lv = parseLevel(levelRank);
+  if (r === JOKER_RED) return 100;
+  if (r === JOKER_BLACK) return 99;
+  if (r === lv) return 80;
+  const i = RANKS.indexOf(r);
   if (i < 0) throw new Error(`未知点数: ${rank}`);
   return i; // 2=0 … A=12
 }
@@ -78,8 +81,9 @@ export function seqIndex(rank) {
  * @returns {string}
  */
 export function nextLevelRank(levelRank) {
-  if (levelRank === 'A') return 'A';
-  const i = RANKS.indexOf(levelRank);
+  const lv = parseLevel(levelRank);
+  if (lv === 'A') return 'A';
+  const i = RANKS.indexOf(lv);
   return RANKS[i + 1];
 }
 
@@ -90,6 +94,7 @@ export function nextLevelRank(levelRank) {
  * @throws {Error} 非法级牌
  */
 export function parseLevel(levelRank) {
-  if (!RANKS.includes(levelRank)) throw new Error(`非法级牌: ${levelRank}`);
-  return levelRank;
+  const lv = String(levelRank);
+  if (!RANKS.includes(lv)) throw new Error(`非法级牌: ${levelRank}`);
+  return lv;
 }
