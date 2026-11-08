@@ -18,7 +18,7 @@
  *   打 A：头游方正在打 A（本副级牌 = A 且是自己的级）并且对家不是末游 → 过 A，整场结束。
  *   （“打 A 三次不过回 2”等地方规则未实现。）
  */
-import { JOKER_RED, RANKS, isJokerRank, isWildCard, singleStrength } from './ranks.js';
+import { JOKER_RED, RANKS, isJokerRank, isWildCard, singleStrength, parseLevel } from './ranks.js';
 
 export const teamOf = (s) => s % 2;
 export const NAT_LE10 = ['2', '3', '4', '5', '6', '7', '8', '9', '10'];
@@ -140,11 +140,13 @@ export function minReturn(hand, lv) {
 // ---------------- 标准升级 ----------------
 /** 新比赛状态。 */
 export function newStdMatch(startLevel = '2') {
-  return { teamLevel: [startLevel, startLevel], level: startLevel, levelTeam: null, matchOver: false, winnerTeam: null, prevOrder: null };
+  const lv = parseLevel(startLevel);
+  return { teamLevel: [lv, lv], level: lv, levelTeam: null, matchOver: false, winnerTeam: null, prevOrder: null };
 }
 
 function bump(lv, n) {
-  return RANKS[Math.min(RANKS.length - 1, RANKS.indexOf(lv) + n)];
+  const base = parseLevel(lv);
+  return RANKS[Math.min(RANKS.length - 1, RANKS.indexOf(base) + n)];
 }
 
 /** 头游方升级数：双上 3、头+三 2、头+末 1。 */

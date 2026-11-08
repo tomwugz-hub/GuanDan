@@ -26,13 +26,13 @@ export function createMatch({
   levelRank = '2',
   defenderTeam = 0,
 } = {}) {
-  parseLevel(levelRank);
+  const lv = parseLevel(levelRank);
   return {
     ruleset,
     config: rulesetConfig(ruleset),
-    levelRank,
+    levelRank: lv,
     defenderTeam,
-    teamLevel: [levelRank, levelRank],
+    teamLevel: [lv, lv],
     matchOver: false,
     winnerTeam: null,
     history: [],
