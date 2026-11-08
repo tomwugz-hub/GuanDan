@@ -45,3 +45,45 @@ export function repairBotBusyForHuman(state) {
   if (humanPlayPhase(state) && state.botBusy) return false;
   return state.botBusy;
 }
+
+/** Clear botBusy whenever the scheduler must yield (human / tribute / deal over). */
+export function repairBotBusy(state) {
+  if (!state.botBusy) return false;
+  if (shouldYieldPlayToHuman(state)) return false;
+  return state.botBusy;
+}
+
+/** Bot async callback is current for this deal + schedule generation. */
+export function isBotCallbackCurrent({
+  scheduleGen,
+  capturedGen,
+  token,
+  capturedToken,
+}) {
+  return scheduleGen === capturedGen && token === capturedToken;
+}
+
+/**
+ * Infer play tribute UI mode when engine still has tributePending but tribMode was lost.
+ * @returns {'resist'|'give'|'return'|null}
+ */
+export function inferTributeUiMode({ tributeState, tributePending, humanSeat = HUMAN_SEAT }) {
+  if (!tributePending || !tributeState) return null;
+  const { plan, phase } = tributeState;
+  if (!plan || plan.kind === 'none') return null;
+  if (plan.resisted) return 'resist';
+  if (phase === 'give') return 'give';
+  if (phase === 'return' && tributeState.pending?.some((x) => x.seat === humanSeat)) return 'return';
+  return null;
+}
+
+/** After bot step failure the loop must continue or south stays locked behind “思考中”. */
+export function shouldRescheduleBotsAfterFailure({
+  isOver,
+  tribMode,
+  tributePending,
+  currentSeat,
+  humanSeat = HUMAN_SEAT,
+}) {
+  return !isOver && !tribMode && !tributePending && currentSeat !== humanSeat;
+}
