@@ -5,9 +5,15 @@ import {
   tributePending, tributeGive, gameLogJsonl, archiveDeal, tributeReturn, autoTribute, returnChoices, botReturnCard,
 } from './core.js';
 import { isWildCard } from '../engine/ranks.js';
+import {
+  HUMAN_SEAT,
+  shouldYieldPlayToHuman,
+  repairBotBusyForHuman,
+  botBusyAfterStaleCallback,
+} from './bot-busy.js';
 
 const $ = (id) => document.getElementById(id);
-const HUMAN = 0;
+const HUMAN = HUMAN_SEAT;
 let G = null;
 let token = 0;
 let selected = new Set();
@@ -78,9 +84,31 @@ function cardEl(c, cls = '') {
 
 function engineMode() { return $('engine').value === 'jev' && jevAvailable ? 'jev' : 'decide'; }
 
+function abandonStaleBot(my) {
+  botBusy = botBusyAfterStaleCallback({
+    botBusy,
+    my,
+    token,
+    currentSeat: G.round.currentSeat,
+    humanSeat: HUMAN,
+    isOver: isOver(G),
+    tribMode,
+    tributePending: tributePending(G),
+  });
+  if (!botBusy) render();
+}
+
 function render() {
   const r = G.round;
   const m = G.match;
+  botBusy = repairBotBusyForHuman({
+    isOver: isOver(G),
+    tribMode,
+    tributePending: tributePending(G),
+    currentSeat: r.currentSeat,
+    humanSeat: HUMAN,
+    botBusy,
+  });
   $('level').textContent = m.levelRank;
   $('lvUs').textContent = m.teamLevel[0];
   $('lvThem').textContent = m.teamLevel[1];
@@ -311,7 +339,13 @@ function afterMove(res) {
 
 function scheduleBots() {
   const my = token;
-  if (isOver(G) || tribMode || tributePending(G) || G.round.currentSeat === HUMAN) {
+  if (shouldYieldPlayToHuman({
+    isOver: isOver(G),
+    tribMode,
+    tributePending: tributePending(G),
+    currentSeat: G.round.currentSeat,
+    humanSeat: HUMAN,
+  })) {
     botBusy = false;
     render();
     return;
@@ -320,7 +354,7 @@ function scheduleBots() {
   render();
   const delay = Math.max(0, Number($('speed').value) || 400);
   setTimeout(async () => {
-    if (my !== token) return;
+    if (my !== token) { abandonStaleBot(my); return; }
     let res;
     try {
       try {
@@ -330,7 +364,7 @@ function scheduleBots() {
         console.error('[guandan-play] bot step error', err);
         try { res = botStepDecide(G); } catch { res = null; }
       }
-      if (my !== token) return;
+      if (my !== token) { abandonStaleBot(my); return; }
       if (!res?.ok) {
         const seat = G.round.currentSeat;
         const fb = isLeading(G) ? [sortHand(G.round.hands[seat], G.match.levelRank).slice(-1)[0]] : [];
@@ -341,6 +375,8 @@ function scheduleBots() {
           botBusy = false;
           toast(res?.reason || '机器人出牌失败');
           render();
+        } else {
+          abandonStaleBot(my);
         }
         return;
       }
@@ -672,6 +708,7 @@ function nextDeal() {
   $('endModal').classList.add('hidden');
   if (G.lastResult?.matchOver) { startNew(); return; }
   token += 1;
+  botBusy = false;
   G.progression = $('progression').checked;
   G.tribute = G.progression;
   startDeal(G);
