@@ -11,6 +11,7 @@
 import { decomposeCounts } from './handplan.js';
 import { returnOptions } from '../engine/tributeStd.js';
 import { singleStrength } from '../engine/ranks.js';
+import { ruleTrig } from './nodeCompat.js';
 
 const r33Mode = () => { const v = typeof process !== 'undefined' ? process.env?.GD_R33 : undefined; return v == null ? 0 : Number(v) || 0; };
 const r81Mode = () => { const v = typeof process !== 'undefined' ? process.env?.GD_R81 : undefined; return v == null ? 0 : Number(v) || 0; };
@@ -85,7 +86,7 @@ export function chooseReturn(hand, info = {}, variant = DEFAULT_RETURN) {
         for (const c of byRank.values()) { if ((cnt.get(c.rank) || 0) !== 1 || c.rank === lv) continue;
           const s = decomposeCounts(hand.filter((x) => x.id !== c.id), lv, cache).cost; const str = singleStrength(c.rank, lv);
           if (s <= best.s + T + 1e-9 && (!alt || s < alt.s - 1e-9 || (Math.abs(s - alt.s) <= 1e-9 && str < alt.str))) alt = { c, s, str }; }
-        if (alt) { if (process.env?.GD_R136_LOG) process.stderr.write('R136TRIG\n'); return alt.c; } } } }
+        if (alt) { ruleTrig('GD_R136_LOG', 'R136TRIG\n'); return alt.c; } } } }
   // r142（#ret=r142_N，默认 0）：还贡最小点优先孤张（宽于 r136）——有可还天然孤张（该点 1 张、非级牌）且代价≤plan 最优+T → 还最小点孤张。bit1 主开关 T=1；bit2 T=3；bit4 plan 首选已是孤张时也改最小点孤张；bit8 仅还给敌方。
   { const m142 = String(variant).startsWith('r142_') ? Number(String(variant).slice(5)) || 0 : 0;
     const toEnemy = info.to == null || info.seat == null || (info.to % 2) !== (info.seat % 2);
@@ -95,7 +96,7 @@ export function chooseReturn(hand, info = {}, variant = DEFAULT_RETURN) {
         for (const c of byRank.values()) { if ((cnt.get(c.rank) || 0) !== 1 || c.rank === lv) continue;
           const s = decomposeCounts(hand.filter((x) => x.id !== c.id), lv, cache).cost; const str = singleStrength(c.rank, lv);
           if (s <= best.s + T + 1e-9 && (!alt || str < alt.str)) alt = { c, s, str }; }
-        if (alt && alt.c.rank !== best.c.rank) { if (process.env?.GD_R142_LOG) process.stderr.write('R142TRIG\n'); return alt.c; } } } }
+        if (alt && alt.c.rank !== best.c.rank) { ruleTrig('GD_R142_LOG', 'R142TRIG\n'); return alt.c; } } } }
   return best.c;
 }
 
