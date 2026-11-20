@@ -30,6 +30,7 @@ import { r42SfPotential } from './tribute.js';
 import { moveFinish, feedAfter, winProb, finishLine, safety } from './lookahead.js';
 import { decompose, decomposeCounts, comboKey } from './handplan.js';
 import { endgameApplies, solveEndgame, mkey as egKey } from './endgame.js';
+import { ruleTrig, ruleLog, envOpt, envFlag } from './nodeCompat.js';
 const LA_CACHE = new WeakMap();
 function laCache(ctx) { let c = LA_CACHE.get(ctx); if (!c) { c = new Map(); LA_CACHE.set(ctx, c); } return c; }
 
@@ -723,7 +724,7 @@ export function scoreMove(move, ctx, allMoves) {
       // r35 bit2（GD_R35，默认 0）：炸弹喂牌时下家敌人 ≤GD_R35X_N 张（先于搭档接） → 不给喂牌加分
       const m35v = typeof process !== 'undefined' ? process.env?.GD_R35 : undefined; const m35f = m35v == null ? 0 : Number(m35v) || 0;
       const nx35 = (ctx.remainingSeatCounts || [])[((ctx.seat ?? 0) + 1) % 4] ?? 27;
-      const r35Skip = !!(m35f & 2) && isBombLike(move.combo) && nx35 <= Number(process.env?.GD_R35X_N ?? 2);
+      const r35Skip = !!(m35f & 2) && isBombLike(move.combo) && nx35 <= Number(envOpt('GD_R35X_N') ?? 2);
       if (feed && bombOk && !r35Skip) {
         const p = winProb(move, ctx);
         if (p >= 0.3) {
@@ -2533,10 +2534,10 @@ export function decide(ctx = {}) {
     const X = (k, d) => { const e = typeof process !== 'undefined' ? process.env?.['GD_R78X_' + k] : undefined; return e == null ? d : Number(e); };
     const me = full.seat ?? 0; const cnt = full.remainingSeatCounts || []; const e1 = cnt[(me + 1) % 4]; const e2 = cnt[(me + 3) % 4]; const pc = cnt[(me + 2) % 4];
     const oneV2 = m78 && pc === 0 && e1 > 0 && e2 > 0; const hand = full.hand || [];
-    if (oneV2 && process.env.GD_R78_LOG) process.stderr.write('SEEN '+(full.leading?'L':'F')+(isPass(ranked[0]?.move)?'p':'m')+'\n');
+    if (oneV2) ruleLog('GD_R78_LOG', () => 'SEEN '+(full.leading?'L':'F')+(isPass(ranked[0]?.move)?'p':'m')+'\n');
     if (oneV2 && ranked[0]) {
       const top = ranked[0]; const emin = Math.min(e1, e2);
-      const set = (alt, tag) => { if (!alt || alt === top) return; if (process.env.GD_R78_LOG) process.stderr.write('TRIG '+tag+'\n'); alt.score = top.score + 1; alt.tags = (alt.tags || []).concat(tag); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; };
+      const set = (alt, tag) => { if (!alt || alt === top) return; ruleLog('GD_R78_LOG', () => 'TRIG '+tag+'\n'); alt.score = top.score + 1; alt.tags = (alt.tags || []).concat(tag); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; };
       const nb = ranked.filter((r) => r.score > -1e5 && !isPass(r.move) && !isBombLike(r.move.combo)).sort((a, b) => b.score - a.score);
       if (!full.leading && full.previous && !isPass(full.previous)) {
         if ((m78 & 1) && isPass(top.move) && !isBombLike(full.previous)) set(nb[0], 'r78Beat');
@@ -2740,7 +2741,7 @@ export function decide(ctx = {}) {
       const ms = _legalMoves(hand, full.previous, lvR, false).filter((m) => m.cards.length && m.cards.length < hand.length && !isBombLike(m.combo) && !ctrl(m))
         .sort((x, y) => st(x) - st(y));
       const pick = ms[0];
-      if (pick) { if (process.env?.GD_R88_LOG) process.stderr.write('R88TRIG\n'); best = pick; bestTags = ['r88GuardNext']; bestS = (top.score ?? 0) + 1; ranked.unshift({ move: pick, score: bestS, tags: bestTags }); }
+      if (pick) { ruleTrig('GD_R88_LOG', 'R88TRIG\n'); best = pick; bestTags = ['r88GuardNext']; bestS = (top.score ?? 0) + 1; ranked.unshift({ move: pick, score: bestS, tags: bestTags }); }
     } }
   // r89（GD_R89，默认 0）：自创正交轴「记牌领出控权」——领出时，在分差≤M 的非炸非走完单/对/三候选中，换成外面（未出且不在我手）可压它的同型张数最少者，以求保住领权（用 belief.remainingByRank 记牌；异于 r87 跟敌最小压、r86 甩牌节奏、r82 同型实现、r76–78 残局、r45/r50）。
   // bit1 仅首选为单/对时；bit2 首选为任何非炸型时（候选仍限单/对/三）；bit4 仅我手 ≤12 张；bit8 要求换后外面可压数=0（绝对大）。
@@ -2765,7 +2766,7 @@ export function decide(ctx = {}) {
           const sc = cand.map((r) => ({ r, b: beaters(r.move) })).sort((x, y) => x.b - y.b || y.r.score - x.r.score);
           const p = sc[0];
           if (p.r !== top && p.b < topB && (!(m89 & 8) || p.b === 0)) {
-            if (process.env?.GD_R89_LOG) process.stderr.write('R89TRIG\n');
+            ruleTrig('GD_R89_LOG', 'R89TRIG\n');
             p.r.score = top.score + 1; p.r.tags = (p.r.tags || []).concat('r89CountLead'); ranked.sort((x, y) => y.score - x.score); best = p.r.move; bestTags = p.r.tags; bestS = p.r.score;
           }
         }
@@ -2783,7 +2784,7 @@ export function decide(ctx = {}) {
       const cand = ranked.filter((r) => r.score > -1e5 && r.move.combo?.type === TYPES.STRAIGHT && r.score >= top.score - M
         && (!(m90 & 8) || (() => { try { return singleStrength(r.move.combo.rank, lvR) <= singleStrength('10', lvR); } catch { return false; } })()));
       if (cand.length) { const p = cand[0];
-        if (process.env?.GD_R90_LOG) process.stderr.write('R90TRIG\n');
+        ruleTrig('GD_R90_LOG', 'R90TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r90StraightLead'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r91（GD_R91，默认 0）：自创正交轴「领出同型最小点先走」——领出且首选为非炸非走完的单/对时，若分差≤M 内有同型更小点（singleStrength 更低）的候选，改领最小点（先清小牌、留大牌控权；异于 r59 孤单、r89 记牌控权、r82 同型同点实现、r90 顺子、r87 跟敌最小压、r45/r50）。
@@ -2798,7 +2799,7 @@ export function decide(ctx = {}) {
       const t0 = ss(top);
       const cand = ranked.filter((r) => r.score > -1e5 && r.move.combo?.type === tt && r.score >= top.score - M && ss(r) < t0);
       if (cand.length) { cand.sort((x, y) => ss(x) - ss(y) || y.score - x.score); const p = cand[0];
-        if (process.env?.GD_R91_LOG) process.stderr.write('R91TRIG\n');
+        ruleTrig('GD_R91_LOG', 'R91TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r91LowLead'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r92（GD_R92，默认 0）：自创正交轴「领出单改对」——领出且首选为非炸非走完单张时，若分差≤M 内有非炸对子候选，改领（分值最高的）对子（换牌型、一次走 2 张；异于 r91 同型最小点、r90 顺子、r59 孤单、r89 记牌控权、r82 同型实现、r45/r50）。
@@ -2812,7 +2813,7 @@ export function decide(ctx = {}) {
       const t0 = ss(top);
       const cand = ranked.filter((r) => r.score > -1e5 && r.move.combo?.type === TYPES.PAIR && !isBombLike(r.move.combo) && r.score >= top.score - M && (!(m92 & 8) || ss(r) <= t0));
       if (cand.length) { const p = cand[0];
-        if (process.env?.GD_R92_LOG) process.stderr.write('R92TRIG\n');
+        ruleTrig('GD_R92_LOG', 'R92TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r92PairLead'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r93（GD_R93，默认 0）：自创正交轴「跟敌贴边改压（结构不劣）」——跟敌非炸、首选过，分差≤M 内有非炸非走完压牌且压后 minPlays 不多于压前 → 改压（r84 贴边改过的镜像；异于 r47 压后≤K 手走完、r87 最小压、r88 跟对家、r89–r92 领出）。
@@ -2824,7 +2825,7 @@ export function decide(ctx = {}) {
       const M = (m93 & 2) ? X('M2', 600) : X('M', 150); const mp0 = minPlays(hand, lvR);
       const cand = ranked.filter((r) => r.score > -1e5 && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length && r.score >= top.score - M && (() => { const k = minPlays(restAfter(hand, r.move), lvR); return (m93 & 8) ? k < mp0 : k <= mp0; })());
       if (cand.length) { const p = cand[0];
-        if (process.env?.GD_R93_LOG) process.stderr.write('R93TRIG\n');
+        ruleTrig('GD_R93_LOG', 'R93TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r93SoftBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r94（GD_R94，默认 0）：自创正交轴「省炸：跟敌小牌不炸」——跟敌非炸、首选为非走完炸弹，敌出牌（单/对等）且出牌座位敌余张 ≥T、我手 ≥H，若有「过」候选分差≤M → 改过保炸（异于 r45/r50 炸回/压住、r75 中盘炸回、r80 炸选型、r84 贴边改过（非炸）、r93）。
@@ -2837,7 +2838,7 @@ export function decide(ctx = {}) {
       && hand.length >= X('H', 8) && ec >= ((m94 & 4) ? 12 : X('T', 8)) && (!(m94 & 8) || (full.previous.cards || []).length <= 2)) {
       const M = (m94 & 2) ? X('M2', 1500) : X('M', 400);
       const p = ranked.find((r) => r.score > -1e5 && isPass(r.move) && r.score >= top.score - M);
-      if (p) { if (process.env?.GD_R94_LOG) process.stderr.write('R94TRIG\n');
+      if (p) { ruleTrig('GD_R94_LOG', 'R94TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r94SaveBomb'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r95（GD_R95，默认 5，r95 SHIPPED）：自创正交轴「跟敌压牌按手牌规划成本选」——跟敌非炸、首选为非炸非走完压牌，分差≤M 内其他非炸压牌中，余牌 decompose 规划成本最低者若比首选低 ≥D → 改用（handplan 成本含拆炸/控制/逢人配惩罚；异于 r87 最小点、r93 minPlays 改压、r84 改过、r82 同型实现、领出 plan 权重）。
@@ -2854,7 +2855,7 @@ export function decide(ctx = {}) {
       const cand = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && (isPass(r.move) ? !!(m95 & 4) : (!isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length)));
       let p = null, pcBest = c0 - D;
       for (const r of cand) { const c = pc(r); if (c <= pcBest - 1e-9) { pcBest = c; p = r; } }
-      if (p) { if (process.env?.GD_R95_LOG) process.stderr.write('R95TRIG\n');
+      if (p) { ruleTrig('GD_R95_LOG', 'R95TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r95PlanBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r96（GD_R96，默认 0）：自创正交轴「领出按手牌规划成本选」——领出且首选非炸非走完时，分差≤M 内其他非炸非走完领出候选中，余牌 handplan.decompose 成本最低者若比首选低 ≥D → 改领（决策点为领出；异于 r95 跟敌、r89 记牌控权、r90 顺子、r91 最小点、r92 单改对、r59 孤单、r45/r50）。
@@ -2869,7 +2870,7 @@ export function decide(ctx = {}) {
       const cand = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length && (!(m96 & 8) || (r.move.cards || []).length >= n0));
       let p = null, pcBest = c0 - D;
       for (const r of cand) { const c = pc(r); if (c <= pcBest - 1e-9) { pcBest = c; p = r; } }
-      if (p) { if (process.env?.GD_R96_LOG) process.stderr.write('R96TRIG\n');
+      if (p) { ruleTrig('GD_R96_LOG', 'R96TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r96PlanLead'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r97（GD_R97，默认 0）：自创正交轴「非炸出牌省逢人配/省级牌王」——首选为非炸非走完且用到逢人配（bit2 起亦含任意级牌/大小王）时，分差≤M 内存在不用这些牌的非炸非走完候选 → 改用分最高者（保留万能/控制牌；领/跟均可，r95PlanBeat 跳过不扰动；异于 r80 炸选型、r82 同型实现、r95/r96 规划成本、r89 记牌控权）。
@@ -2881,7 +2882,7 @@ export function decide(ctx = {}) {
     if ((m97 & 1) && top && !isPass(top.move) && !isBombLike(top.move.combo) && !(top.tags || []).includes('r95PlanBeat') && (top.move.cards || []).length < hand.length && keep(top.move) && (!(m97 & 8) || full.leading)) {
       const M = (m97 & 4) ? X('M2', 1500) : X('M', 400);
       const p = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length && !keep(r.move));
-      if (p) { if (process.env?.GD_R97_LOG) process.stderr.write('R97TRIG\n');
+      if (p) { ruleTrig('GD_R97_LOG', 'R97TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r97SaveWild'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r98（GD_R98，默认 0）：自创正交轴「收官出牌顺序：先出难压的」——领出且首选非炸非走完、出后余牌恰剩 1 手（bit4 起 ≤2 手）时，分差≤M 内同样余牌≤K 手的非炸领出候选中，出牌主点 singleStrength 最高者若高于首选 → 改领（先打控制再走完；异于 r89–r92/r96 领出改写的减手/点数/牌型/规划成本，决策点仅收官两手序；不动 r95）。
@@ -2896,7 +2897,7 @@ export function decide(ctx = {}) {
       const M = (m98 & 2) ? X('M2', 1200) : X('M', 300); const s0 = st(top);
       let p = null, sb = s0;
       for (const r of ranked) { if (r === top || r.score <= -1e5 || r.score < top.score - M || isPass(r.move) || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue; const s1 = st(r); if (s1 > sb && mp(r) <= K) { sb = s1; p = r; } }
-      if (p) { if (process.env?.GD_R98_LOG) process.stderr.write('R98TRIG\n');
+      if (p) { ruleTrig('GD_R98_LOG', 'R98TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r98StrongFirst'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r99（GD_R99，默认 0）：自创正交轴「早盘跟敌小牌省控制牌改过」——跟敌非炸、敌出牌主点 singleStrength ≤T，首选为用到大小王或级牌（bit2 起亦含 A）的非炸压牌，我手 ≥H 张且两敌都 ≥E 张时，分差≤M 内「过」→ 改过（保控制牌到中后盘；异于 r84 贴边改过（无控制牌条件）、r97 换不用逢人配的压牌、r94 省炸、r87 最小压、r95 规划成本；不动 r95PlanBeat）。
@@ -2912,7 +2913,7 @@ export function decide(ctx = {}) {
       && (!(m99 & 8) || pv.type === TYPES.SINGLE || pv.type === TYPES.PAIR)) {
       const M = (m99 & 4) ? X('M2', 2000) : X('M', 600);
       const p = ranked.find((r) => r.score > -1e5 && isPass(r.move) && r.score >= top.score - M);
-      if (p) { if (process.env?.GD_R99_LOG) process.stderr.write('R99TRIG\n');
+      if (p) { ruleTrig('GD_R99_LOG', 'R99TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r99SaveCtl'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r100（GD_R100，默认 0）：自创正交轴「敌短手顶大压」——跟敌非炸、出牌敌余牌 ≤S 张（bit4 起 ≤8），首选为非炸非走完压牌时，分差≤M 内其他非炸压牌中主点 singleStrength 最高者若高于首选 → 改用（敌将走完时用大牌封顶减少其续出；异于 r87 最小压、r95 规划成本、r60 只能炸、r76 敌已头游、r99 改过、r98 领出；不动 r95PlanBeat）。
@@ -2928,7 +2929,7 @@ export function decide(ctx = {}) {
       && (!(m100 & 8) || pv.type === TYPES.SINGLE || pv.type === TYPES.PAIR)) {
       const M = (m100 & 2) ? X('M2', 1200) : X('M', 400); let p = null, sb = st(top);
       for (const r of ranked) { if (r === top || r.score <= -1e5 || r.score < top.score - M || isPass(r.move) || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue; const s1 = st(r); if (s1 > sb) { sb = s1; p = r; } }
-      if (p) { if (process.env?.GD_R100_LOG) process.stderr.write('R100TRIG\n');
+      if (p) { ruleTrig('GD_R100_LOG', 'R100TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r100CapShort'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r101（GD_R101，默认 0）：自创正交轴「对家短手让路」——跟敌非炸、对家余牌 ≤S 张且尚在场，首选为非炸非走完压牌且主点 singleStrength ≥ A（bit4 起不限点），我余牌 > S 时，分差≤M 内若有过 → 改过（把控制牌留下、让对家接手走牌；异于 r99 早盘省控按敌余牌、r84 贴边改过、r54/r65/r66 跟对家、r69 对家短不顶领出；不动 r95PlanBeat）。
@@ -2943,7 +2944,7 @@ export function decide(ctx = {}) {
       && ((m101 & 4) || tst >= singleStrength('A', lvR)) && (!(m101 & 8) || ls === (me + 3) % 4)) {
       const M = (m101 & 2) ? X('M2', 1500) : X('M', 500);
       const p = ranked.find((r) => r.score > -1e5 && isPass(r.move) && r.score >= top.score - M);
-      if (p) { if (process.env?.GD_R101_LOG) process.stderr.write('R101TRIG\n');
+      if (p) { ruleTrig('GD_R101_LOG', 'R101TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r101YieldMate'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r102（GD_R102，默认 0）：自创正交轴「跟敌拆组压 → 换不拆」——跟敌非炸单张（bit4 含对子），首选为非炸非走完压牌且其主点在手中张数多于压牌张数（拆对/拆三），分差≤M 内若有主点手中张数恰等于压牌张数的非炸压牌 → 改用（保持对子/三张结构；bit8 无此类时允许改过）。异于 r87 最小压、r100 顶大、r101 让路、r59 孤儿领出、r82 同型实现；不动 r95PlanBeat。
@@ -2959,7 +2960,7 @@ export function decide(ctx = {}) {
         const M = (m102 & 2) ? X('M2', 900) : X('M', 300);
         let p = ranked.find((r) => r.score > -1e5 && !isPass(r.move) && !isBombLike(r.move.combo) && r.move.combo?.rank != null && (r.move.cards || []).length === n && (byR.get(r.move.combo.rank) || 0) === n && (r.move.cards || []).length < hand.length && r.score >= top.score - M);
         if (!p && (m102 & 8)) p = ranked.find((r) => r.score > -1e5 && isPass(r.move) && r.score >= top.score - M);
-        if (p) { if (process.env?.GD_R102_LOG) process.stderr.write('R102TRIG\n');
+        if (p) { ruleTrig('GD_R102_LOG', 'R102TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r102KeepSet'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -2980,7 +2981,7 @@ export function decide(ctx = {}) {
       const M = (m103 & 2) ? X('M2', 900) : X('M', 300);
       const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && r.move.combo?.type === pv.type && r.move.combo?.rank != null
         && (r.move.cards || []).length < hand.length && beaters(r.move) === 0);
-      if (p) { if (process.env?.GD_R103_LOG) process.stderr.write('R103TRIG\n');
+      if (p) { ruleTrig('GD_R103_LOG', 'R103TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r103TopSeize'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r104（GD_R104，默认 0）：自创正交轴「末位拦截：我是最后可压者」——跟敌非炸、出牌敌为下家（对家与另一敌都已过，我过则下家敌直接回手领出），首选为过（非 r95PlanBeat）时，分差≤M 内若有非炸非走完压牌 → 改压分最高者（座位顺序「最后机会」条件；异于 r93 结构不劣改压、r103 记牌顶张、r47 压后≤K 手、r88 跟对家、r60 炸拦、r71 拦下家领出；不动 r95PlanBeat）。
@@ -2992,7 +2993,7 @@ export function decide(ctx = {}) {
       && (!(m104 & 4) || (rc[ls] != null && rc[ls] <= 10)) && (!(m104 & 8) || pv.type === TYPES.SINGLE || pv.type === TYPES.PAIR)) {
       const M = (m104 & 2) ? X('M2', 900) : X('M', 300);
       const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length);
-      if (p) { if (process.env?.GD_R104_LOG) process.stderr.write('R104TRIG\n');
+      if (p) { ruleTrig('GD_R104_LOG', 'R104TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r104LastStop'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r105（GD_R105，默认 0）：自创正交轴「大牌型跟敌接压」——跟敌非炸且敌出牌张数 ≥5（顺子/三带二/连对/钢板），首选为过（非 r95PlanBeat）时，分差≤M 内有同型非炸非走完压牌 → 改压分最高者（按牌型大小门控、无结构/座位/记牌条件；异于 r93 结构不劣改压、r103 记牌顶张单/对/三、r104 末位座位、r47 压后≤K 手、r61 对家出完；不动 r95PlanBeat）。
@@ -3005,7 +3006,7 @@ export function decide(ctx = {}) {
       && (!(m105 & 4) || hand.length >= 10) && (!(m105 & 8) || (rc[ls] != null && rc[ls] <= 12))) {
       const M = (m105 & 2) ? X('M2', 900) : X('M', 300);
       const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && r.move.combo?.type === pv.type && (r.move.cards || []).length < hand.length);
-      if (p) { if (process.env?.GD_R105_LOG) process.stderr.write('R105TRIG\n');
+      if (p) { ruleTrig('GD_R105_LOG', 'R105TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r105BigFollow'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r106（GD_R106，默认 0）：自创正交轴「敌报牌领出避型」——领出且首选非炸非走完、某敌余牌 n≤N（bit1 N=1：首选单张；bit4 N=2：首选张数≤2）且首选张数 ≤ 该敌余牌时，分差≤M 内若有张数 > 该敌余牌的非炸非走完领出 → 改领分最高者（按敌余牌张数避其可接的型；异于 r89–r92/r96/r98 领出改写的记牌/顺子/最小点/单改对/规划/顺序、r100 跟敌短手顶大；不动 r95PlanBeat）。
@@ -3019,7 +3020,7 @@ export function decide(ctx = {}) {
       if (ens.length) { const need = Math.max(...ens.map((s) => rc[s]));
         const M = (m106 & 2) ? X('M2', 900) : X('M', 300);
         const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length > need && (r.move.cards || []).length < hand.length);
-        if (p) { if (process.env?.GD_R106_LOG) process.stderr.write('R106TRIG\n');
+        if (p) { ruleTrig('GD_R106_LOG', 'R106TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r106AvoidShort'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; } }
     } }
   // r107（GD_R107，默认 0）：自创正交轴「上家敌出、对家可接时让对家」——跟敌非炸且出牌者为上家敌（对家尚未表态），首选为非炸非走完压牌（非 r95PlanBeat）、对家余牌 < 我余牌时，分差≤M 内「过」→ 改过（按座位+对家张数让接手；异于 r84 贴边改过无座位条件、r99 控制牌改过、r104 末位改压、r52/r54 压对家、r88 跟对家顶）。
@@ -3033,7 +3034,7 @@ export function decide(ctx = {}) {
       && (!(m107 & 4) || pc <= 8) && (!(m107 & 8) || (pv.rank != null && singleStrength(pv.rank, lvR) <= singleStrength('10', lvR)))) {
       const M = (m107 & 2) ? X('M2', 900) : X('M', 300);
       const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && isPass(r.move));
-      if (p) { if (process.env?.GD_R107_LOG) process.stderr.write('R107TRIG\n');
+      if (p) { ruleTrig('GD_R107_LOG', 'R107TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r107LetPartner'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r108（GD_R108，默认 0）：自创正交轴「敌头游后抢二游：跟剩余敌过→炸」——已有敌方出完（finishedOrder 含敌座）、对家未出完，跟剩余敌非炸、首选为过（非 r95PlanBeat）时，分差≤M 内有非走完炸弹 → 改炸分最高者（按出完状态门控：敌头游后剩余敌二游即 +3，异于 r45/r46/r60 按手数/拦截炸回、r94 省炸、r61 对家出完、r84/r99/r107 改过、r93/r103–r105 改非炸压；不动 r95PlanBeat）。
@@ -3046,7 +3047,7 @@ export function decide(ctx = {}) {
       && fo.some((s) => s % 2 !== me % 2) && !fo.includes((me + 2) % 4) && (!(m108 & 8) || (rc[ls] != null && rc[ls] <= 8))) {
       const M = (m108 & 2) ? X('M2', 900) : X('M', 300);
       const p = ranked.find((r) => r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && (isBombLike(r.move.combo) || (m108 & 4)) && (r.move.cards || []).length < hand.length);
-      if (p) { if (process.env?.GD_R108_LOG) process.stderr.write('R108TRIG\n');
+      if (p) { ruleTrig('GD_R108_LOG', 'R108TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r108SecondPlace'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r109（GD_R109，默认 0）：自创正交轴「记牌跟敌换控权顶张」——跟敌非炸、首选为非炸非走完压牌（非 r95PlanBeat），分差≤M 内其他非炸非走完压牌中，外面（belief.remainingByRank 未出且不在我手）可压它的同型点数严格更少者 → 改用最少者（同少取分高；跟敌已压时换更稳控权顶；异于 r89 领出记牌、r103 过→必回手压、r95 规划成本、r87 最小点、r100 顶大、r102 不拆组、r106 领出避型；不动 r95PlanBeat）。
@@ -3071,7 +3072,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && r.move.combo?.rank != null && beaters(r.move) < b0);
         cands.sort((a, b) => beaters(a.move) - beaters(b.move) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R109_LOG) process.stderr.write('R109TRIG\n');
+        if (p) { ruleTrig('GD_R109_LOG', 'R109TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r109BeliefCap'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3092,7 +3093,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && iso(restAfter(hand, r.move)) < i0);
         cands.sort((a, b) => iso(restAfter(hand, a.move)) - iso(restAfter(hand, b.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R110_LOG) process.stderr.write('R110TRIG\n');          p.score = top.score + 1; p.tags = (p.tags || []).concat('r110LessIso'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
+        if (p) { ruleTrig('GD_R110_LOG', 'R110TRIG\n');          p.score = top.score + 1; p.tags = (p.tags || []).concat('r110LessIso'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
   // r111（GD_R111，默认 0）：自创正交轴「跟敌压牌省控制牌」——跟敌非炸、首选为非炸非走完压牌且用到控制牌（大王/小王/级牌/A）（非 r95PlanBeat），分差≤M 内有不含控制牌的非炸非走完压 → 改用分最高者（压→换压省控；异于 r99 省控改过、r97 省逢人配/级/王、r87 最小点、r110 孤张、r95 handplan、r67 单对改非控；避开 r59、r75–r110、过→改压、压→改过、领出结构、记牌换控权；不动 r95PlanBeat）。
@@ -3111,7 +3112,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hand.length && !isCtrl(r.move));
       cands.sort((a, b) => b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R111_LOG) process.stderr.write('R111TRIG\n');
+      if (p) { ruleTrig('GD_R111_LOG', 'R111TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r111SaveCtrl'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r112（GD_R112，默认 0）：自创正交轴「跟敌压牌后留控更多」——跟敌非炸、首选为非炸非走完压牌（非 r95PlanBeat），分差≤M 内其他非炸非走完压牌中，压后余牌控制牌数（大王/小王/级牌/A）严格更多者 → 改用最多者（同多取分高；压后余控优化；异于 r111 首选含控改不含控、r110 孤张、r97 省逢人配出牌、r99 省控改过、r95 handplan；避开 r59、r75–r111、过→改压、压→改过、领出结构、记牌换控权惨败、减孤张；不动 r95PlanBeat）。
@@ -3131,7 +3132,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && nCtrl(restAfter(hand, r.move)) > c0);
         cands.sort((a, b) => nCtrl(restAfter(hand, b.move)) - nCtrl(restAfter(hand, a.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R112_LOG) process.stderr.write('R112TRIG\n');
+        if (p) { ruleTrig('GD_R112_LOG', 'R112TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r112RemCtrl'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3152,7 +3153,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && nTri(restAfter(hand, r.move)) > t0);
         cands.sort((a, b) => nTri(restAfter(hand, b.move)) - nTri(restAfter(hand, a.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R113_LOG) process.stderr.write('R113TRIG\n');
+        if (p) { ruleTrig('GD_R113_LOG', 'R113TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r113RemTri'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3173,7 +3174,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && rich(restAfter(hand, r.move)) > r0);
         cands.sort((a, b) => rich(restAfter(hand, b.move)) - rich(restAfter(hand, a.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R114_LOG) process.stderr.write('R114TRIG\n');
+        if (p) { ruleTrig('GD_R114_LOG', 'R114TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r114ShapeRich'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3194,7 +3195,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hand.length);
       cands.sort((a, b) => b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R115_LOG) process.stderr.write('R115TRIG\n');
+      if (p) { ruleTrig('GD_R115_LOG', 'R115TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r115NoBombBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r116（GD_R116，默认 0）：自创正交轴「领出减手数」——领出、首选为非炸非走完（非 r95PlanBeat）时，分差≤M 内其他非炸非走完领出中，出后 minPlays 严格更少者 → 改用最少者（同少取分高；异于 r90 顺子、r92 单改对、r89 记牌、r96 handplan 成本、r98 收官难压、甩多张；避开 r59、r75–r115、跟敌改压后结构/控/孤张/三张/能压不炸簇；保留 sticky GD_R95=5；不动 r95PlanBeat）。
@@ -3212,7 +3213,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && minPlays(restAfter(hand, r.move), lvR) < mp0);
         cands.sort((a, b) => minPlays(restAfter(hand, a.move), lvR) - minPlays(restAfter(hand, b.move), lvR) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R116_LOG) process.stderr.write('R116TRIG\n');
+        if (p) { ruleTrig('GD_R116_LOG', 'R116TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r116LeadFewerPlays'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3232,7 +3233,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && iso(restAfter(hand, r.move)) < i0);
         cands.sort((a, b) => iso(restAfter(hand, a.move)) - iso(restAfter(hand, b.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R117_LOG) process.stderr.write('R117TRIG\n');
+        if (p) { ruleTrig('GD_R117_LOG', 'R117TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r117LeadLessIso'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3253,7 +3254,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hand.length && (r.move.cards || []).length > n0);
       cands.sort((a, b) => (b.move.cards || []).length - (a.move.cards || []).length || b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R118_LOG) process.stderr.write('R118TRIG\n');
+      if (p) { ruleTrig('GD_R118_LOG', 'R118TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r118DumpAfterPartnerOut'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r119（GD_R119，默认 0）：自创正交轴「对家已出完跟敌压牌换最小点」——对家余牌=0、跟敌非炸、首选为非炸非走完压牌（非 r95PlanBeat）时，分差≤M 内其他非炸非走完压牌中主点 singleStrength 严格更小者 → 改用最小者（同小取分高；接风残局省大牌抢二游；异于 r87 一般跟敌最小压、r118 领出甩多张、r108 炸、r61 bit16 过→压、r100 顶大、r109 记牌换顶；避开 r59、r75–r118、跟敌改压结构簇、能压不炸、领出减手数/减孤张/对家出完甩多张；保留 sticky GD_R95=5；不动 r95PlanBeat）。
@@ -3275,7 +3276,7 @@ export function decide(ctx = {}) {
           && singleStrength(r.move.combo.rank, lvR) < s0);
         cands.sort((a, b) => singleStrength(a.move.combo.rank, lvR) - singleStrength(b.move.combo.rank, lvR) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R119_LOG) process.stderr.write('R119TRIG\n');
+        if (p) { ruleTrig('GD_R119_LOG', 'R119TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r119ResumeMinBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3298,7 +3299,7 @@ export function decide(ctx = {}) {
           && singleStrength(r.move.combo.rank, lvR) < s0);
         cands.sort((a, b) => singleStrength(a.move.combo.rank, lvR) - singleStrength(b.move.combo.rank, lvR) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R120_LOG) process.stderr.write('R120TRIG\n');
+        if (p) { ruleTrig('GD_R120_LOG', 'R120TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r120ResumeLeadMin'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3321,7 +3322,7 @@ export function decide(ctx = {}) {
           && singleStrength(r.move.combo.rank, lvR) > s0);
         cands.sort((a, b) => singleStrength(b.move.combo.rank, lvR) - singleStrength(a.move.combo.rank, lvR) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R121_LOG) process.stderr.write('R121TRIG\n');
+        if (p) { ruleTrig('GD_R121_LOG', 'R121TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r121ResumeLeadMax'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3347,7 +3348,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && r.move.combo?.rank != null && beaters(r.move) > b0);
         cands.sort((a, b) => beaters(b.move) - beaters(a.move) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R122_LOG) process.stderr.write('R122TRIG\n');
+        if (p) { ruleTrig('GD_R122_LOG', 'R122TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r122BeliefLoose'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3367,7 +3368,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hand.length && (r.move.cards || []).length > n0);
       cands.sort((a, b) => (b.move.cards || []).length - (a.move.cards || []).length || b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R123_LOG) process.stderr.write('R123TRIG\n');
+      if (p) { ruleTrig('GD_R123_LOG', 'R123TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r123EarlyShed'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r124（GD_R124，默认 0）：自创正交轴「开局领出清孤张」——本副首领领出、首选为非炸非走完（非 r95PlanBeat）时，分差≤M 内其他非炸非走完领出中，出后余牌天然孤张数（非逢人配、同点恰 1 张）严格更少者 → 改用最少者（同少取分高；开局清散非省控；异于 r117 一般领出减孤张、r110 跟敌减孤张、r70/r99 省控、r123 早盘甩多；避开 r59、r75–r123、对家出完簇、记牌换控权/松顶、早盘甩多张惨败邻域；保留 sticky GD_R95=5；不动 r95PlanBeat）。
@@ -3386,7 +3387,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hand.length && iso(restAfter(hand, r.move)) < i0);
         cands.sort((a, b) => iso(restAfter(hand, a.move)) - iso(restAfter(hand, b.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R124_LOG) process.stderr.write('R124TRIG\n');
+        if (p) { ruleTrig('GD_R124_LOG', 'R124TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r124OpenClearIso'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3407,7 +3408,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hl && iso(restAfter(hand, r.move)) < i0);
         cands.sort((a, b) => iso(restAfter(hand, a.move)) - iso(restAfter(hand, b.move)) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R125_LOG) process.stderr.write('R125TRIG\n');
+        if (p) { ruleTrig('GD_R125_LOG', 'R125TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r125MidClearIso'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3430,7 +3431,7 @@ export function decide(ctx = {}) {
           && (r.move.cards || []).length < hl && f(r) > w0);
         cands.sort((a, b) => f(b) - f(a) || b.score - a.score);
         const p = cands[0];
-        if (p) { if (process.env?.GD_R126_LOG) process.stderr.write('R126TRIG\n');
+        if (p) { ruleTrig('GD_R126_LOG', 'R126TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r126KeepSF'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3450,7 +3451,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hl && ((m127 & 8) ? wn(r.move) === 0 : wn(r.move) < w0));
       cands.sort((a, b) => wn(a.move) - wn(b.move) || b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R127_LOG) process.stderr.write('R127TRIG\n');
+      if (p) { ruleTrig('GD_R127_LOG', 'R127TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r127SaveWild'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r128（GD_R128，默认 0）：自创正交轴「出牌省自然级牌」——领出/跟敌非炸/跟对家（bit4 仅跟敌）、首选为非炸非走完（非 r95PlanBeat）且首选动用自然级牌（级牌点非逢人配）时，分差≤M 内其他非炸非走完出法中动用级牌（含逢人配）张数严格更少者 → 改用最少者（同少取分高；留级牌控）。异于 r127 仅逢人配、r109/r122 记牌换顶、r87 最小点、r95 handplan；避开 r59、r75–r127 及各簇；保留 sticky GD_R95=5；不动 r95PlanBeat。
@@ -3470,7 +3471,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hl && ((m128 & 8) ? ln(r.move) === 0 : ln(r.move) < w0));
       cands.sort((a, b) => ln(a.move) - ln(b.move) || b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R128_LOG) process.stderr.write('R128TRIG\n');
+      if (p) { ruleTrig('GD_R128_LOG', 'R128TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r128SaveLevel'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r129（GD_R129，默认 0）：自创正交轴「跟敌弃权改争」——跟敌非炸、首选为不出（pass）时，分差≤M 内存在非炸非走完压牌 → 改压（取分最高；bit8 取最小点）。异于「跟敌能压不炸」(炸/非炸)、r124–r128 换牌簇、省级牌/省逢人配/清孤张/甩多张/同花顺潜力簇；决策点为 pass↔压；避开 r59、r75–r128；保留 sticky GD_R95=5；不动 r95PlanBeat。
@@ -3486,7 +3487,7 @@ export function decide(ctx = {}) {
         && (r.move.cards || []).length < hl);
       if (m129 & 8) cands.sort((a, b) => (a.move.cards || []).reduce((s, c) => s + singleStrength(c.rank, full.levelRank || '2'), 0) - (b.move.cards || []).reduce((s, c) => s + singleStrength(c.rank, full.levelRank || '2'), 0) || b.score - a.score);
       const p = cands[0];
-      if (p) { if (process.env?.GD_R129_LOG) process.stderr.write('R129TRIG\n');
+      if (p) { ruleTrig('GD_R129_LOG', 'R129TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r129ContestNotPass'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r130（GD_R130，默认 0）：自创正交轴「记牌领出必回手」——领出、首选为非炸非走完（非 r95PlanBeat）且首选在外面仍有可压同型（beaters>0）时，分差≤M 内存在单/对（bit4 含三张）非炸非走完领出、且外面（belief.remainingByRank 未出且不在我手）已无可压它的同型（beaters=0，不计炸弹）→ 改用之（取分最高；保领权）。决策点为领出的记牌切面，异于 r103 跟敌记牌夺权、r109/r122 跟敌换顶、r106 敌报牌避型、r116/r117/r123–r126 领出换牌簇；避开 r59、r75–r129；保留 sticky GD_R95=5；不动 r95PlanBeat。先试「跟对家压改让」trig≈4/48 副（M 放大至 6000 仍 5），改本轴。
@@ -3508,7 +3509,7 @@ export function decide(ctx = {}) {
         const M = (m130 & 2) ? X('M2', 900) : X('M', 300);
         const p = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo)
           && (r.move.cards || []).length < hl && okT(r.move.combo) && beaters(r.move) === 0);
-        if (p) { if (process.env?.GD_R130_LOG) process.stderr.write('R130TRIG\n');
+        if (p) { ruleTrig('GD_R130_LOG', 'R130TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r130LeadSafeTop'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3534,7 +3535,7 @@ export function decide(ctx = {}) {
           const M = (m131 & 2) ? X('M2', 900) : X('M', 300);
           const p = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo)
             && (r.move.cards || []).length < hl && hit(r.move));
-          if (p) { if (process.env?.GD_R131_LOG) process.stderr.write('R131TRIG\n');
+          if (p) { ruleTrig('GD_R131_LOG', 'R131TRIG\n');
             p.score = top.score + 1; p.tags = (p.tags || []).concat('r131EnemyPassedType'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
         }
       }
@@ -3553,7 +3554,7 @@ export function decide(ctx = {}) {
         const M = (m132 & 2) ? X('M2', 900) : X('M', 300);
         const bs = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hl && okT(r.move));
         if (bs.length) { bs.sort((a, b) => (ss(a.move.combo?.rank) - ss(b.move.combo?.rank)) || (b.score - a.score));
-          const p = bs[0]; if (process.env?.GD_R132_LOG) process.stderr.write('R132TRIG\n');
+          const p = bs[0]; ruleTrig('GD_R132_LOG', 'R132TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r132FeedPartner'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3570,7 +3571,7 @@ export function decide(ctx = {}) {
       const M = (m133 & 2) ? X('M2', 900) : X('M', 300); const tn = (top.move.cards || []).length; const tt = top.move.combo?.type;
       const bs = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length === tn && r.move.combo?.type === tt && (r.move.cards || []).length < hl && ss(r.move.combo?.rank) > ss(top.move.combo?.rank));
       if (bs.length) { bs.sort((a, b) => (ss(b.move.combo?.rank) - ss(a.move.combo?.rank)) || (b.score - a.score));
-        const p = bs[0]; if (process.env?.GD_R133_LOG) process.stderr.write('R133TRIG\n');
+        const p = bs[0]; ruleTrig('GD_R133_LOG', 'R133TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r133CapTop'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r134（GD_R134，默认 0）：自创正交轴「跟牌少拆孤张」——跟敌非炸（bit4 含跟对家）、首选为非炸非走完压牌（非 r95PlanBeat）时，分差≤M 内其他非炸非走完压牌中，出后余牌自然孤张数（非逢人配、非王按点计，数量=1 的点）严格更少者 → 改用孤张最少者（同少取分高）。异于 r124/r125 领出清孤张、r116/「跟敌压牌减手数」minPlays、r87 最小点、r133 封顶；bit8 仅我手 ≥13。保留 sticky GD_R95=5；不动 r95PlanBeat。bit1 M=300；bit2 M2=900。
@@ -3585,7 +3586,7 @@ export function decide(ctx = {}) {
       const t0 = sing(top.move); const M = (m134 & 2) ? X('M2', 900) : X('M', 300);
       const bs = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hl).map((r) => [r, sing(r.move)]).filter((x) => x[1] < t0);
       if (bs.length) { bs.sort((a, b) => (a[1] - b[1]) || (b[0].score - a[0].score));
-        const p = bs[0][0]; if (process.env?.GD_R134_LOG) process.stderr.write('R134TRIG\n');
+        const p = bs[0][0]; ruleTrig('GD_R134_LOG', 'R134TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r134FollowFewSingles'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r135（GD_R135，默认 0）：自创正交轴「跟敌压牌后留对更多」——跟敌非炸、首选为非炸非走完压牌（非 r95PlanBeat）时，分差≤M 内其他非炸非走完压牌中，出后余牌天然对子数（非逢人配、数量恰=2 的点）严格更多者 → 改用对子最多者（同多取分高）。异于 r110 减孤张、r113 留三、r114 结构分、r134 少拆孤张；A 挡下家补压/B 早盘少炸 smoke 触发≈0 弃。bit4 含跟对家；bit8 仅我手 ≥13。保留 sticky GD_R95=5；不动 r95PlanBeat。bit1 M=300；bit2 M2=900。
@@ -3600,7 +3601,7 @@ export function decide(ctx = {}) {
       const t0 = prs(top.move); const M = (m135 & 2) ? X('M2', 900) : X('M', 300);
       const bs = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hl).map((r) => [r, prs(r.move)]).filter((x) => x[1] > t0);
       if (bs.length) { bs.sort((a, b) => (b[1] - a[1]) || (b[0].score - a[0].score));
-        const p = bs[0][0]; if (process.env?.GD_R135_LOG) process.stderr.write('R135TRIG\n');
+        const p = bs[0][0]; ruleTrig('GD_R135_LOG', 'R135TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r135FollowKeepPairs'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r137（GD_R137，默认 0）：「跟敌压后不拆天然炸」——跟敌非炸、首选为非炸非走完压牌（非 r95PlanBeat），若其用到我手中同点 ≥4（天然炸，非逢人配计）的牌（bit4 放宽：同点 ≥3 且出后该点余 ≤1 也算拆）→ 分差≤M 内改不拆的非炸非走完压牌（取分最高）。先试 C「接风后跟敌过→最小非炸压」trig 2/48 弃；D「领出换更少 beaters」trig 43–61、Δ −0.52~−0.96 惨负弃；E「晚盘能炸走完则炸」trig 0（现策略已覆盖）弃。smoke 48 副 seed 23790000：bit1/3 trig 0，bit5/7 trig 11 Δ −0.50 [−1.66, 0.66]。bit1 M=300；bit2 M2=900；bit8 仅我手 ≥10。保留 sticky GD_R95=5；不动 r95PlanBeat。
@@ -3615,7 +3616,7 @@ export function decide(ctx = {}) {
       if (splits(top.move)) {
         const M = (m137 & 2) ? X('M2', 900) : X('M', 300);
         const p = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hl && !splits(r.move));
-        if (p) { if (process.env?.GD_R137_LOG) process.stderr.write('R137TRIG\n');
+        if (p) { ruleTrig('GD_R137_LOG', 'R137TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r137FollowKeepBomb'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3634,7 +3635,7 @@ export function decide(ctx = {}) {
       if (!p) { const ri = (m) => { const i = ORD.indexOf(String(m.combo.rank)); return i < 0 ? 99 : i; };
         const fo = (filteredOut || []).filter((m) => !isPass(m) && !isBombLike(m.combo) && (m.cards || []).length < hl && !(m.cards || []).some((c) => isWildCard(c, full.levelRank || '2'))).sort((a, b) => ri(a) - ri(b));
         if (fo.length) { p = { move: fo[0], score: top.score, tags: [] }; ranked.push(p); } }
-      if (process.env?.GD_R138_LOG) process.stderr.write(p ? 'R138TRIG\n' : 'R138GATE ' + ranked.map((r) => (isPass(r.move) ? 'P' : r.move.combo.type + ':' + r.move.combo.rank) + '@' + Math.round(r.score)).join(',') + '\n');
+      ruleLog('GD_R138_LOG', () => p ? 'R138TRIG\n' : 'R138GATE ' + ranked.map((r) => (isPass(r.move) ? 'P' : r.move.combo.type + ':' + r.move.combo.rank) + '@' + Math.round(r.score)).join(',') + '\n');
       if (p) { p.score = top.score + 1; p.tags = (p.tags || []).concat('r138BlockNext'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r139（GD_R139，默认 0）：「我短手领出甩够张」——先试 E「双下风险跟敌过→炸」smoke trig 1–2/48 弃。领出、我余牌 n≤K、首选为非炸非走完（非 r95PlanBeat）且张数 <n → 分差≤M 内改张数严格更多的非炸领出（走完优先，同多取分高）。bit1 K=6；bit2 K=10；bit4 不限分差；bit8 仅某敌余牌≤10。异于早盘甩多（r123）、对家出完甩多（r118）。保留 sticky GD_R95=5；不动 r95PlanBeat。
@@ -3648,14 +3649,14 @@ export function decide(ctx = {}) {
       const M = X('M', 600); const tn = (top.move.cards || []).length;
       const bs = ranked.filter((r) => r !== top && r.score > -1e5 && ((m139 & 4) || r.score >= top.score - M) && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length > tn);
       bs.sort((a, b) => ((b.move.cards || []).length - (a.move.cards || []).length) || (b.score - a.score));
-      if (bs.length) { const p = bs[0]; if (process.env?.GD_R139_LOG) process.stderr.write('R139TRIG\n');
+      if (bs.length) { const p = bs[0]; ruleTrig('GD_R139_LOG', 'R139TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r139ShortLeadLong'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r140（GD_R140，默认 0）：「对家炸弹/SF 调参」。bit1 对家刚出炸、首选非过且非走完 → 过；bit2 对家刚出非炸、首选为炸且非走完 → 过；bit4 首选为同花顺且非走完、存在分差≤M 的非 SF 炸 → 改用非 SF 炸（保 SF）。保留 sticky GD_R95=5；不动 r95PlanBeat。
   { const v = typeof process !== 'undefined' ? process.env?.GD_R140 : undefined; const m140 = v == null ? 0 : Number(v) || 0;
     const X = (k, d) => { const e = typeof process !== 'undefined' ? process.env?.['GD_R140X_' + k] : undefined; return e == null ? d : Number(e); };
     const me = full.seat ?? 0; const hl = (full.hand || []).length; const top = ranked[0];
-    const set = (p, tag) => { if (process.env?.GD_R140_LOG) process.stderr.write('R140TRIG ' + tag + '\n'); p.score = top.score + 1; p.tags = (p.tags || []).concat(tag); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; };
+    const set = (p, tag) => { ruleTrig('GD_R140_LOG', 'R140TRIG ' + tag + '\n'); p.score = top.score + 1; p.tags = (p.tags || []).concat(tag); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; };
     if (m140 && top && !isPass(top.move) && (top.move.cards || []).length < hl && !(top.tags || []).includes('r95PlanBeat')) {
       const partner = !full.leading && full.previous && full.lastPlaySeat === (me + 2) % 4;
       const pb = partner && isBombLike(full.previous);
@@ -3691,7 +3692,7 @@ export function decide(ctx = {}) {
             const rec = (i, acc) => { if (acc.length === need) { const val = sfw(restAfter(hand, { cards: acc })); if (val > bv) { bv = val; bestSet = acc.slice(); } return; } for (let j = i; j < pool.length; j++) { acc.push(pool[j]); rec(j + 1, acc); acc.pop(); } };
             rec(0, []);
             if (bestSet && Math.floor(bv / 10) - Math.floor(base / 10) >= ((m141 & 2) ? 2 : 1)) {
-              if (process.env?.GD_R141_LOG) process.stderr.write('R141TRIG\n');
+              ruleTrig('GD_R141_LOG', 'R141TRIG\n');
               top.move = { ...top.move, cards: bestSet }; top.tags = (top.tags || []).concat('r141SuitSF'); best = top.move; bestTags = top.tags;
             }
           }
@@ -3711,7 +3712,7 @@ export function decide(ctx = {}) {
         const alts = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && r.move.combo?.type === top.move.combo?.type && (r.move.cards || []).length < hand.length)
           .map((r) => ({ r, k: run(restAfter(hand, r.move)) })).filter((x) => x.k > base);
         alts.sort((a, b) => b.k - a.k || b.r.score - a.r.score);
-        if (alts.length) { const alt = alts[0].r; if (process.env?.GD_R143_LOG) process.stderr.write('R143TRIG\n');
+        if (alts.length) { const alt = alts[0].r; ruleTrig('GD_R143_LOG', 'R143TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r143Straight'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3727,7 +3728,7 @@ export function decide(ctx = {}) {
       const alts = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length)
         .map((r) => ({ r, k: sc(restAfter(hand, r.move)) })).filter((x) => x.k.v > base.v && (!(m144 & 4) || (x.k.pr >= 3 && base.pr < 3)));
       alts.sort((a, b) => b.k.v - a.k.v || b.r.score - a.r.score);
-      if (alts.length) { const alt = alts[0].r; if (process.env?.GD_R144_LOG) process.stderr.write('R144TRIG\n');
+      if (alts.length) { const alt = alts[0].r; ruleTrig('GD_R144_LOG', 'R144TRIG\n');
         alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r144KeepTube'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
     } }
   // r145（GD_R145，默认 0）：「跟敌压不拆天然对」。跟敌非炸、首选非炸非走完压（非 r95PlanBeat）若用到同点恰 2 张的天然对之部分（拆对）→ 分差≤M 内改不拆对的非炸非走完压（取分最高）。bit1 M=300；bit2 M=900；bit4 含拆三（同点恰 3 出部分也算拆）；bit8 仅我手≥10。异于 r134/r110 事后孤张计数、r137 不拆炸、r135 留对更多、r143 留顺、r144 领出 tube；保留 sticky GD_R95=5；不动 r95PlanBeat。先试 A 领出不拆炸/B 跟敌换更大点/C 跟敌留 tube/D 中盘不领炸 smoke 弃；F 领出不拆对惨负、G 单改对贴边、H 双敌短不领单 trig 低、I 对家出完炸走完 trig0 弃。
@@ -3741,7 +3742,7 @@ export function decide(ctx = {}) {
       if (breaksPair(top.move)) {
         const M = (m145 & 2) ? 900 : 300;
         const p = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length < hl && !breaksPair(r.move));
-        if (p) { if (process.env?.GD_R145_LOG) process.stderr.write('R145TRIG\n');
+        if (p) { ruleTrig('GD_R145_LOG', 'R145TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r145FollowKeepPair'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3760,7 +3761,7 @@ export function decide(ctx = {}) {
         const alts = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && r.move.combo?.type === top.move.combo?.type && (r.move.cards || []).length < hand.length)
           .map((r) => ({ r, k: run(restAfter(hand, r.move)) })).filter((x) => x.k > base);
         alts.sort((a, b) => b.k - a.k || b.r.score - a.r.score);
-        if (alts.length) { const alt = alts[0].r; if (process.env?.GD_R146_LOG) process.stderr.write('R146TRIG\n');
+        if (alts.length) { const alt = alts[0].r; ruleTrig('GD_R146_LOG', 'R146TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r146KeepPairRun'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3774,7 +3775,7 @@ export function decide(ctx = {}) {
       if (full.leading && top && !isPass(top.move) && !isBombLike(top.move.combo) && !(top.tags || []).includes('r95PlanBeat') && (top.move.cards || []).length < hand.length && hand.length <= emin + slack && isOrphanSingleMove(top.move, byR) && !isControlRank(top.move.combo.rank, lv) && (!(m147 & 8) || hand.length <= 10)) {
         const alts = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length >= 2 && (r.move.cards || []).length < hand.length);
         alts.sort((a, b) => b.score - a.score);
-        if (alts[0]) { const alt = alts[0]; if (process.env?.GD_R147_LOG) process.stderr.write('R147TRIG\n');
+        if (alts[0]) { const alt = alts[0]; ruleTrig('GD_R147_LOG', 'R147TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r147RaceNoOrphan'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3785,7 +3786,7 @@ export function decide(ctx = {}) {
       if (!full.leading && full.previous && !isBombLike(full.previous) && full.lastPlaySeat != null && full.lastPlaySeat % 2 !== me % 2 && emin >= T
         && top && !isPass(top.move) && !isBombLike(top.move.combo) && !(top.tags || []).includes('r95PlanBeat') && (top.move.cards || []).length <= 2 && (top.move.cards || []).length < hand.length && isControlRank(top.move.combo.rank, lv)) {
         const alt = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isBombLike(r.move.combo) && (isPass(r.move) ? !(m148 & 8) : !isControlRank(r.move.combo.rank, lv) && (r.move.cards || []).length < hand.length));
-        if (alt) { if (process.env?.GD_R148_LOG) process.stderr.write('R148TRIG\n');
+        if (alt) { ruleTrig('GD_R148_LOG', 'R148TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r148SaveCtrl'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3806,7 +3807,7 @@ export function decide(ctx = {}) {
           if (pc && top.move.combo.type !== pc.type && (!(m149 & 8) || (rc[pt] ?? 0) <= hand.length))
             alt = ranked.find((r) => ok(r) && r.move.combo.type === pc.type && (r.move.cards || []).length === (pc.size ?? (r.move.cards || []).length) && (!(m149 & 4) || singleStrength(r.move.combo.rank, lv) < singleStrength(pc.rank, lv)));
         }
-        if (alt) { if (process.env?.GD_R149_LOG) process.stderr.write('R149TRIG\n');
+        if (alt) { ruleTrig('GD_R149_LOG', 'R149TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r149LeadSignal'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3820,7 +3821,7 @@ export function decide(ctx = {}) {
         && isOrphanSingleMove(top.move, byR) && !isControlRank(top.move.combo.rank, lv)) {
         const okT = (t) => !(m150 & 4) || t === TYPES.TRIPLE || t === TYPES.FULLHOUSE || t === TYPES.TRIPLE_SEQ;
         const alt = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length >= 2 && (r.move.cards || []).length < hand.length && okT(r.move.combo?.type));
-        if (alt) { if (process.env?.GD_R150_LOG) process.stderr.write('R150TRIG\n');
+        if (alt) { ruleTrig('GD_R150_LOG', 'R150TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r150BombNoOrphanChain'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3832,7 +3833,7 @@ export function decide(ctx = {}) {
       if (full.leading && first && top && !isPass(top.move) && !isBombLike(top.move.combo) && !(top.tags || []).includes('r95PlanBeat')
         && (top.move.cards || []).length < K && (top.move.cards || []).length < hand.length) {
         const alt = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && !isPass(r.move) && !isBombLike(r.move.combo) && (r.move.cards || []).length >= K && (r.move.cards || []).length < hand.length);
-        if (alt) { if (process.env?.GD_R151_LOG) process.stderr.write('R151TRIG\n');
+        if (alt) { ruleTrig('GD_R151_LOG', 'R151TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r151FirstLeadLong'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3846,7 +3847,7 @@ export function decide(ctx = {}) {
         const cnt = (rk) => hand.filter((c) => c.rank === rk).length;
         const alt = ranked.find((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && r.move.combo?.type === TYPES.SINGLE
           && (() => { const rk = r.move.combo.rank; if (rk === lvR || isJokerRank(rk)) return false; const st = singleStrength(rk, lvR); return st >= 9 && st <= 12 && cnt(rk) === 1; })());
-        if (alt) { if (process.env?.GD_R152_LOG) process.stderr.write('R152TRIG\n');
+        if (alt) { ruleTrig('GD_R152_LOG', 'R152TRIG\n');
           alt.score = top.score + 1; alt.tags = (alt.tags || []).concat('r152HighSingleBlock'); ranked.sort((a, b) => b.score - a.score); best = alt.move; bestTags = alt.tags; bestS = alt.score; }
       }
     } }
@@ -3861,7 +3862,7 @@ export function decide(ctx = {}) {
       const cand = ranked.filter((r) => r !== top && r.score > -1e5 && r.score >= top.score - M && (isPass(r.move) ? !!(m153 & 4) : (!isBombLike(r.move.combo) && (r.move.cards || []).length < hand.length)));
       let p = null, pcBest = c0 - D;
       for (const r of cand) { const c = pc(r); if (c <= pcBest - 1e-9) { pcBest = c; p = r; } }
-      if (p) { if (process.env?.GD_R153_LOG) process.stderr.write('R153TRIG\n');
+      if (p) { ruleTrig('GD_R153_LOG', 'R153TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r153PartnerPlan'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r154（GD_R154，默认 0）：自创正交轴「跟敌首选过→规划成本不升则压」。跟敌非炸、首选为过 → 分差≤M 内非炸非走完压牌中，压后余牌 decompose 成本 ≤ 原手成本+D 的最低者 → 改压（夺牌权不伤结构；异于 r47 按 minPlays、r84 改过、r95 压牌间换）。bit1 M=300,D=0；bit2 M=900；bit4 仅出牌敌余牌≤10；bit8 D=0.5。保留 sticky GD_R95=5。
@@ -3876,7 +3877,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 + D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c <= pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R154_LOG) process.stderr.write('R154TRIG\n');
+        if (p) { ruleTrig('GD_R154_LOG', 'R154TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r154CheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3892,7 +3893,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 + D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c <= pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R155_LOG) process.stderr.write('R155TRIG\n');
+        if (p) { ruleTrig('GD_R155_LOG', 'R155TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r155LastGuard'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3910,7 +3911,7 @@ export function decide(ctx = {}) {
           if ((m157 & 4) && sa !== 'sure') continue;
           if (wa < w0 + DW - 1e-9) continue;
           if (!p || wa > pw + 1e-9 || (Math.abs(wa - pw) <= 1e-9 && r.score > p.score)) { p = r; pw = wa; } }
-        if (p) { if (process.env?.GD_R157_LOG) process.stderr.write('R157TRIG\n');
+        if (p) { ruleTrig('GD_R157_LOG', 'R157TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r157HoldVsLast'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3927,7 +3928,7 @@ export function decide(ctx = {}) {
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           let sa = null; try { sa = safety(r.move, full); } catch { continue; }
           if (sa !== 'sure') continue; if (!p || r.score > p.score) p = r; }
-        if (p) { if (process.env?.GD_R158_LOG) process.stderr.write('R158TRIG\n');
+        if (p) { ruleTrig('GD_R158_LOG', 'R158TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r158SureVsNear'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3945,7 +3946,7 @@ export function decide(ctx = {}) {
           let wa = 0; try { wa = winProb(r.move, full); } catch { continue; }
           if (wa < w0 + DW - 1e-9) continue;
           if (!p || wa > pw + 1e-9 || (Math.abs(wa - pw) <= 1e-9 && r.score > p.score)) { p = r; pw = wa; } }
-        if (p) { if (process.env?.GD_R159_LOG) process.stderr.write('R159TRIG\n');
+        if (p) { ruleTrig('GD_R159_LOG', 'R159TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r159ProbVsNear'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3958,7 +3959,7 @@ export function decide(ctx = {}) {
       && top && !isPass(top.move) && !isBombLike(top.move.combo) && (top.move.cards || []).length < hand.length) {
       const M = (m160 & 2) ? 900 : 300;
       const p = ranked.find((r) => isPass(r.move) && r.score > -1e5 && r.score >= top.score - M);
-      if (p) { if (process.env?.GD_R160_LOG) process.stderr.write('R160TRIG\n');
+      if (p) { ruleTrig('GD_R160_LOG', 'R160TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r160YieldPartner'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r161（GD_R161，默认 0）：自创正交轴「下家敌短手领出换高胜率」——领出、下家（敌）余牌≤K、首选非炸非走完且 winProb < 1−DW → 分差≤M 内非炸非走完领出中 winProb ≥ 首选+DW 者取 winProb 最高再分最高 → 改用（下家快走完时领出优先压得住的；异于 r157 敌头游后领出、r159 跟敌）。bit1 M=300,K=6,DW=0.1；bit2 M=900；bit4 K=10；bit8 DW=0.25。保留 sticky GD_R95=5。
@@ -3974,7 +3975,7 @@ export function decide(ctx = {}) {
           let wa = 0; try { wa = winProb(r.move, full); } catch { continue; }
           if (wa < w0 + DW - 1e-9) continue;
           if (!p || wa > pw + 1e-9 || (Math.abs(wa - pw) <= 1e-9 && r.score > p.score)) { p = r; pw = wa; } }
-        if (p) { if (process.env?.GD_R161_LOG) process.stderr.write('R161TRIG\n');
+        if (p) { ruleTrig('GD_R161_LOG', 'R161TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r161ProbVsNextShort'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -3990,7 +3991,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 - D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c <= pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R162_LOG) process.stderr.write('R162TRIG\n');
+        if (p) { ruleTrig('GD_R162_LOG', 'R162TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r162StrictCheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -4007,7 +4008,7 @@ export function decide(ctx = {}) {
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           if ((r.move.cards || []).some((c) => isControlRank(c.rank, lvR))) continue;
           const c = pc(restAfter(hand, r.move)); if (c <= pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R163_LOG) process.stderr.write('R163TRIG\n');
+        if (p) { ruleTrig('GD_R163_LOG', 'R163TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r163NoCtrlCheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -4023,7 +4024,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 + D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c <= pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R164_LOG) process.stderr.write('R164TRIG\n');
+        if (p) { ruleTrig('GD_R164_LOG', 'R164TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r164NextSeatCheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -4048,7 +4049,7 @@ export function decide(ctx = {}) {
           || (r.move.cards || []).length >= hand.length || usesProt(r.move)) continue;
         if (!p || r.score > p.score) p = r;
       }
-      if (p) { if (process.env?.GD_R166_LOG) process.stderr.write('R166TRIG\n');
+      if (p) { ruleTrig('GD_R166_LOG', 'R166TRIG\n');
         p.score = top.score + 1; p.tags = (p.tags || []).concat('r166KeepRjLead'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
     } }
   // r167（GD_R167，默认 0）：自创轴「跟敌首选过→对家短手时成本不升则压」（正交于 r154 任意座位、r155 我是末道防线/对家已过、r164 我是敌下家；本轮门控是对家短手而非我座位）。跟敌非炸、首选为过、对家余牌 rc[(me+2)%4]≤K → 分差≤M 内非炸非走完压牌中压后 decompose 成本 ≤ 原手+D 的最低者（同成本取分高）→ 改压。bit1 M=300,D=0,K=8；bit2 M=900；bit4 K=12；bit8 D=0.5。保留 sticky GD_R95=5；不动 r95PlanBeat；异于 r154/r155/r164 座位切分。
@@ -4064,7 +4065,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 + D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c < pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R167_LOG) process.stderr.write('R167TRIG\n');
+        if (p) { ruleTrig('GD_R167_LOG', 'R167TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r167PartnerShortCheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -4081,7 +4082,7 @@ export function decide(ctx = {}) {
         let p = null, pcBest = c0 + D + 1e-9;
         for (const r of ranked) { if (r === top || isPass(r.move) || r.score <= -1e5 || r.score < top.score - M || isBombLike(r.move.combo) || (r.move.cards || []).length >= hand.length) continue;
           const c = pc(restAfter(hand, r.move)); if (c < pcBest) { pcBest = c; p = r; } }
-        if (p) { if (process.env?.GD_R168_LOG) process.stderr.write('R168TRIG\n');
+        if (p) { ruleTrig('GD_R168_LOG', 'R168TRIG\n');
           p.score = top.score + 1; p.tags = (p.tags || []).concat('r168OwnerShortCheapBeat'); ranked.sort((x, y) => y.score - x.score); best = p.move; bestTags = p.tags; bestS = p.score; }
       }
     } }
@@ -4253,7 +4254,7 @@ export function decide(ctx = {}) {
   if (R7('GD_R19F', 1) && endgameApplies(full, (m156 & 1) && (m156 & 4) ? 4 : (r34Mode() & 1 ? R34('E', 4) : 3))) {
     const all = uniqueByCards(cands);
     const eg = (m156 & 1) ? solveEndgame(full, all, { maxWorlds: 300, nodeBudget: (m156 & 2) ? 240000 : 120000, timeMs: (m156 & 2) ? 320 : 160, minWorlds: 12 }) : solveEndgame(full, all);
-    if (m156 && eg && eg.best && process.env?.GD_R156_LOG && !sameMove(eg.best, best)) process.stderr.write('R156TRIG\n');
+    if (m156 && eg && eg.best && envFlag('GD_R156_LOG') && !sameMove(eg.best, best)) ruleTrig('GD_R156_LOG', 'R156TRIG\n');
     if (eg && eg.best && eg.bestValue > (eg.values.get(egKey(best)) ?? -1e9) + ((m156 & 8) ? 0.05 : 0.01)) {
       const before = eg.values.get(egKey(best));
       best = eg.best;
